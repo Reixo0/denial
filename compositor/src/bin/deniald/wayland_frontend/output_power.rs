@@ -28,7 +28,9 @@ pub(crate) struct OutputPowerRequest {
 #[derive(Debug)]
 pub(super) struct OutputPowerManager {
     _global: GlobalId,
-    controllers: HashMap<OutputId, ZwlrOutputPowerV1>,
+    /// Every client watching or setting an output's power. Requests are
+    /// the last writer's; each one hears the outcome.
+    controllers: HashMap<OutputId, Vec<ZwlrOutputPowerV1>>,
     pending: BTreeMap<OutputId, bool>,
 }
 
@@ -73,26 +75,24 @@ impl WaylandFrontend {
             resource.failed();
             return;
         };
-        if self.output_power.controllers.contains_key(&output) {
-            resource.failed();
-            return;
-        }
-
         resource.mode(if powered {
             zwlr_output_power_v1::Mode::On
         } else {
             zwlr_output_power_v1::Mode::Off
         });
-        self.output_power.controllers.insert(output, resource);
+        self.output_power
+            .controllers
+            .entry(output)
+            .or_default()
+            .push(resource);
     }
 
     fn unregister_output_power(&mut self, output: OutputId, resource: &ZwlrOutputPowerV1) {
-        let owns_control = self
-            .output_power
-            .controllers
-            .get(&output)
-            .is_some_and(|current| current.id() == resource.id());
-        if owns_control {
+        let Some(controllers) = self.output_power.controllers.get_mut(&output) else {
+            return;
+        };
+        controllers.retain(|current| current.id() != resource.id());
+        if controllers.is_empty() {
             self.output_power.controllers.remove(&output);
             self.output_power.pending.remove(&output);
         }
@@ -108,7 +108,11 @@ impl WaylandFrontend {
             .output_power
             .controllers
             .get(&output)
-            .is_some_and(|current| current.id() == resource.id())
+            .is_some_and(|controllers| {
+                controllers
+                    .iter()
+                    .any(|current| current.id() == resource.id())
+            })
             && self.outputs.iter().any(|entry| entry.id == output)
         {
             self.output_power.pending.insert(output, powered);
@@ -140,12 +144,14 @@ impl WaylandFrontend {
         if changed {
             self.refresh_image_copy_constraints();
         }
-        if announce && let Some(resource) = self.output_power.controllers.get(&output) {
-            resource.mode(if powered {
-                zwlr_output_power_v1::Mode::On
-            } else {
-                zwlr_output_power_v1::Mode::Off
-            });
+        if announce && let Some(controllers) = self.output_power.controllers.get(&output) {
+            for resource in controllers {
+                resource.mode(if powered {
+                    zwlr_output_power_v1::Mode::On
+                } else {
+                    zwlr_output_power_v1::Mode::Off
+                });
+            }
             // KMS applies power transitions outside Wayland client dispatch.
             // Deliver the event now: a sleeping client may send no requests
             // that would otherwise flush this notification.
@@ -157,7 +163,13 @@ impl WaylandFrontend {
 
     pub(crate) fn fail_output_power(&mut self, output: OutputId) {
         self.output_power.pending.remove(&output);
-        if let Some(resource) = self.output_power.controllers.remove(&output) {
+        for resource in self
+            .output_power
+            .controllers
+            .remove(&output)
+            .into_iter()
+            .flatten()
+        {
             resource.failed();
         }
     }
