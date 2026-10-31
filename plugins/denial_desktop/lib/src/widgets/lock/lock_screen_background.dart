@@ -814,6 +814,115 @@ class _LockDepthForegroundState extends ConsumerState<_LockDepthForeground> {
 /// The phone's notifications under the clock, as many as fit, newest first,
 /// unless the lock screen settings hide them. They slide with the face and
 /// let drags through to the swipe; a tap asks for the PIN, then opens.
+/// The phone app's call notification, category call.incoming or call.ongoing.
+DesktopNotification? _lockCall(DesktopNotificationsState state) {
+  for (final notification in state.active.values) {
+    if (notification.category == 'call.incoming' ||
+        notification.category == 'call.ongoing') {
+      return notification;
+    }
+  }
+  return null;
+}
+
+/// A call answers on the lock screen, as on any phone: who it is, whatever
+/// the preview setting, and the notification's actions without the PIN. The
+/// actions go to the app that posted them; nothing here opens the session.
+class _LockCall extends ConsumerWidget {
+  const _LockCall({required this.scale});
+
+  /// The clock's scale, which moves its lower edge.
+  final double scale;
+
+  static const Color _accept = Color(0xFF34C759);
+  static const Color _refuse = Color(0xFFFF3B30);
+  static const Color _plain = Color(0x33FFFFFF);
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final call = _lockCall(ref.watch(desktopNotificationsProvider));
+    if (call == null) {
+      return const SizedBox.shrink();
+    }
+    final notifications = ref.read(desktopNotificationsProvider.notifier);
+    final size = MediaQuery.sizeOf(context);
+    final clockTop = math.max(48.0, size.height * 0.25 - 96.0);
+    final clockHeight = math.min(250.0, size.height * 0.34);
+    final clockBottom = clockTop + clockHeight * (1 + scale) / 2;
+    final metrics = MobileUiMetrics.of(context);
+    return Positioned(
+      left: metrics.visual(24),
+      right: metrics.visual(24),
+      top: clockBottom + metrics.visual(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            call.summary,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: const Color(0xFFFFFFFF),
+              fontSize: metrics.visual(28),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          SizedBox(height: metrics.visual(6)),
+          Text(
+            call.body,
+            style: TextStyle(
+              color: const Color(0xCCFFFFFF),
+              fontSize: metrics.visual(16),
+            ),
+          ),
+          SizedBox(height: metrics.visual(28)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              for (final action in call.actions)
+                // Wins as the finger lifts, as a notification's tap does: the
+                // face's swipe and double tap would otherwise hold it back.
+                _LockNotificationPress(
+                  key: ValueKey('lock-call-${action.key}'),
+                  onTap: () {
+                    ref.read(hapticsServiceProvider).pulse();
+                    notifications.invokeAction(call.id, action.key);
+                  },
+                  child: Container(
+                    constraints: BoxConstraints(
+                      minWidth: metrics.visual(112),
+                      minHeight: metrics.visual(64),
+                    ),
+                    alignment: Alignment.center,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: metrics.visual(18),
+                    ),
+                    decoration: BoxDecoration(
+                      color: switch (action.key) {
+                        'answer' => _accept,
+                        'decline' || 'end' => _refuse,
+                        _ => _plain,
+                      },
+                      borderRadius: BorderRadius.circular(metrics.visual(32)),
+                    ),
+                    child: Text(
+                      action.label,
+                      style: TextStyle(
+                        color: const Color(0xFFFFFFFF),
+                        fontSize: metrics.visual(17),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _LockNotifications extends ConsumerWidget {
   const _LockNotifications({required this.scale, required this.onOpen});
 
@@ -835,7 +944,8 @@ class _LockNotifications extends ConsumerWidget {
     // The shade's history: a notification stays after its popup is gone.
     // A stacked group is one card with its app and count.
     final groups = state.groups.take(_shown).toList(growable: false);
-    if (groups.isEmpty) {
+    // A call has the face to itself.
+    if (groups.isEmpty || _lockCall(state) != null) {
       return const SizedBox.shrink();
     }
     // The same block _LockClockBlock lays the mobile time out in.
@@ -904,7 +1014,11 @@ class _LockNotifications extends ConsumerWidget {
 /// The card gives under the finger and springs back as the face leaves for
 /// the PIN.
 class _LockNotificationPress extends StatefulWidget {
-  const _LockNotificationPress({required this.onTap, required this.child});
+  const _LockNotificationPress({
+    super.key,
+    required this.onTap,
+    required this.child,
+  });
 
   final VoidCallback onTap;
   final Widget child;

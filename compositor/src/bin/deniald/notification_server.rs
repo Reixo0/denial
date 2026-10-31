@@ -235,6 +235,21 @@ impl NotificationServer {
                 .is_ok()
     }
 
+    /// An action of a call's notification, the one thing a locked session may
+    /// invoke. The worker checks the category.
+    pub(super) fn invoke_call_action(&self, notification_id: u32, action_key: String) -> bool {
+        notification_id != 0
+            && !action_key.is_empty()
+            && action_key.len() <= MAX_STRING_BYTES
+            && self
+                .commands
+                .try_send(Command::InvokeCallAction {
+                    notification_id,
+                    action_key,
+                })
+                .is_ok()
+    }
+
     pub(super) fn invoke_default(
         &self,
         notification_id: u32,
@@ -397,6 +412,10 @@ enum Command {
     Dismiss {
         notification_id: u32,
     },
+    InvokeCallAction {
+        notification_id: u32,
+        action_key: String,
+    },
     InvokeAction {
         notification_id: u32,
         action_key: String,
@@ -477,6 +496,24 @@ fn run_worker(
                         notification_id,
                         "ignored notification dismiss for unknown ID"
                     );
+                }
+            }
+            Ok(Command::InvokeCallAction {
+                notification_id,
+                action_key,
+            }) => {
+                if store.is_call(notification_id) {
+                    invoke_action(
+                        &connection,
+                        &publish,
+                        &stopping,
+                        &mut store,
+                        notification_id,
+                        action_key,
+                        None,
+                    );
+                } else {
+                    warn!(notification_id, "ignored a locked action on a non-call notification");
                 }
             }
             Ok(Command::InvokeAction {
@@ -607,6 +644,17 @@ struct StoredNotification {
 }
 
 impl NotificationStore {
+    fn is_call(&self, notification_id: u32) -> bool {
+        self.notifications
+            .get(&notification_id)
+            .is_some_and(|stored| {
+                matches!(
+                    stored.notification.category.as_str(),
+                    "call.incoming" | "call.ongoing"
+                )
+            })
+    }
+
     fn notify(
         &mut self,
         replaces_id: u32,

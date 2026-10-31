@@ -457,6 +457,7 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
                               scale: lockSettings.clockScale,
                               onOpen: _openAfterUnlock,
                             ),
+                            _LockCall(scale: lockSettings.clockScale),
                             const _LockGlyph(),
                           ],
                         ),
