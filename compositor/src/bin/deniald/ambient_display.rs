@@ -107,6 +107,9 @@ struct Refresh {
 
 #[derive(Debug, Default)]
 pub(super) struct AmbientDisplay {
+    /// Outputs a Wayland client is turning off, such as the proximity sensor's
+    /// during a call: that is a plain blank, with no lock and no picture.
+    pub(super) client_off: BTreeSet<OutputId>,
     /// Loaded on use and again whenever the file changes, keyed by its
     /// modification time; None inside when there is no usable profile.
     profile: Option<(Option<SystemTime>, Option<Profile>)>,
@@ -213,6 +216,11 @@ pub(super) fn hold_power_off(
     now: Instant,
 ) {
     let ready = runtime.take_ambient_display_ready();
+    events.ambient_display.client_off.retain(|output| {
+        scanouts
+            .iter()
+            .any(|scanout| scanout.output.id == *output && scanout.powered)
+    });
     if refresh(runtime, scheduler, scanouts, events, now) {
         return;
     }
@@ -384,6 +392,9 @@ fn power_off_to_hold(
         .iter()
         .find(|scanout| scanout.output.name == name && scanout.powered)?;
     let output = scanout.output.id;
+    if events.ambient_display.client_off.contains(&output) {
+        return None;
+    }
     (events.output_power_requests.get(&output) == Some(&false)).then_some((output, beside_desk))
 }
 

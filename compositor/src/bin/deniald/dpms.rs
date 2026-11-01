@@ -14,6 +14,11 @@ pub(super) fn collect_output_power_requests(events: &mut RuntimeState) {
         events
             .idle_policy
             .note_external_power_request(request.output, request.powered);
+        if request.powered {
+            events.ambient_display.client_off.remove(&request.output);
+        } else {
+            events.ambient_display.client_off.insert(request.output);
+        }
         events
             .output_power_requests
             .insert(request.output, request.powered);
@@ -533,6 +538,12 @@ pub(super) fn apply_output_power_requests(
                 events
                     .frontend_mut()
                     .output_power_applied(output, false, announce);
+                // A finger on the glass as a client blanks the output, such
+                // as at the ear: its lift is dropped while dark, and without
+                // this the UI waits for it forever.
+                if events.ambient_display.client_off.contains(&output) {
+                    wayland_frontend::reset_all_input_devices(events);
+                }
             }
         }
     }
