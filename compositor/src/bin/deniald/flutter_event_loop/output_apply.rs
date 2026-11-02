@@ -112,7 +112,7 @@ fn prepare_output_persistence(
         .outputs
         .iter()
         .map(|output| options::PersistedOutput {
-            name: output.name.clone(),
+            name: staged_configuration.config_name(&output.name),
             // Settings shows the effective state, which can include a transient
             // fallback or clamshell. Save the reconciled preference instead.
             enabled: !staged_configuration.disabled_outputs.contains(&output.name),

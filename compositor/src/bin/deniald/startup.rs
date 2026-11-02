@@ -382,7 +382,7 @@ pub(super) fn run(options: Options) -> Result<(), Box<dyn Error>> {
         &mut drm_scanner,
         &kms.drm,
         options.max_outputs,
-        &output_configuration,
+        &mut output_configuration,
     )?;
     policy_journal.record(&configured.selection);
     if configured.outputs.is_empty() {

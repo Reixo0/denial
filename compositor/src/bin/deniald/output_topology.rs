@@ -54,6 +54,9 @@ pub(super) struct RuntimeOutputConfiguration {
     /// Transient lid position. It shapes which outputs are lit, but it is
     /// never saved with the output preferences.
     pub(super) lid_closed: bool,
+    /// The preference name of the display on each external connector, as
+    /// `NAME@IDENTITY`. Connectors without an entry use their own name.
+    pub(super) displays: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug)]
@@ -98,7 +101,70 @@ impl RuntimeOutputConfiguration {
             vrr_outputs: options.vrr_outputs.clone(),
             disabled_outputs: options.disabled_outputs.clone(),
             lid_closed: false,
+            displays: BTreeMap::new(),
         }
+    }
+
+    /// The name an output's preferences are saved under: its connector, or
+    /// for a display that identifies itself, the connector and that display.
+    pub(super) fn config_name(&self, name: &str) -> String {
+        self.displays
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| name.to_owned())
+    }
+
+    /// Point the connector's live preferences at the display now on it.
+    /// Every display on one connector has the same name (each USB-C monitor
+    /// is DP-1), so each keeps its own preferences under `NAME@IDENTITY`:
+    /// the previous display's go back there, the new one's come from there.
+    pub(super) fn adopt_display(&mut self, name: &str, identity: Option<&str>) {
+        let profile = identity.map(|identity| format!("{name}@{identity}"));
+        if self.displays.get(name) == profile.as_ref() {
+            return;
+        }
+        let previous = self.displays.remove(name);
+        if let Some(previous) = &previous {
+            self.copy_preferences(name, previous);
+        }
+        match profile {
+            Some(profile) => {
+                self.copy_preferences(&profile, name);
+                self.displays.insert(name.to_owned(), profile);
+            }
+            // A display without an EDID: the previous display's preferences
+            // must not carry over to it.
+            None if previous.is_some() => self.copy_preferences("", name),
+            None => {}
+        }
+    }
+
+    /// Make `to`'s preferences those of `from`, dropping what `from` lacks.
+    fn copy_preferences(&mut self, from: &str, to: &str) {
+        fn copy<T: Clone>(map: &mut BTreeMap<String, T>, from: &str, to: &str) {
+            match map.get(from).cloned() {
+                Some(value) => {
+                    map.insert(to.to_owned(), value);
+                }
+                None => {
+                    map.remove(to);
+                }
+            }
+        }
+        fn copy_set(set: &mut BTreeSet<String>, from: &str, to: &str) {
+            if set.contains(from) {
+                set.insert(to.to_owned());
+            } else {
+                set.remove(to);
+            }
+        }
+        copy(&mut self.positions, from, to);
+        copy(&mut self.modes, from, to);
+        copy(&mut self.scales_120, from, to);
+        copy(&mut self.transforms, from, to);
+        copy(&mut self.scrolling_layout_axes, from, to);
+        copy_set(&mut self.vrr_outputs, from, to);
+        copy_set(&mut self.disabled_outputs, from, to);
     }
 
     pub(super) fn effective_transform(&self, name: &str) -> OutputTransform {
@@ -156,9 +222,19 @@ pub(super) fn connected_outputs(
     scanner: &mut DrmScanner<SimpleCrtcMapper>,
     drm: &DrmDevice,
     max_outputs: usize,
-    configuration: &RuntimeOutputConfiguration,
+    configuration: &mut RuntimeOutputConfiguration,
 ) -> Result<ConfiguredOutputs, Box<dyn Error>> {
     let connected = scan_connected_connectors(scanner, drm)?;
+    for connector in &connected {
+        let name = connector_name(&connector.info);
+        if output_policy::is_internal_panel(&name) {
+            continue;
+        }
+        let id = OutputId(u64::from(u32::from(connector.info.handle())));
+        let identity = output_color::read_edid(drm.device_fd(), id)
+            .and_then(|edid| output_color::display_identity(&edid));
+        configuration.adopt_display(&name, identity.as_deref());
+    }
     configured_outputs(connected, max_outputs, configuration)
 }
 

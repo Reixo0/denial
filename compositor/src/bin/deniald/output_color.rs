@@ -357,23 +357,43 @@ pub(super) fn parse_cube(text: &str) -> Result<Lut, String> {
 
 /// Read the output's EDID: its correction, if it needs one, and its HDR.
 pub(super) fn read(drm: &DrmDeviceFd, id: OutputId) -> DisplayColor {
-    let edid = || -> Option<Vec<u8>> {
-        let handle = u32::try_from(id.0)
-            .ok()
-            .and_then(std::num::NonZeroU32::new)
-            .map(connector::Handle::from)?;
-        for (property, value) in drm.get_properties(handle).ok()? {
-            let property = drm.get_property(property).ok()?;
-            if property.name().to_str() == Ok("EDID") {
-                let blob = property.value_type().convert_value(value).as_blob()?;
-                return (blob != 0)
-                    .then(|| drm.get_property_blob(blob).ok())
-                    .flatten();
-            }
+    read_edid(drm, id).map_or_else(DisplayColor::default, |edid| from_edid(&edid))
+}
+
+/// The connector's EDID blob, if the display has sent one.
+pub(super) fn read_edid(drm: &DrmDeviceFd, id: OutputId) -> Option<Vec<u8>> {
+    let handle = u32::try_from(id.0)
+        .ok()
+        .and_then(std::num::NonZeroU32::new)
+        .map(connector::Handle::from)?;
+    for (property, value) in drm.get_properties(handle).ok()? {
+        let property = drm.get_property(property).ok()?;
+        if property.name().to_str() == Ok("EDID") {
+            let blob = property.value_type().convert_value(value).as_blob()?;
+            return (blob != 0)
+                .then(|| drm.get_property_blob(blob).ok())
+                .flatten();
         }
-        None
-    };
-    edid().map_or_else(DisplayColor::default, |edid| from_edid(&edid))
+    }
+    None
+}
+
+/// What tells this display apart from another on the same connector: the
+/// EDID's vendor, product code and serial number, as `VVVPPPP-SSSSSSSS`.
+pub(super) fn display_identity(edid: &[u8]) -> Option<String> {
+    if edid.len() < 128 || edid[..8] != [0, 255, 255, 255, 255, 255, 255, 0] {
+        return None;
+    }
+    let vendor = u16::from_be_bytes([edid[8], edid[9]]);
+    let letter = |shift: u16| char::from(b'@' + ((vendor >> shift) & 0x1f) as u8);
+    let product = u16::from_le_bytes([edid[10], edid[11]]);
+    let serial = u32::from_le_bytes([edid[12], edid[13], edid[14], edid[15]]);
+    Some(format!(
+        "{}{}{}{product:04X}-{serial:08X}",
+        letter(10),
+        letter(5),
+        letter(0)
+    ))
 }
 
 fn from_edid(edid: &[u8]) -> DisplayColor {

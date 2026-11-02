@@ -1258,7 +1258,12 @@ fn render_persisted_output_config(
     if let Some(primary_output) = primary_output {
         validate_output_config_name(primary_output)?;
     }
-    let connected = sorted.keys().copied().collect::<BTreeSet<_>>();
+    // A display saved as `NAME@IDENTITY` also replaces the connector-wide
+    // entries an earlier version wrote for its connector.
+    let connected = sorted
+        .keys()
+        .flat_map(|name| [*name, name.split_once('@').map_or(*name, |(connector, _)| connector)])
+        .collect::<BTreeSet<_>>();
 
     let mut lines = original
         .lines()
