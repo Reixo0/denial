@@ -111,6 +111,7 @@ class ShellOskPanel extends StatefulWidget {
     this.layout = 'en',
     this.pcKeys = false,
     this.onPcKeysChanged,
+    this.autocorrect = true,
   });
 
   final ValueChanged<ShellOskKeyIntent>? onKey;
@@ -124,6 +125,9 @@ class ShellOskPanel extends StatefulWidget {
 
   /// The PC keys toggle was tapped.
   final ValueChanged<bool>? onPcKeysChanged;
+
+  /// Whether a misspelt word is replaced as a space or a mark follows it.
+  final bool autocorrect;
 
   /// A finger landed on a key.
   final VoidCallback? onKeyDown;
@@ -469,7 +473,9 @@ class _ShellOskPanelState extends State<ShellOskPanel> {
   /// states hints without asking for spellchecking or completion.
   bool get _autocorrects {
     final input = _input;
-    if (!_predicts || input!.contentPurpose == _ContentType.purposeName) {
+    if (!widget.autocorrect ||
+        !_predicts ||
+        input!.contentPurpose == _ContentType.purposeName) {
       return false;
     }
     final hint = input.contentHint;

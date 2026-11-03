@@ -798,7 +798,11 @@ class ShellSoundSettings {
 /// XKB layouts, and replaces it on every shell update.
 @immutable
 class ShellOskSettings {
-  const ShellOskSettings({this.layout = 'en', this.pcKeys = false});
+  const ShellOskSettings({
+    this.layout = 'en',
+    this.pcKeys = false,
+    this.autocorrect = true,
+  });
 
   /// The on-screen keyboard's letters: 'en' (US QWERTY) or 'es' (QWERTY with
   /// Ñ and Spanish accents).
@@ -808,16 +812,25 @@ class ShellOskSettings {
   /// arrows) above the keys.
   final bool pcKeys;
 
+  /// Whether a space or a mark after a misspelt word replaces it with the
+  /// first suggestion. Suggestions show either way.
+  final bool autocorrect;
+
   static const layouts = ['en', 'es'];
 
-  ShellOskSettings copyWith({String? layout, bool? pcKeys}) {
+  ShellOskSettings copyWith({String? layout, bool? pcKeys, bool? autocorrect}) {
     return ShellOskSettings(
       layout: layout ?? this.layout,
       pcKeys: pcKeys ?? this.pcKeys,
+      autocorrect: autocorrect ?? this.autocorrect,
     );
   }
 
-  Map<String, Object?> toJson() => {'layout': layout, 'pcKeys': pcKeys};
+  Map<String, Object?> toJson() => {
+    'layout': layout,
+    'pcKeys': pcKeys,
+    'autocorrect': autocorrect,
+  };
 
   factory ShellOskSettings.fromJson(Object? value) {
     final json = _map(value);
@@ -826,6 +839,9 @@ class ShellOskSettings {
     return ShellOskSettings(
       layout: layouts.contains(layout) ? layout as String : defaults.layout,
       pcKeys: json['pcKeys'] is bool ? json['pcKeys'] as bool : defaults.pcKeys,
+      autocorrect: json['autocorrect'] is bool
+          ? json['autocorrect'] as bool
+          : defaults.autocorrect,
     );
   }
 
@@ -833,11 +849,12 @@ class ShellOskSettings {
   bool operator ==(Object other) {
     return other is ShellOskSettings &&
         other.layout == layout &&
-        other.pcKeys == pcKeys;
+        other.pcKeys == pcKeys &&
+        other.autocorrect == autocorrect;
   }
 
   @override
-  int get hashCode => Object.hash(layout, pcKeys);
+  int get hashCode => Object.hash(layout, pcKeys, autocorrect);
 }
 
 @immutable

@@ -430,6 +430,7 @@ class _EdgePanelContent extends ConsumerWidget {
               ),
               layout: osk.layout,
               pcKeys: osk.pcKeys,
+              autocorrect: osk.autocorrect,
               onPcKeysChanged: (value) => ref
                   .read(shellSettingsProvider.notifier)
                   .setKeyboardPcKeys(value),
