@@ -625,8 +625,6 @@ class _ShellOskPanelState extends State<ShellOskPanel> {
             _repeat = Timer.periodic(_repeatInterval, (_) => _backspace());
           });
         }
-      case _OskControl.symbols:
-        touch.longPress = Timer(_longPress, () => _armCtrl(touch));
       default:
         break;
     }
@@ -870,18 +868,6 @@ class _ShellOskPanelState extends State<ShellOskPanel> {
     widget.onKey?.call(const ShellOskKeyIntent.backspace());
     _update(() {
       if (_typed.isNotEmpty) _typed = _typed.substring(0, _typed.length - 1);
-    });
-  }
-
-  void _armCtrl(_Touch touch) {
-    touch.longPress = null;
-    if (touch.done) return;
-    touch.done = true;
-    widget.onKeyDown?.call();
-    setState(() {
-      _ctrlArmed = true;
-      _shift = _Shift.off;
-      _shiftAutomatic = false;
     });
   }
 
@@ -1607,9 +1593,6 @@ class _OskKeySpec {
     required bool ctrlArmed,
     required AppLocalizations l10n,
   }) {
-    if (control == _OskControl.symbols && ctrlArmed) {
-      return l10n.oskControlKey;
-    }
     if (control == _OskControl.symbols) {
       return l10n.oskNumbersAndSymbolsKey;
     }
@@ -1695,7 +1678,6 @@ class _OskKeySpec {
     bool pcKeys = false,
   }) {
     return (control == _OskControl.shift && shift != _Shift.off) ||
-        (control == _OskControl.symbols && ctrlArmed) ||
         (control == _OskControl.ctrl && ctrlArmed) ||
         (control == _OskControl.alt && altArmed) ||
         (control == _OskControl.pcKeys && pcKeys);
@@ -1764,7 +1746,7 @@ const _letterSpaceRow = _OskRowData([
     _OskKeySpec.control(_OskControl.symbols, flex: 17),
     _OskKeySpec.control(
       _OskControl.pcKeys,
-      icon: Icons.keyboard_command_key,
+      icon: Icons.keyboard_rounded,
       flex: 10,
     ),
     _OskKeySpec.text(',', flex: 10),
@@ -1807,10 +1789,10 @@ const _pcKeyRow = _OskRowData([
   _OskKeySpec.pc('End', value: 'End'),
   _OskKeySpec.pc('Prior', value: 'PgUp'),
   _OskKeySpec.pc('Next', value: 'PgDn'),
-  _OskKeySpec.pc('Left', icon: Icons.keyboard_arrow_left_rounded),
+  _OskKeySpec.pc('Left', value: '←'),
   _OskKeySpec.pc('Up', icon: Icons.keyboard_arrow_up_rounded),
   _OskKeySpec.pc('Down', icon: Icons.keyboard_arrow_down_rounded),
-  _OskKeySpec.pc('Right', icon: Icons.keyboard_arrow_right_rounded),
+  _OskKeySpec.pc('Right', value: '→'),
 ]);
 
 const _numberRows = [
