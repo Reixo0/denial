@@ -237,6 +237,15 @@ pub(super) struct ShellKeyStroke {
     pub(super) shift: bool,
 }
 
+/// Modifiers the software keyboard holds around one key.
+#[cfg(feature = "flutter")]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) struct ShellKeyModifiers {
+    pub(super) ctrl: bool,
+    pub(super) alt: bool,
+    pub(super) shift: bool,
+}
+
 #[cfg(feature = "flutter")]
 fn shell_text_key_stroke(character: char) -> Option<ShellKeyStroke> {
     let (evdev_keycode, shift) = match character {
@@ -318,6 +327,23 @@ fn shell_named_key_stroke(key: &str) -> Option<ShellKeyStroke> {
         "Right" => (106, false),
         "Down" => (108, false),
         "Delete" => (111, false),
+        "Insert" => (110, false),
+        "Home" => (102, false),
+        "End" => (107, false),
+        "Prior" | "Page_Up" => (104, false),
+        "Next" | "Page_Down" => (109, false),
+        "F1" => (59, false),
+        "F2" => (60, false),
+        "F3" => (61, false),
+        "F4" => (62, false),
+        "F5" => (63, false),
+        "F6" => (64, false),
+        "F7" => (65, false),
+        "F8" => (66, false),
+        "F9" => (67, false),
+        "F10" => (68, false),
+        "F11" => (87, false),
+        "F12" => (88, false),
         "comma" => (51, false),
         "period" => (52, false),
         "slash" => (53, false),
@@ -344,12 +370,13 @@ fn inject_shell_key_stroke(
     state: &mut RuntimeState,
     keyboard: &KeyboardHandle<RuntimeState>,
     stroke: ShellKeyStroke,
-    ctrl: bool,
+    held: ShellKeyModifiers,
     time: InputTime,
 ) -> bool {
     const XKB_KEYCODE_OFFSET: u32 = 8;
     const LEFT_CTRL: u32 = 29;
     const LEFT_SHIFT: u32 = 42;
+    const LEFT_ALT: u32 = 56;
 
     let keycode = Keycode::new(stroke.evdev_keycode + XKB_KEYCODE_OFFSET);
     if keyboard.pressed_keys().contains(&keycode) {
@@ -361,9 +388,11 @@ fn inject_shell_key_stroke(
     }
 
     let modifiers = keyboard.modifier_state();
-    let inject_ctrl = ctrl && !modifiers.ctrl;
-    let inject_shift = stroke.shift && !modifiers.shift;
+    let inject_ctrl = held.ctrl && !modifiers.ctrl;
+    let inject_alt = held.alt && !modifiers.alt;
+    let inject_shift = (stroke.shift || held.shift) && !modifiers.shift;
     let ctrl_keycode = Keycode::new(LEFT_CTRL + XKB_KEYCODE_OFFSET);
+    let alt_keycode = Keycode::new(LEFT_ALT + XKB_KEYCODE_OFFSET);
     let shift_keycode = Keycode::new(LEFT_SHIFT + XKB_KEYCODE_OFFSET);
     let mut delivered = false;
     let mut send = |state: &mut RuntimeState, keycode: Keycode, key_state: KeyState| {
@@ -373,6 +402,9 @@ fn inject_shell_key_stroke(
     if inject_ctrl {
         send(state, ctrl_keycode, KeyState::Pressed);
     }
+    if inject_alt {
+        send(state, alt_keycode, KeyState::Pressed);
+    }
     if inject_shift {
         send(state, shift_keycode, KeyState::Pressed);
     }
@@ -380,6 +412,9 @@ fn inject_shell_key_stroke(
     send(state, keycode, KeyState::Released);
     if inject_shift {
         send(state, shift_keycode, KeyState::Released);
+    }
+    if inject_alt {
+        send(state, alt_keycode, KeyState::Released);
     }
     if inject_ctrl {
         send(state, ctrl_keycode, KeyState::Released);
@@ -459,7 +494,7 @@ pub(super) fn navigate_back(state: &mut RuntimeState, window: &smithay::desktop:
             evdev_keycode: EVDEV_KEY_BACK,
             shift: false,
         },
-        false,
+        ShellKeyModifiers::default(),
         time,
     )
 }
@@ -525,7 +560,13 @@ pub(crate) fn dispatch_shell_keyboard(
                         return false;
                     };
                     for _ in replaced.chars() {
-                        inject_shell_key_stroke(state, &keyboard, backspace, false, time);
+                        inject_shell_key_stroke(
+                            state,
+                            &keyboard,
+                            backspace,
+                            ShellKeyModifiers::default(),
+                            time,
+                        );
                     }
                     type_shell_text(state, &keyboard, text, time)
                 }
@@ -534,14 +575,25 @@ pub(crate) fn dispatch_shell_keyboard(
         super::super::wire::KeyboardCommand::Text(text) => {
             type_shell_text(state, &keyboard, text, time)
         }
-        super::super::wire::KeyboardCommand::Key { key, ctrl, phase } => {
+        super::super::wire::KeyboardCommand::Key {
+            key,
+            ctrl,
+            alt,
+            shift,
+            phase,
+        } => {
             let Some(stroke) = shell_named_key_stroke(key) else {
                 warn!(%key, "ignored unsupported shell keyboard key");
                 return false;
             };
             match phase {
                 super::super::wire::KeyboardKeyPhase::Tap => {
-                    inject_shell_key_stroke(state, &keyboard, stroke, *ctrl, time)
+                    let held = ShellKeyModifiers {
+                        ctrl: *ctrl,
+                        alt: *alt,
+                        shift: *shift,
+                    };
+                    inject_shell_key_stroke(state, &keyboard, stroke, held, time)
                 }
                 super::super::wire::KeyboardKeyPhase::Pressed => {
                     inject_shell_key_transition(state, &keyboard, stroke, KeyState::Pressed, time)
@@ -567,7 +619,8 @@ fn type_shell_text(
             warn!(%character, "ignored character unsupported by the shell keyboard keymap");
             continue;
         };
-        delivered |= inject_shell_key_stroke(state, keyboard, stroke, false, time);
+        delivered |=
+            inject_shell_key_stroke(state, keyboard, stroke, ShellKeyModifiers::default(), time);
     }
     delivered
 }

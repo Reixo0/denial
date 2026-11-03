@@ -58,6 +58,8 @@ const int _inputWindowGeometryLocked = 1 << 2;
 const int _keyboardCtrl = 1 << 0;
 const int _keyboardPressed = 1 << 1;
 const int _keyboardReleased = 1 << 2;
+const int _keyboardAlt = 1 << 3;
+const int _keyboardShift = 1 << 4;
 const int _placementPacketBytes = 80;
 const int _dragIconPacketBytes = 128;
 const int _placementPacketMagic = 0x504e4544; // DENP, little-endian.
@@ -436,6 +438,8 @@ class DenialWireCodec {
   Uint8List encodeKeyboardKey(
     String key, {
     bool ctrl = false,
+    bool alt = false,
+    bool shift = false,
     DenialKeyboardKeyPhase phase = DenialKeyboardKeyPhase.tap,
   }) {
     final phaseFlag = switch (phase) {
@@ -448,7 +452,11 @@ class DenialWireCodec {
       generated.KeyboardCommandObjectBuilder(
         kind: generated.KeyboardCommandKind.Key,
         key: key,
-        flags: (ctrl ? _keyboardCtrl : 0) | phaseFlag,
+        flags:
+            (ctrl ? _keyboardCtrl : 0) |
+            (alt ? _keyboardAlt : 0) |
+            (shift ? _keyboardShift : 0) |
+            phaseFlag,
       ),
     );
   }

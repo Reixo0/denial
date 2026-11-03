@@ -583,13 +583,15 @@ fn decode_keyboard_command(command: fb::KeyboardCommand<'_>) -> Result<KeyboardC
                 KEYBOARD_RELEASED => KeyboardKeyPhase::Released,
                 _ => return Err(WireError::Flags),
             };
-            let ctrl = command.flags() & KEYBOARD_CTRL != 0;
-            if ctrl && phase != KeyboardKeyPhase::Tap {
+            // Modifiers ride on a complete tap only.
+            if command.flags() & KEYBOARD_MODIFIER_MASK != 0 && phase != KeyboardKeyPhase::Tap {
                 return Err(WireError::Flags);
             }
             Ok(KeyboardCommand::Key {
                 key: key.expect("validated keyboard key").to_owned(),
-                ctrl,
+                ctrl: command.flags() & KEYBOARD_CTRL != 0,
+                alt: command.flags() & KEYBOARD_ALT != 0,
+                shift: command.flags() & KEYBOARD_SHIFT != 0,
                 phase,
             })
         }

@@ -92,8 +92,11 @@ const WINDOW_PLACEMENT_PACKET_BYTES: usize = 80;
 const KEYBOARD_CTRL: u32 = 1 << 0;
 const KEYBOARD_PRESSED: u32 = 1 << 1;
 const KEYBOARD_RELEASED: u32 = 1 << 2;
+const KEYBOARD_ALT: u32 = 1 << 3;
+const KEYBOARD_SHIFT: u32 = 1 << 4;
 const KEYBOARD_PHASE_MASK: u32 = KEYBOARD_PRESSED | KEYBOARD_RELEASED;
-const KEYBOARD_FLAGS_MASK: u32 = KEYBOARD_CTRL | KEYBOARD_PHASE_MASK;
+const KEYBOARD_MODIFIER_MASK: u32 = KEYBOARD_CTRL | KEYBOARD_ALT | KEYBOARD_SHIFT;
+const KEYBOARD_FLAGS_MASK: u32 = KEYBOARD_MODIFIER_MASK | KEYBOARD_PHASE_MASK;
 const MAX_KEYBOARD_PANEL_HEIGHT: u32 = 16_384;
 const MAX_KEYBOARD_PANEL_DURATION_MS: u32 = 10_000;
 /// Longest word the keyboard asks suggestions for, in characters.
@@ -220,6 +223,8 @@ pub enum KeyboardCommand {
     Key {
         key: String,
         ctrl: bool,
+        alt: bool,
+        shift: bool,
         phase: KeyboardKeyPhase,
     },
     /// Replaces `replaced`, the text just before the cursor, with `text`.

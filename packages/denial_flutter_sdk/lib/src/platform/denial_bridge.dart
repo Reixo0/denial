@@ -417,8 +417,12 @@ class DenialBridge {
 
   void sendKeyboardText(String text) => _input.sendKeyboardText(text);
 
-  void sendKeyboardKey(String key, {bool ctrl = false}) =>
-      _input.sendKeyboardKey(key, ctrl: ctrl);
+  void sendKeyboardKey(
+    String key, {
+    bool ctrl = false,
+    bool alt = false,
+    bool shift = false,
+  }) => _input.sendKeyboardKey(key, ctrl: ctrl, alt: alt, shift: shift);
 
   /// Replaces [replaced], the text just before the cursor, with [text].
   void sendKeyboardReplace(String replaced, String text) =>

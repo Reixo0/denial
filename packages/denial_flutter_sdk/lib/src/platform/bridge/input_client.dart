@@ -63,12 +63,19 @@ final class BridgeInputClient {
     );
   }
 
-  void sendKeyboardKey(String key, {bool ctrl = false}) {
+  void sendKeyboardKey(
+    String key, {
+    bool ctrl = false,
+    bool alt = false,
+    bool shift = false,
+  }) {
     if (key.isEmpty) {
       return;
     }
 
-    _context.sendWire(_context.codec.encodeKeyboardKey(key, ctrl: ctrl));
+    _context.sendWire(
+      _context.codec.encodeKeyboardKey(key, ctrl: ctrl, alt: alt, shift: shift),
+    );
   }
 
   void dismissKeyboardPanel(int activationSerial) {
