@@ -794,6 +794,52 @@ class ShellSoundSettings {
   int get hashCode => keyboardVibration.hashCode;
 }
 
+/// The software keyboard. Its own section: deniald owns `keyboard`, the
+/// XKB layouts, and replaces it on every shell update.
+@immutable
+class ShellOskSettings {
+  const ShellOskSettings({this.layout = 'en', this.pcKeys = false});
+
+  /// The on-screen keyboard's letters: 'en' (US QWERTY) or 'es' (QWERTY with
+  /// Ñ and Spanish accents).
+  final String layout;
+
+  /// A row of PC keys (Esc, Tab, Ctrl, Alt, Home, End, Page Up and Down,
+  /// arrows) above the keys.
+  final bool pcKeys;
+
+  static const layouts = ['en', 'es'];
+
+  ShellOskSettings copyWith({String? layout, bool? pcKeys}) {
+    return ShellOskSettings(
+      layout: layout ?? this.layout,
+      pcKeys: pcKeys ?? this.pcKeys,
+    );
+  }
+
+  Map<String, Object?> toJson() => {'layout': layout, 'pcKeys': pcKeys};
+
+  factory ShellOskSettings.fromJson(Object? value) {
+    final json = _map(value);
+    const defaults = ShellOskSettings();
+    final layout = json['layout'];
+    return ShellOskSettings(
+      layout: layouts.contains(layout) ? layout as String : defaults.layout,
+      pcKeys: json['pcKeys'] is bool ? json['pcKeys'] as bool : defaults.pcKeys,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is ShellOskSettings &&
+        other.layout == layout &&
+        other.pcKeys == pcKeys;
+  }
+
+  @override
+  int get hashCode => Object.hash(layout, pcKeys);
+}
+
 @immutable
 class ShellApplicationEnvironmentSettings {
   const ShellApplicationEnvironmentSettings({
@@ -1024,6 +1070,7 @@ class ShellSettings {
     this.power = const ShellPowerSettings(),
     this.notifications = const ShellNotificationSettings(),
     this.sound = const ShellSoundSettings(),
+    this.osk = const ShellOskSettings(),
     this.applicationEnvironment = const ShellApplicationEnvironmentSettings(),
   });
 
@@ -1041,6 +1088,7 @@ class ShellSettings {
   final ShellPowerSettings power;
   final ShellNotificationSettings notifications;
   final ShellSoundSettings sound;
+  final ShellOskSettings osk;
   final ShellApplicationEnvironmentSettings applicationEnvironment;
 
   ShellSettings copyWith({
@@ -1054,6 +1102,7 @@ class ShellSettings {
     ShellPowerSettings? power,
     ShellNotificationSettings? notifications,
     ShellSoundSettings? sound,
+    ShellOskSettings? osk,
     ShellApplicationEnvironmentSettings? applicationEnvironment,
   }) {
     return ShellSettings(
@@ -1067,6 +1116,7 @@ class ShellSettings {
       power: power ?? this.power,
       notifications: notifications ?? this.notifications,
       sound: sound ?? this.sound,
+      osk: osk ?? this.osk,
       applicationEnvironment:
           applicationEnvironment ?? this.applicationEnvironment,
     );
@@ -1334,6 +1384,10 @@ class ShellSettings {
       patch['sound'] = sound.toJson();
     }
 
+    if (osk != previous.osk) {
+      patch['osk'] = osk.toJson();
+    }
+
     if (applicationEnvironment != previous.applicationEnvironment) {
       // This section is a complete desired map: absence means delete the
       // override, so it must never be recursively merged with an older map.
@@ -1426,6 +1480,7 @@ class ShellSettings {
       },
       'notifications': notifications.toJson(),
       'sound': sound.toJson(),
+      'osk': osk.toJson(),
       'inputDeck': inputDeck.toJson(),
       'applicationEnvironment': applicationEnvironment.toJson(),
     };
@@ -1808,6 +1863,7 @@ class ShellSettings {
       ),
       notifications: ShellNotificationSettings.fromJson(json['notifications']),
       sound: ShellSoundSettings.fromJson(json['sound']),
+      osk: ShellOskSettings.fromJson(json['osk']),
       inputDeck: InputDeckSettings.fromJson(json['inputDeck']),
       applicationEnvironment: ShellApplicationEnvironmentSettings.fromJson(
         json['applicationEnvironment'],
@@ -1828,6 +1884,7 @@ class ShellSettings {
         other.power == power &&
         other.notifications == notifications &&
         other.sound == sound &&
+        other.osk == osk &&
         other.applicationEnvironment == applicationEnvironment;
   }
 
@@ -1843,6 +1900,7 @@ class ShellSettings {
     power,
     notifications,
     sound,
+    osk,
     applicationEnvironment,
   );
 }

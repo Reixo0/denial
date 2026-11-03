@@ -20,14 +20,26 @@ class ShellOskKeyIntent {
     this.text,
     this.key,
     this.ctrl = false,
+    this.alt = false,
+    this.shift = false,
     this.replaced,
   });
 
   const ShellOskKeyIntent.text(String value)
     : this._(action: ShellOskKeyAction.text, text: value);
 
-  const ShellOskKeyIntent.key(String value, {bool ctrl = false})
-    : this._(action: ShellOskKeyAction.key, key: value, ctrl: ctrl);
+  const ShellOskKeyIntent.key(
+    String value, {
+    bool ctrl = false,
+    bool alt = false,
+    bool shift = false,
+  }) : this._(
+         action: ShellOskKeyAction.key,
+         key: value,
+         ctrl: ctrl,
+         alt: alt,
+         shift: shift,
+       );
 
   const ShellOskKeyIntent.space({bool ctrl = false})
     : this._(
@@ -51,6 +63,8 @@ class ShellOskKeyIntent {
   final String? text;
   final String? key;
   final bool ctrl;
+  final bool alt;
+  final bool shift;
   final String? replaced;
 }
 
@@ -94,9 +108,22 @@ class ShellOskPanel extends StatefulWidget {
     this.textInputStates,
     this.predictions,
     this.onPredict,
+    this.layout = 'en',
+    this.pcKeys = false,
+    this.onPcKeysChanged,
   });
 
   final ValueChanged<ShellOskKeyIntent>? onKey;
+
+  /// The letters: 'en' (US QWERTY) or 'es' (QWERTY with Ñ and Spanish
+  /// accents).
+  final String layout;
+
+  /// Whether the row of PC keys shows above the keys.
+  final bool pcKeys;
+
+  /// The PC keys toggle was tapped.
+  final ValueChanged<bool>? onPcKeysChanged;
 
   /// A finger landed on a key.
   final VoidCallback? onKeyDown;
@@ -170,6 +197,20 @@ const _accents = <String, Map<String, List<String>>>{
   },
 };
 
+/// What a long press offers on each layout, letters and marks alike.
+const _layoutAccents = <String, Map<String, List<String>>>{
+  'es': {
+    'a': ['á'],
+    'e': ['é'],
+    'i': ['í'],
+    'o': ['ó'],
+    'u': ['ú', 'ü'],
+    'n': ['ñ'],
+    '?': ['¿'],
+    '!': ['¡'],
+  },
+};
+
 /// Every row but the bottom one is this much taller than it.
 const _tallRow = 1.067;
 
@@ -194,6 +235,8 @@ class _ShellOskPanelState extends State<ShellOskPanel> {
   /// Shift was set by automatic capitals, which may also clear it.
   bool _shiftAutomatic = false;
   bool _ctrlArmed = false;
+  bool _altArmed = false;
+  late bool _pcKeys = widget.pcKeys;
   Duration? _lastShiftDown;
   Timer? _repeat;
 
@@ -519,8 +562,11 @@ class _ShellOskPanelState extends State<ShellOskPanel> {
   }
 
   List<String> _accentsFor(_OskKeySpec spec) {
-    if (!spec.isLetter) return const [];
+    if (spec.control != null) return const [];
+    final layout = _layoutAccents[widget.layout]?[spec.value];
+    if (!spec.isLetter) return layout ?? const [];
     return {
+      ...?layout,
       for (final language in _languages) ...?_accents[language]?[spec.value],
     }.toList(growable: false);
   }
@@ -665,27 +711,36 @@ class _ShellOskPanelState extends State<ShellOskPanel> {
   /// the keys look different.
   /// A correction survives only until the next action.
   void _update(VoidCallback change) {
-    final before = (_layer, _shift, _ctrlArmed);
+    final before = (_layer, _shift, _ctrlArmed, _altArmed);
     final undo = _undo;
     change();
     if (identical(_undo, undo)) _undo = null;
     _updateAutoShift();
     _wordChanged();
-    if ((_layer, _shift, _ctrlArmed) != before) setState(() {});
+    if ((_layer, _shift, _ctrlArmed, _altArmed) != before) setState(() {});
   }
 
   void _commit(_OskKeySpec spec, {_Touch? touch}) {
     final control = spec.control;
+    if (control == _OskControl.pcKey) {
+      _sendPcKey(spec.keyName!);
+      return;
+    }
     if (control != null) {
       _handleControl(control);
       return;
     }
     final capital = _shift != _Shift.off;
-    final named = _ctrlArmed ? spec.namedKey(capital: capital) : null;
+    final named = _ctrlArmed || _altArmed
+        ? spec.namedKey(capital: capital)
+        : null;
     if (named != null) {
-      widget.onKey?.call(ShellOskKeyIntent.key(named, ctrl: true));
+      widget.onKey?.call(
+        ShellOskKeyIntent.key(named, ctrl: _ctrlArmed, alt: _altArmed),
+      );
       _update(() {
         _ctrlArmed = false;
+        _altArmed = false;
         _forgetTyped();
       });
       return;
@@ -749,6 +804,33 @@ class _ShellOskPanelState extends State<ShellOskPanel> {
         _sendCursorKey(ShellOskKeyIntent.key('Up', ctrl: _ctrlArmed));
       case _OskControl.arrowDown:
         _sendCursorKey(ShellOskKeyIntent.key('Down', ctrl: _ctrlArmed));
+      case _OskControl.pcKeys:
+        setState(() => _pcKeys = !_pcKeys);
+        widget.onPcKeysChanged?.call(_pcKeys);
+      case _OskControl.ctrl:
+        setState(() => _ctrlArmed = !_ctrlArmed);
+      case _OskControl.alt:
+        setState(() => _altArmed = !_altArmed);
+      case _OskControl.pcKey:
+        break;
+    }
+  }
+
+  /// A key from the PC row, with the armed Ctrl and Alt and the Shift key.
+  void _sendPcKey(String name) {
+    _sendCursorKey(
+      ShellOskKeyIntent.key(
+        name,
+        ctrl: _ctrlArmed,
+        alt: _altArmed,
+        shift: _shift != _Shift.off,
+      ),
+    );
+    if (_shift == _Shift.once) {
+      setState(() {
+        _shift = _Shift.off;
+        _shiftAutomatic = false;
+      });
     }
   }
 
@@ -803,6 +885,7 @@ class _ShellOskPanelState extends State<ShellOskPanel> {
       _shift = _Shift.off;
       _shiftAutomatic = false;
       _ctrlArmed = false;
+      _altArmed = false;
     });
   }
 
@@ -824,17 +907,22 @@ class _ShellOskPanelState extends State<ShellOskPanel> {
     widget.onKey?.call(intent);
     _update(() {
       _ctrlArmed = false;
+      _altArmed = false;
       _forgetTyped();
     });
   }
 
   // Layout.
 
-  List<_OskRowData> get _rows => switch (_layer) {
-    _OskLayer.letters => _letterRows,
-    _OskLayer.numbers => _numberRows,
-    _OskLayer.symbols => _extraSymbolRows,
-  };
+  List<_OskRowData> get _rows {
+    final rows = switch (_layer) {
+      _OskLayer.letters =>
+        widget.layout == 'es' ? _spanishLetterRows : _letterRows,
+      _OskLayer.numbers => _numberRows,
+      _OskLayer.symbols => _extraSymbolRows,
+    };
+    return _pcKeys ? [_pcKeyRow, ...rows] : rows;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -901,6 +989,8 @@ class _ShellOskPanelState extends State<ShellOskPanel> {
                                 spec: key.spec,
                                 shift: _shift,
                                 ctrlArmed: _ctrlArmed,
+                                altArmed: _altArmed,
+                                pcKeys: _pcKeys,
                                 pressed: _pressed.contains(key.spec),
                                 onActivate: () => _commit(key.spec),
                               ),
@@ -1164,6 +1254,8 @@ class _OskKeyCap extends StatelessWidget {
     required this.spec,
     required this.shift,
     required this.ctrlArmed,
+    this.altArmed = false,
+    this.pcKeys = false,
     required this.pressed,
     required this.onActivate,
   });
@@ -1171,6 +1263,8 @@ class _OskKeyCap extends StatelessWidget {
   final _OskKeySpec spec;
   final _Shift shift;
   final bool ctrlArmed;
+  final bool altArmed;
+  final bool pcKeys;
   final bool pressed;
 
   /// Types the key for assistive technology, which has no touch.
@@ -1181,7 +1275,12 @@ class _OskKeyCap extends StatelessWidget {
     final control = spec.control;
     final theme = context.shellTheme;
     final accent = ShellTheme.of(context).accent;
-    final selected = spec.isSelected(shift: shift, ctrlArmed: ctrlArmed);
+    final selected = spec.isSelected(
+      shift: shift,
+      ctrlArmed: ctrlArmed,
+      altArmed: altArmed,
+      pcKeys: pcKeys,
+    );
     final capital = shift != _Shift.off;
     var background = selected
         ? theme.accentPalette.container
@@ -1436,6 +1535,16 @@ enum _OskControl {
   enter,
   arrowUp,
   arrowDown,
+
+  /// Shows or hides the PC keys row.
+  pcKeys,
+
+  /// Sticky Ctrl and Alt for the next key.
+  ctrl,
+  alt,
+
+  /// A named key from the PC row.
+  pcKey,
 }
 
 class _OskRowData {
@@ -1448,23 +1557,33 @@ class _OskRowData {
 class _OskKeySpec {
   const _OskKeySpec.text(this.value, {this.flex = 10})
     : control = null,
-      icon = null;
+      icon = null,
+      keyName = null;
 
   const _OskKeySpec.control(this.control, {this.icon, this.flex = 14})
-    : value = null;
+    : value = null,
+      keyName = null;
+
+  /// A PC row key: [value] is its label, [keyName] the key it sends.
+  const _OskKeySpec.pc(this.keyName, {this.value, this.icon, this.flex = 10})
+    : control = _OskControl.pcKey;
+
+  const _OskKeySpec.modifier(this.control, this.value, {this.flex = 10})
+    : icon = null,
+      keyName = null;
 
   final String? value;
+  final String? keyName;
   final _OskControl? control;
   final IconData? icon;
   final int flex;
 
   bool get isLetter {
     final text = value;
-    if (text == null || text.length != 1) {
+    if (control != null || text == null || text.length != 1) {
       return false;
     }
-    final code = text.codeUnitAt(0);
-    return code >= 97 && code <= 122;
+    return text.toLowerCase() == text && text.toUpperCase() != text;
   }
 
   bool get showsPopup => control == null;
@@ -1494,6 +1613,11 @@ class _OskKeySpec {
     if (control == _OskControl.letters) {
       return l10n.oskLettersKey;
     }
+    if (control == _OskControl.pcKey ||
+        control == _OskControl.ctrl ||
+        control == _OskControl.alt) {
+      return value ?? '';
+    }
     return outputText(capital: capital);
   }
 
@@ -1512,6 +1636,8 @@ class _OskKeySpec {
       _OskControl.enter => l10n.oskEnter,
       _OskControl.arrowUp => l10n.oskArrowUp,
       _OskControl.arrowDown => l10n.oskArrowDown,
+      _OskControl.pcKeys => 'PC keys',
+      _OskControl.ctrl || _OskControl.alt || _OskControl.pcKey => value ?? '',
       null => labelText(
         capital: shift != _Shift.off,
         ctrlArmed: false,
@@ -1556,14 +1682,21 @@ class _OskKeySpec {
     };
   }
 
-  bool isSelected({required _Shift shift, required bool ctrlArmed}) {
+  bool isSelected({
+    required _Shift shift,
+    required bool ctrlArmed,
+    bool altArmed = false,
+    bool pcKeys = false,
+  }) {
     return (control == _OskControl.shift && shift != _Shift.off) ||
-        (control == _OskControl.symbols && ctrlArmed);
+        (control == _OskControl.symbols && ctrlArmed) ||
+        (control == _OskControl.ctrl && ctrlArmed) ||
+        (control == _OskControl.alt && altArmed) ||
+        (control == _OskControl.pcKeys && pcKeys);
   }
 }
 
-const _letterRows = [
-  _OskRowData([
+const _qwertyTopRow = _OskRowData([
     _OskKeySpec.text('q'),
     _OskKeySpec.text('w'),
     _OskKeySpec.text('e'),
@@ -1574,8 +1707,9 @@ const _letterRows = [
     _OskKeySpec.text('i'),
     _OskKeySpec.text('o'),
     _OskKeySpec.text('p'),
-  ]),
-  _OskRowData([
+  ]);
+
+const _qwertyHomeRow = _OskRowData([
     _OskKeySpec.text('a'),
     _OskKeySpec.text('s'),
     _OskKeySpec.text('d'),
@@ -1585,8 +1719,22 @@ const _letterRows = [
     _OskKeySpec.text('j'),
     _OskKeySpec.text('k'),
     _OskKeySpec.text('l'),
-  ], sideInset: 28),
-  _OskRowData([
+  ], sideInset: 28);
+
+const _spanishHomeRow = _OskRowData([
+    _OskKeySpec.text('a'),
+    _OskKeySpec.text('s'),
+    _OskKeySpec.text('d'),
+    _OskKeySpec.text('f'),
+    _OskKeySpec.text('g'),
+    _OskKeySpec.text('h'),
+    _OskKeySpec.text('j'),
+    _OskKeySpec.text('k'),
+    _OskKeySpec.text('l'),
+    _OskKeySpec.text('ñ'),
+  ]);
+
+const _qwertyBottomRow = _OskRowData([
     _OskKeySpec.control(
       _OskControl.shift,
       icon: Icons.keyboard_arrow_up_rounded,
@@ -1604,14 +1752,20 @@ const _letterRows = [
       icon: Icons.backspace_rounded,
       flex: 15,
     ),
-  ]),
-  _OskRowData([
+  ]);
+
+const _letterSpaceRow = _OskRowData([
     _OskKeySpec.control(_OskControl.symbols, flex: 17),
+    _OskKeySpec.control(
+      _OskControl.pcKeys,
+      icon: Icons.keyboard_command_key,
+      flex: 10,
+    ),
     _OskKeySpec.text(',', flex: 10),
     _OskKeySpec.control(
       _OskControl.space,
       icon: Icons.space_bar_rounded,
-      flex: 46,
+      flex: 36,
     ),
     _OskKeySpec.text('.', flex: 10),
     _OskKeySpec.control(
@@ -1619,8 +1773,39 @@ const _letterRows = [
       icon: Icons.keyboard_return_rounded,
       flex: 17,
     ),
-  ]),
+  ]);
+
+const _letterRows = [
+  _qwertyTopRow,
+  _qwertyHomeRow,
+  _qwertyBottomRow,
+  _letterSpaceRow,
 ];
+
+/// QWERTY with Ñ, as Spanish keyboards have it.
+const _spanishLetterRows = [
+  _qwertyTopRow,
+  _spanishHomeRow,
+  _qwertyBottomRow,
+  _letterSpaceRow,
+];
+
+/// PC keys for terminals and editors. Ctrl and Alt hold for the next key;
+/// the keyboard's Shift applies to these keys too.
+const _pcKeyRow = _OskRowData([
+  _OskKeySpec.pc('Escape', value: 'Esc'),
+  _OskKeySpec.pc('Tab', icon: Icons.keyboard_tab_rounded),
+  _OskKeySpec.modifier(_OskControl.ctrl, 'Ctrl'),
+  _OskKeySpec.modifier(_OskControl.alt, 'Alt'),
+  _OskKeySpec.pc('Home', value: 'Home'),
+  _OskKeySpec.pc('End', value: 'End'),
+  _OskKeySpec.pc('Prior', value: 'PgUp'),
+  _OskKeySpec.pc('Next', value: 'PgDn'),
+  _OskKeySpec.pc('Left', icon: Icons.keyboard_arrow_left_rounded),
+  _OskKeySpec.pc('Up', icon: Icons.keyboard_arrow_up_rounded),
+  _OskKeySpec.pc('Down', icon: Icons.keyboard_arrow_down_rounded),
+  _OskKeySpec.pc('Right', icon: Icons.keyboard_arrow_right_rounded),
+]);
 
 const _numberRows = [
   _OskRowData([

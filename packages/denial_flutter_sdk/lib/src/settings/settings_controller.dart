@@ -535,6 +535,10 @@ class ShellSettingsController extends Notifier<ShellSettings> {
     );
   }
 
+  void setKeyboardPcKeys(bool value) {
+    _update(state.copyWith(osk: state.osk.copyWith(pcKeys: value)));
+  }
+
   void setKeyboardVibration(bool value) {
     _update(
       state.copyWith(sound: state.sound.copyWith(keyboardVibration: value)),

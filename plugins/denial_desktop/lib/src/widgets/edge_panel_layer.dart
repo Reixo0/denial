@@ -381,6 +381,9 @@ class _EdgePanelContent extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final bridge = ref.read(denialBridgeProvider);
     final haptics = ref.read(hapticsServiceProvider);
+    final osk = ref.watch(
+      shellSettingsProvider.select((settings) => settings.osk),
+    );
     final vibrate = ref.watch(
       shellSettingsProvider.select(
         (settings) => settings.sound.keyboardVibration,
@@ -425,6 +428,11 @@ class _EdgePanelContent extends ConsumerWidget {
                 touchY: word.touchY,
                 manualCapital: word.manualCapital,
               ),
+              layout: osk.layout,
+              pcKeys: osk.pcKeys,
+              onPcKeysChanged: (value) => ref
+                  .read(shellSettingsProvider.notifier)
+                  .setKeyboardPcKeys(value),
             ),
           ),
         ),
@@ -437,7 +445,12 @@ class _EdgePanelContent extends ConsumerWidget {
       case ShellOskKeyAction.text:
         bridge.sendKeyboardText(intent.text ?? '');
       case ShellOskKeyAction.key:
-        bridge.sendKeyboardKey(intent.key ?? '', ctrl: intent.ctrl);
+        bridge.sendKeyboardKey(
+          intent.key ?? '',
+          ctrl: intent.ctrl,
+          alt: intent.alt,
+          shift: intent.shift,
+        );
       case ShellOskKeyAction.space:
         if (intent.ctrl) {
           bridge.sendKeyboardKey(intent.key ?? 'space', ctrl: true);
