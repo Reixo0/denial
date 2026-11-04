@@ -451,6 +451,8 @@ impl WaylandFrontend {
             #[cfg(feature = "flutter")]
             client_touch_routes: HashMap::new(),
             #[cfg(feature = "flutter")]
+            touch_pointer: Default::default(),
+            #[cfg(feature = "flutter")]
             edge_swipe_candidates: HashMap::new(),
             #[cfg(feature = "flutter")]
             client_touch_frame_pending: false,

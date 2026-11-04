@@ -78,6 +78,9 @@ pub(super) mod edge_swipe;
 pub(super) mod flutter_route;
 #[path = "input/tablet.rs"]
 mod tablet;
+#[cfg(feature = "flutter")]
+#[path = "input/touch_pointer.rs"]
+pub(super) mod touch_pointer;
 #[path = "input/wayland_route.rs"]
 mod wayland_route;
 

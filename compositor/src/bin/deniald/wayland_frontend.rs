@@ -601,6 +601,9 @@ pub(super) struct WaylandFrontend {
     flutter_touch_slots: HashSet<i32>,
     #[cfg(feature = "flutter")]
     client_touch_routes: HashMap<i32, ClientInputRoute>,
+    /// Contacts on clients without touch, driving the pointer instead.
+    #[cfg(feature = "flutter")]
+    touch_pointer: input::touch_pointer::TouchPointer,
     /// Client contacts that started in a shell edge-swipe region and may
     /// still be claimed by Flutter.
     #[cfg(feature = "flutter")]

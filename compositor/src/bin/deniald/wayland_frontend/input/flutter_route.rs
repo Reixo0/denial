@@ -2,6 +2,7 @@
 
 #[cfg(feature = "flutter")]
 use smithay::desktop::PopupUngrabStrategy;
+use smithay::input::touch::TouchHandle;
 #[cfg(feature = "flutter")]
 use smithay::wayland::seat::WaylandFocus;
 
@@ -27,6 +28,20 @@ pub(in super::super) fn cancel_captured_touch_routes(
     if slots.is_empty() {
         return false;
     }
+    // A system gesture took a contact that drove the pointer: its button
+    // lets go, its scroll ends.
+    let pointer_actions = {
+        let touch_pointer = &mut state.frontend_mut().touch_pointer;
+        slots
+            .iter()
+            .filter(|slot| touch_pointer.owns(**slot))
+            .copied()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .flat_map(|slot| touch_pointer.cancel(slot))
+            .collect::<Vec<_>>()
+    };
+    let released = apply_touch_pointer(state, pointer_actions, InputTime::now());
     let (flutter_slots, cancel_client, touch) = {
         let frontend = state.frontend_mut();
         let flutter_slots = slots
@@ -51,7 +66,89 @@ pub(in super::super) fn cancel_captured_touch_routes(
             touch.unset_grab(state);
         }
     }
-    cancel_client
+    cancel_client || released
+}
+
+/// Whether [surface]'s client never asked for touch: it would not see a
+/// finger at all.
+#[cfg(feature = "flutter")]
+fn client_lacks_touch(touch: &TouchHandle<RuntimeState>, surface: &WlSurface) -> bool {
+    use smithay::reexports::wayland_server::Resource;
+    surface
+        .client()
+        .is_some_and(|client| touch.client_touch(&client).next().is_none())
+}
+
+/// Drives the pointer for contacts on clients without touch.
+#[cfg(feature = "flutter")]
+fn apply_touch_pointer(
+    state: &mut RuntimeState,
+    actions: Vec<super::touch_pointer::TouchPointerAction>,
+    time: InputTime,
+) -> bool {
+    use super::touch_pointer::TouchPointerAction;
+    const BTN_LEFT: u32 = 0x110;
+    const BTN_RIGHT: u32 = 0x111;
+
+    let mut delivered = false;
+    for action in actions {
+        match action {
+            TouchPointerAction::Move(to) => delivered |= move_touch_pointer(state, to, time),
+            TouchPointerAction::PressFrom(start, to) => {
+                delivered |= move_touch_pointer(state, start, time);
+                delivered |= route_pointer_button(state, BTN_LEFT, ButtonState::Pressed, time);
+                delivered |= move_touch_pointer(state, to, time);
+            }
+            TouchPointerAction::Release => {
+                delivered |= route_pointer_button(state, BTN_LEFT, ButtonState::Released, time);
+            }
+            TouchPointerAction::Click | TouchPointerAction::RightClick => {
+                let button = if action == TouchPointerAction::Click {
+                    BTN_LEFT
+                } else {
+                    BTN_RIGHT
+                };
+                delivered |= route_pointer_button(state, button, ButtonState::Pressed, time);
+                delivered |= route_pointer_button(state, button, ButtonState::Released, time);
+            }
+            TouchPointerAction::Scroll(by) => {
+                let frame = AxisFrame::new(time)
+                    .source(AxisSource::Finger)
+                    .value(Axis::Horizontal, -by.x)
+                    .value(Axis::Vertical, -by.y);
+                delivered |= send_touch_pointer_axis(state, frame);
+            }
+            TouchPointerAction::ScrollStop => {
+                let frame = AxisFrame::new(time)
+                    .source(AxisSource::Finger)
+                    .stop(Axis::Horizontal)
+                    .stop(Axis::Vertical);
+                delivered |= send_touch_pointer_axis(state, frame);
+            }
+        }
+    }
+    delivered
+}
+
+#[cfg(feature = "flutter")]
+fn move_touch_pointer(state: &mut RuntimeState, to: Point<f64, Logical>, time: InputTime) -> bool {
+    let target = state.frontend_mut().pointer_motion_target(to);
+    route_pointer_motion(state, to, target, time, None)
+}
+
+#[cfg(feature = "flutter")]
+fn send_touch_pointer_axis(state: &mut RuntimeState, frame: AxisFrame) -> bool {
+    let pointer = state
+        .frontend()
+        .seat
+        .get_pointer()
+        .expect("seat has no pointer");
+    if pointer.current_focus().is_none() {
+        return false;
+    }
+    pointer.axis(state, frame);
+    pointer.frame(state);
+    true
 }
 
 /// Follows a client contact that started in a shell edge-swipe region. Once
@@ -307,6 +404,34 @@ pub(super) fn process_flutter_input_event(
                         .seat
                         .get_touch()
                         .expect("seat has no touch");
+                    let edge_swipe = state
+                        .frontend()
+                        .input_layout
+                        .as_ref()
+                        .is_some_and(|layout| {
+                            super::edge_swipe::EdgeSwipeCandidate::at(
+                                &layout.edge_swipe_regions,
+                                scene_position,
+                                position,
+                                touch_event.time().micros(),
+                            )
+                            .is_some()
+                        });
+                    // A client that never asked for touch gets a mouse
+                    // instead. Contacts at a shell edge stay touches, so a
+                    // Back swipe still starts over it.
+                    if !edge_swipe && client_lacks_touch(&touch, &focus.0) {
+                        let actions = state.frontend_mut().touch_pointer.down(
+                            slot,
+                            position,
+                            touch_event.time().micros(),
+                        );
+                        apply_touch_pointer(state, actions, touch_event.time());
+                        if scene_changed {
+                            state.scene_sync.mark_dirty();
+                        }
+                        return true;
+                    }
                     touch.down(
                         state,
                         Some(focus),
@@ -376,6 +501,14 @@ pub(super) fn process_flutter_input_event(
             let flush_clients = apply_touch_gesture_update(state, gesture);
             if gesture_consumed {
                 return flush_clients;
+            }
+            if state.frontend().touch_pointer.owns(slot) {
+                let actions = state.frontend_mut().touch_pointer.motion(
+                    slot,
+                    position,
+                    touch_event.time().micros(),
+                );
+                return apply_touch_pointer(state, actions, touch_event.time());
             }
             let flutter_target = state.frontend().flutter_touch_slots.contains(&slot);
             if flutter_target {
@@ -449,6 +582,13 @@ pub(super) fn process_flutter_input_event(
             if gesture_consumed {
                 return flush_clients;
             }
+            if state.frontend().touch_pointer.owns(slot) {
+                let actions = state
+                    .frontend_mut()
+                    .touch_pointer
+                    .up(slot, touch_event.time().micros());
+                return apply_touch_pointer(state, actions, touch_event.time());
+            }
             let flutter_target = state.frontend_mut().flutter_touch_slots.remove(&slot);
             if flutter_target {
                 state.flutter_input.handle(&event);
@@ -519,6 +659,10 @@ pub(super) fn process_flutter_input_event(
             let flush_clients = apply_touch_gesture_update(state, gesture);
             if gesture_consumed {
                 return flush_clients;
+            }
+            if state.frontend().touch_pointer.owns(slot) {
+                let actions = state.frontend_mut().touch_pointer.cancel(slot);
+                return apply_touch_pointer(state, actions, touch_event.time());
             }
             let flutter_target = state.frontend_mut().flutter_touch_slots.remove(&slot);
             if flutter_target {
