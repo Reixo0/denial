@@ -67,11 +67,13 @@ class HomeGridLayout {
   static List<HomeGridItem?> initialSlotsForApps(
     List<DesktopApp> apps,
     Iterable<LocalFlutterApplication> localApps,
-    List<HomeLayoutSlot?>? savedLayout,
-  ) {
+    List<HomeLayoutSlot?>? savedLayout, {
+    Set<String> exclude = const {},
+  }) {
     final appsById = _appItemsById(apps, localApps);
     final clock = HomeGridItem.clock();
-    final used = <String>{};
+    // Apps in the dock are not on the grid.
+    final used = <String>{...exclude};
     var slots = <HomeGridItem?>[];
 
     for (var index = 0; index < (savedLayout?.length ?? 0); index += 1) {
@@ -122,10 +124,11 @@ class HomeGridLayout {
   static List<HomeGridItem?> refreshSlotsForApps(
     List<HomeGridItem?> currentSlots,
     List<DesktopApp> apps,
-    Iterable<LocalFlutterApplication> localApps,
-  ) {
+    Iterable<LocalFlutterApplication> localApps, {
+    Set<String> exclude = const {},
+  }) {
     final appsById = _appItemsById(apps, localApps);
-    final placedIds = <String>{};
+    final placedIds = <String>{...exclude};
     var next = <HomeGridItem?>[];
 
     for (var index = 0; index < currentSlots.length; index += 1) {
@@ -167,6 +170,24 @@ class HomeGridLayout {
       placedIds.add(item.id);
     }
     return next;
+  }
+
+  /// Every installed app, in no particular order.
+  static List<HomeGridItem> catalogFor(
+    List<DesktopApp> apps,
+    Iterable<LocalFlutterApplication> localApps,
+  ) => _appItemsById(apps, localApps).values.toList(growable: false);
+
+  /// The apps of [ids] that are installed, in order, each once.
+  static List<HomeGridItem> dockForApps(
+    List<DesktopApp> apps,
+    Iterable<LocalFlutterApplication> localApps,
+    Iterable<String> ids,
+  ) {
+    final appsById = _appItemsById(apps, localApps);
+    return [
+      for (final id in {...ids}) ?appsById[id],
+    ];
   }
 
   static Map<String, HomeGridItem> _appItemsById(
@@ -708,6 +729,161 @@ class HomeGridLayout {
       seed += 1;
     }
     return '${HomeGridItem.folderIdPrefix}${seed.toRadixString(36)}';
+  }
+
+  // Dock ---------------------------------------------------------------------
+
+  /// Moves the app at grid [fromIndex] into the dock at [position]. With
+  /// the dock at [capacity], it trades places with the app at [position].
+  static ({List<HomeGridItem?> slots, List<HomeGridItem> dock})? moveToDock(
+    List<HomeGridItem?> slots,
+    List<HomeGridItem> dock,
+    int fromIndex,
+    int position,
+    int capacity,
+  ) {
+    final app = fromIndex >= 0 && fromIndex < slots.length
+        ? slots[fromIndex]
+        : null;
+    if (app == null || !app.isApp || position < 0) {
+      return null;
+    }
+    final nextSlots = [...slots];
+    final nextDock = [...dock];
+    if (dock.length < capacity) {
+      nextSlots[fromIndex] = null;
+      nextDock.insert(position.clamp(0, dock.length), app);
+    } else {
+      if (position >= dock.length) {
+        return null;
+      }
+      nextSlots[fromIndex] = dock[position];
+      nextDock[position] = app;
+    }
+    return (slots: nextSlots, dock: nextDock);
+  }
+
+  /// Moves [appId] out of the folder at [folderIndex] into the dock at
+  /// [position], when the dock has room below [capacity].
+  static ({List<HomeGridItem?> slots, List<HomeGridItem> dock})?
+  moveFromFolderToDock(
+    List<HomeGridItem?> slots,
+    List<HomeGridItem> dock,
+    int folderIndex,
+    String appId,
+    int position,
+    int capacity,
+  ) {
+    if (dock.length >= capacity || position < 0) {
+      return null;
+    }
+    final taken = takeFromFolder(slots, folderIndex, appId);
+    if (taken == null) {
+      return null;
+    }
+    final nextDock = [...dock]
+      ..insert(position.clamp(0, dock.length), taken.app);
+    return (slots: taken.slots, dock: nextDock);
+  }
+
+  static List<HomeGridItem>? reorderDock(
+    List<HomeGridItem> dock,
+    int from,
+    int to,
+  ) {
+    if (from < 0 || from >= dock.length) {
+      return null;
+    }
+    final next = [...dock];
+    final app = next.removeAt(from);
+    next.insert(to.clamp(0, next.length), app);
+    return next;
+  }
+
+  /// Moves the dock's app at [position] to the free grid cell [toIndex].
+  static ({List<HomeGridItem?> slots, List<HomeGridItem> dock})? moveFromDock(
+    List<HomeGridItem?> slots,
+    List<HomeGridItem> dock,
+    int position,
+    int toIndex,
+  ) {
+    if (position < 0 || position >= dock.length) {
+      return null;
+    }
+    final placed = placeItemAt(slots, toIndex, dock[position]);
+    if (identical(placed, slots)) {
+      return null;
+    }
+    return (slots: placed, dock: [...dock]..removeAt(position));
+  }
+
+  /// Drops the dock's app at [position] on the app or folder at
+  /// [targetIndex], as [merge] does.
+  static ({List<HomeGridItem?> slots, List<HomeGridItem> dock})? mergeFromDock(
+    List<HomeGridItem?> slots,
+    List<HomeGridItem> dock,
+    int position,
+    int targetIndex, {
+    required String folderId,
+    required String folderName,
+  }) {
+    final target = targetIndex >= 0 && targetIndex < slots.length
+        ? slots[targetIndex]
+        : null;
+    if (position < 0 ||
+        position >= dock.length ||
+        target == null ||
+        !(target.isApp || target.isFolder)) {
+      return null;
+    }
+    final next = [...slots];
+    next[targetIndex] = _withApp(
+      target,
+      dock[position],
+      folderId: folderId,
+      folderName: folderName,
+    );
+    return (slots: next, dock: [...dock]..removeAt(position));
+  }
+
+  // Removing and adding --------------------------------------------------------
+
+  /// Takes the item [id] off home: from the dock, the grid or a folder. A
+  /// folder goes with its apps. [removed] lists the apps that left.
+  static ({
+    List<HomeGridItem?> slots,
+    List<HomeGridItem> dock,
+    Set<String> removed,
+  })?
+  removeFromHome(
+    List<HomeGridItem?> slots,
+    List<HomeGridItem> dock,
+    String id,
+  ) {
+    final docked = dock.indexWhere((app) => app.id == id);
+    if (docked >= 0) {
+      return (slots: slots, dock: [...dock]..removeAt(docked), removed: {id});
+    }
+    for (var index = 0; index < slots.length; index += 1) {
+      final item = slots[index];
+      if (item == null || item.resizable) {
+        continue;
+      }
+      if (item.id == id) {
+        return (
+          slots: [...slots]..[index] = null,
+          dock: dock,
+          removed: {for (final app in item.apps) app.id},
+        );
+      }
+      if (item.isFolder && item.folderApps.any((app) => app.id == id)) {
+        final taken = takeFromFolder(slots, index, id);
+        return taken == null
+            ? null
+            : (slots: taken.slots, dock: dock, removed: {id});
+      }
+    }
+    return null;
   }
 
   static double rectOverlapArea(Rect a, Rect b) {

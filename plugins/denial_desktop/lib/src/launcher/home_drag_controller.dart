@@ -16,6 +16,9 @@ enum HomeDropKind {
 
   /// To a position in the open folder.
   folder,
+
+  /// To a position in the dock.
+  dock,
 }
 
 typedef HomeDropTarget = ({HomeDropKind kind, int index});
@@ -32,6 +35,8 @@ class HomeDrag {
     required this.item,
     required this.source,
     required this.inFolder,
+    this.inDock = false,
+    this.fromDrawer = false,
     required this.size,
     required this.grip,
     this.target,
@@ -42,9 +47,17 @@ class HomeDrag {
 
   final HomeGridItem item;
 
-  /// The item's grid anchor, or the anchor of the folder holding it.
+  /// The item's grid anchor, the anchor of the folder holding it, or its
+  /// position in the dock.
   final int source;
   final bool inFolder;
+  final bool inDock;
+
+  /// Picked up in the app drawer. An app not on home has no [source].
+  final bool fromDrawer;
+
+  /// An app from the drawer that is not on home yet: dropped, it joins it.
+  bool get offHome => fromDrawer && source < 0;
 
   /// The lifted tile's size, and where in it the finger holds it.
   final Size size;
@@ -71,6 +84,8 @@ class HomeDrag {
       item: item,
       source: source,
       inFolder: inFolder,
+      inDock: inDock,
+      fromDrawer: fromDrawer,
       size: size,
       grip: grip,
       target: clearTarget ? null : target ?? this.target,
@@ -124,6 +139,8 @@ class HomeDragController {
     required HomeGridItem item,
     required int source,
     required bool inFolder,
+    bool inDock = false,
+    bool fromDrawer = false,
     required Rect tileRect,
     required Offset global,
   }) {
@@ -135,6 +152,8 @@ class HomeDragController {
       item: item,
       source: source,
       inFolder: inFolder,
+      inDock: inDock,
+      fromDrawer: fromDrawer,
       size: tileRect.size,
       grip: global - tileRect.topLeft,
     );
@@ -240,6 +259,13 @@ class HomeDragController {
       folder.close();
     }
 
+    final dock = _host.dock;
+    if (dock != null && dock.bounds.inflate(12).contains(pointer.value)) {
+      _cancelDwells();
+      _setTarget(_dockTarget(current, grid, dock));
+      return;
+    }
+
     final tile =
         _host.globalToGrid(pointer.value) - current.grip & current.size;
     final candidate = _mergeCandidateAt(current, grid, geometry, tile);
@@ -279,6 +305,32 @@ class HomeDragController {
           });
   }
 
+  void _cancelDwells() {
+    _mergeCandidate = null;
+    _mergeTimer?.cancel();
+    _mergeTimer = null;
+    _previewTimer?.cancel();
+    _previewTimer = null;
+  }
+
+  /// The place in the dock under the finger. A full dock trades the app
+  /// there for one from the grid; an app from a folder has no place to
+  /// trade it into.
+  HomeDropTarget? _dockTarget(
+    HomeDrag drag,
+    HomeGridState grid,
+    HomeDockGeometry dock,
+  ) {
+    if (!drag.item.isApp) return null;
+    final others = grid.dock.length - (drag.inDock ? 1 : 0);
+    final at = pointer.value;
+    if (others < dock.capacity) {
+      return (kind: HomeDropKind.dock, index: dock.positionAt(at, others + 1));
+    }
+    if (drag.inFolder || drag.offHome) return null;
+    return (kind: HomeDropKind.dock, index: dock.positionAt(at, others));
+  }
+
   /// The app or folder whose icon the dragged app's icon is centered on.
   int? _mergeCandidateAt(
     HomeDrag drag,
@@ -292,7 +344,7 @@ class HomeDragController {
     if (cell == null) return null;
     final anchor = HomeGridLayout.anchorForCell(cell, grid.slots);
     // Never onto itself, nor back onto the folder it came from.
-    if (anchor == null || anchor == drag.source) return null;
+    if (anchor == null || (!drag.inDock && anchor == drag.source)) return null;
     final target = grid.slots[anchor];
     if (target == null || !(target.isApp || target.isFolder)) return null;
     final icon = HomeTileMetrics.iconRectIn(geometry.itemRect(anchor, target));
@@ -326,7 +378,7 @@ class HomeDragController {
         );
         final overlap = HomeGridLayout.rectOverlapArea(tile, candidate);
         if (overlap <= 0) continue;
-        final allowed = drag.inFolder
+        final allowed = drag.inFolder || drag.inDock || drag.offHome
             ? HomeGridLayout.anchorForCell(index, grid.slots) == null
             : HomeGridLayout.canMoveSlot(
                 grid.slots,
@@ -358,6 +410,8 @@ class HomeDragController {
     if (preview &&
         target?.kind == HomeDropKind.cell &&
         !current.inFolder &&
+        !current.inDock &&
+        !current.offHome &&
         grid != null &&
         geometry != null) {
       final partner = HomeGridLayout.swapPartner(
@@ -397,7 +451,11 @@ class HomeDragController {
       Offset.zero & Size(geometry.width, geometry.height),
     );
     final center = global - current.grip + current.size.center(Offset.zero);
-    final direction = center.dx < viewport.left + pageEdge
+    // Moving along the dock never turns the page.
+    final overDock = _host.dock?.bounds.contains(global) ?? false;
+    final direction = overDock
+        ? 0
+        : center.dx < viewport.left + pageEdge
         ? -1
         : center.dx > viewport.right - pageEdge
         ? 1
@@ -441,13 +499,17 @@ class HomeDragController {
       case (kind: HomeDropKind.merge, :final index):
         final into = grid.slots[index];
         final name = _host.folderNameFor([?into, drag.item]);
-        if (drag.inFolder) {
+        if (drag.offHome) {
+          controller.addIntoFolder(appId, index, folderName: name);
+        } else if (drag.inFolder) {
           controller.moveFromFolderInto(
             drag.source,
             appId,
             index,
             folderName: name,
           );
+        } else if (drag.inDock) {
+          controller.mergeFromDock(drag.source, index, folderName: name);
         } else {
           controller.merge(drag.source, index, folderName: name);
         }
@@ -462,12 +524,30 @@ class HomeDragController {
           ),
           absorbed: true,
         );
+      case (kind: HomeDropKind.dock, :final index):
+        final capacity = _host.dock?.capacity ?? 0;
+        if (drag.offHome) {
+          controller.addToDock(appId, index, capacity);
+        } else if (drag.inDock) {
+          controller.reorderDock(drag.source, index);
+        } else if (drag.inFolder) {
+          controller.moveFromFolderToDock(drag.source, appId, index, capacity);
+        } else {
+          controller.moveToDock(drag.source, index, capacity);
+        }
       case (kind: HomeDropKind.cell, :final index):
-        if (drag.inFolder) {
+        if (drag.offHome) {
+          controller.addToHomeAt(appId, index);
+        } else if (drag.inFolder) {
           controller.moveOutOfFolder(drag.source, appId, index, pageSize);
+        } else if (drag.inDock) {
+          controller.moveFromDock(drag.source, index);
         } else {
           controller.moveSlot(drag.source, index, pageSize);
         }
+      case null when drag.fromDrawer:
+        // Back where it was, on home or off it.
+        break;
       case null:
         final layout = _host.folders.layout;
         if (drag.inFolder &&
@@ -495,14 +575,21 @@ class HomeDragController {
           );
         }
     }
-    return _landingOnGrid(drag.item, geometry);
+    return _landing(drag.item, geometry);
   }
 
-  /// Where [item] now sits on the visible page, or a fade where it is when
-  /// it went to another page.
-  HomeLanding? _landingOnGrid(HomeGridItem item, HomeGridGeometry geometry) {
+  /// Where [item] now sits in the dock or on the visible page, or a fade
+  /// where it is when it went to another page.
+  HomeLanding? _landing(HomeGridItem item, HomeGridGeometry geometry) {
     final grid = _host.grid;
     if (grid == null) return null;
+    final dock = _host.dock;
+    final position = grid.dock.indexWhere((app) => app.id == item.id);
+    if (position >= 0) {
+      return dock == null
+          ? null
+          : (rect: dock.iconRect(position, grid.dock.length), absorbed: false);
+    }
     final index = grid.slots.indexWhere((slot) => slot?.id == item.id);
     if (index < 0 || index ~/ geometry.pageSize != grid.page) {
       return null;

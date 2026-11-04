@@ -5,9 +5,20 @@ import '../models/home_grid_item.dart';
 
 /// The saved home layouts.
 class HomeSavedLayouts {
-  const HomeSavedLayouts({this.layouts = const {}, this.unassigned});
+  const HomeSavedLayouts({
+    this.layouts = const {},
+    this.unassigned,
+    this.dock = const [],
+    this.hidden = const [],
+  });
 
   final Map<HomeOrientation, List<HomeLayoutSlot?>> layouts;
+
+  /// The apps in the dock, in order. Every orientation shares it.
+  final List<String> dock;
+
+  /// The apps taken off home. They stay in the app drawer.
+  final List<String> hidden;
 
   /// A layout not yet shown in any orientation, as in files from before
   /// orientations: it belongs to whichever orientation home shows first.
@@ -36,12 +47,20 @@ class HomeLayoutRepository {
           rawSlots.map(_decodeSlot).toList(growable: false),
         _ => null,
       };
+      List<String> readIds(String key) => switch (decoded[key]) {
+        final List ids => List<String>.unmodifiable(
+          ids.whereType<String>().where((id) => id.isNotEmpty),
+        ),
+        _ => const [],
+      };
       return HomeSavedLayouts(
         layouts: {
           for (final orientation in HomeOrientation.values)
             orientation: ?read(orientation.name),
         },
         unassigned: read('slots'),
+        dock: readIds('dock'),
+        hidden: readIds('hidden'),
       );
     } on Object {
       return const HomeSavedLayouts();
@@ -58,6 +77,8 @@ class HomeLayoutRepository {
         for (final MapEntry(:key, :value) in saved.layouts.entries)
           key.name: encode(value),
         if (saved.unassigned case final slots?) 'slots': encode(slots),
+        'dock': saved.dock,
+        'hidden': saved.hidden,
       });
       await file.writeAsString('$payload\n', flush: true);
     } on Object {

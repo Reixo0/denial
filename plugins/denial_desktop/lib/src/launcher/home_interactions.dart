@@ -22,13 +22,15 @@ abstract interface class HomeInteractions {
   void openFolder(HomeGridItem folder, Rect iconRect);
 
   /// A long press on [item], anchored at [index] (or held in the folder
-  /// at [index]), whose tile is at [tileRect] in global coordinates.
+  /// at [index], or at [index] in the dock), whose tile is at [tileRect] in
+  /// global coordinates.
   void hold(
     HomeGridItem item,
     int index,
     Rect tileRect,
     Offset pointer, {
     bool inFolder = false,
+    bool inDock = false,
   });
 }
 
@@ -59,6 +61,9 @@ abstract interface class HomeGridHost {
 
   /// The pager's layout, null before its first.
   HomeGridGeometry? get geometry;
+
+  /// The dock's layout, in global coordinates; null before its first.
+  HomeDockGeometry? get dock;
 
   Offset globalToGrid(Offset global);
   Rect gridToGlobal(Rect rect);

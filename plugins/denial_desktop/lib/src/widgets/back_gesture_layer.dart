@@ -1,3 +1,4 @@
+import 'package:denial_desktop/src/state/home_back.dart';
 import 'package:denial_desktop/src/state/reference_shell_controller.dart';
 import 'package:denial_desktop/src/state/reference_shell_metrics.dart';
 import 'package:denial_desktop/src/state/reference_shell_state.dart';
@@ -79,6 +80,7 @@ class _MobileBackGestureLayerState extends ConsumerState<MobileBackGestureLayer>
         ),
       ),
     );
+    final homeBack = ref.watch(homeBackProvider) != null;
     final size = MediaQuery.sizeOf(context);
     final strips = ReferenceShellMetrics.backGestureRects(
       size,
@@ -96,7 +98,7 @@ class _MobileBackGestureLayerState extends ConsumerState<MobileBackGestureLayer>
         // Disabling keeps a gesture in flight alive; its release then finds
         // nothing to go back from.
         IgnorePointer(
-          ignoring: !shell.enabled && widget.onBack == null,
+          ignoring: !shell.enabled && !homeBack && widget.onBack == null,
           child: Stack(
             fit: StackFit.expand,
             children: [
@@ -218,8 +220,9 @@ class _MobileBackGestureLayerState extends ConsumerState<MobileBackGestureLayer>
       final onBack = widget.onBack;
       if (onBack != null) {
         onBack();
-      } else {
-        ref.read(referenceShellProvider.notifier).navigateBack();
+      } else if (!ref.read(referenceShellProvider.notifier).navigateBack()) {
+        // Nothing of the system's to go back from: home's own, if open.
+        ref.read(homeBackProvider)?.call();
       }
     } else {
       _arm.reverse();

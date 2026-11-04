@@ -131,3 +131,62 @@ class HomeGridGeometry {
   int get hashCode =>
       Object.hash(columns, rows, tileSize, inset, orientation, gap);
 }
+
+/// Where the dock draws its apps: below home's pages, or along their right
+/// when the screen is sideways.
+///
+/// Its apps spread along it; with as many apps as the grid has columns,
+/// each sits under a column.
+@immutable
+class HomeDockGeometry {
+  const HomeDockGeometry({
+    required this.bounds,
+    required this.capacity,
+    this.gap = HomeGridLayout.gridGap,
+  });
+
+  /// The dock's plate, in the coordinates its user works in.
+  final Rect bounds;
+
+  /// How many apps it takes.
+  final int capacity;
+  final double gap;
+
+  static const double padding = 12;
+
+  /// The plate's thickness across its apps.
+  static const double thickness = HomeTileMetrics.icon + padding * 2;
+
+  /// The grid columns' inset inside the plate.
+  static const double inset = 10;
+
+  /// A sideways dock runs top to bottom.
+  bool get vertical => bounds.height > bounds.width;
+
+  double get _length => (vertical ? bounds.height : bounds.width) - inset * 2;
+
+  double _step(int count) => (_length + gap) / math.max(count, 1);
+
+  /// Icons shrink when a short dock holds many.
+  double _icon(int count) =>
+      math.min(HomeTileMetrics.icon, _step(count) - gap / 2);
+
+  /// The icon of the app at [position] of [count].
+  Rect iconRect(int position, int count) {
+    final along = inset - gap / 2 + _step(count) * (position + 0.5);
+    return Rect.fromCenter(
+      center: vertical
+          ? Offset(bounds.center.dx, bounds.top + along)
+          : Offset(bounds.left + along, bounds.center.dy),
+      width: _icon(count),
+      height: _icon(count),
+    );
+  }
+
+  /// The position among [count] places that [point] falls in.
+  int positionAt(Offset point, int count) {
+    final along = vertical ? point.dy - bounds.top : point.dx - bounds.left;
+    final place = ((along - inset + gap / 2) / _step(count)).floor();
+    return place.clamp(0, math.max(count - 1, 0));
+  }
+}

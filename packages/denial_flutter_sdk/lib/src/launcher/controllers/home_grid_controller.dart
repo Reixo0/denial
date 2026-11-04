@@ -44,20 +44,55 @@ final homeClockProvider = Provider<HomeClockInfo>((ref) {
 }, isAutoDispose: true);
 
 class HomeGridState {
-  HomeGridState({required List<HomeGridItem?> slots, this.page = 0})
-    : slots = List.unmodifiable(slots);
+  HomeGridState({
+    required List<HomeGridItem?> slots,
+    List<HomeGridItem> dock = const [],
+    Set<String> hidden = const {},
+    List<HomeGridItem> catalog = const [],
+    this.page = 0,
+  }) : slots = List.unmodifiable(slots),
+       dock = List.unmodifiable(dock),
+       hidden = Set.unmodifiable(hidden),
+       catalog = List.unmodifiable(catalog);
 
-  HomeGridState._({required this.slots, required this.page});
+  HomeGridState._({
+    required this.slots,
+    required this.dock,
+    required this.hidden,
+    required this.catalog,
+    required this.page,
+  });
 
   final List<HomeGridItem?> slots;
+
+  /// The apps in the dock below the pages, in order.
+  final List<HomeGridItem> dock;
+
+  /// The apps taken off home; the app drawer still lists them.
+  final Set<String> hidden;
+
+  /// Every installed app, on home or not.
+  final List<HomeGridItem> catalog;
   final int page;
 
-  /// Every application on the grid, folder contents included.
-  Iterable<HomeGridItem> get apps => HomeGridLayout.appsIn(slots);
+  /// Every application on home, folder contents and the dock included.
+  Iterable<HomeGridItem> get apps sync* {
+    yield* HomeGridLayout.appsIn(slots);
+    yield* dock;
+  }
 
-  HomeGridState copyWith({List<HomeGridItem?>? slots, int? page}) {
+  HomeGridState copyWith({
+    List<HomeGridItem?>? slots,
+    List<HomeGridItem>? dock,
+    Set<String>? hidden,
+    List<HomeGridItem>? catalog,
+    int? page,
+  }) {
     return HomeGridState._(
       slots: slots == null ? this.slots : List.unmodifiable(slots),
+      dock: dock == null ? this.dock : List.unmodifiable(dock),
+      hidden: hidden == null ? this.hidden : Set.unmodifiable(hidden),
+      catalog: catalog == null ? this.catalog : List.unmodifiable(catalog),
       page: page ?? this.page,
     );
   }
@@ -130,22 +165,37 @@ class HomeGridController extends AsyncNotifier<HomeGridState> {
       final savedLayout = orientation == null
           ? saved.unassigned
           : saved.layouts[orientation];
+      final catalog = HomeGridLayout.catalogFor(apps, localApps);
+      final dock = HomeGridLayout.dockForApps(apps, localApps, saved.dock);
+      final hidden = _installed(saved.hidden, catalog).difference(_idsOf(dock));
       final slots = HomeGridLayout.initialSlotsForApps(
         apps,
         localApps,
         savedLayout,
+        exclude: {..._idsOf(dock), ...hidden},
+      );
+      HomeGridState loaded() => HomeGridState(
+        slots: slots,
+        dock: dock,
+        hidden: hidden,
+        catalog: catalog,
       );
       if (!_isBuildActive(generation)) {
-        return HomeGridState(slots: slots);
+        return loaded();
       }
       _orientation = orientation;
       _layouts = {...saved.layouts};
       _lastDesktopRefresh = DateTime.now();
-      if (_savedLayoutNeedsRefresh(apps, localApps, savedLayout, slots)) {
-        _save(slots);
+      if (dock.length != saved.dock.length ||
+          hidden.length != saved.hidden.length ||
+          _savedLayoutNeedsRefresh(apps, localApps, savedLayout, slots, [
+            ...dock,
+            for (final id in hidden) ?_find(catalog, id),
+          ])) {
+        _save(slots, dock, hidden);
       }
       unawaited(_startDesktopRefreshTriggers(generation, appsRepository));
-      return HomeGridState(slots: slots);
+      return loaded();
     } on Object catch (error, stackTrace) {
       Error.throwWithStackTrace(error, stackTrace);
     }
@@ -192,7 +242,7 @@ class HomeGridController extends AsyncNotifier<HomeGridState> {
         return;
       }
 
-      final currentApps = _appsByGridId(current.apps);
+      final currentApps = _appsByGridId(current.catalog);
       final refreshedApps = _appsByGridId(apps.map(HomeGridItem.app));
 
       final addedIds = refreshedApps.keys
@@ -216,13 +266,28 @@ class HomeGridController extends AsyncNotifier<HomeGridState> {
       final localApps = ref
           .read(localFlutterApplicationRegistryProvider)
           .applications;
+      final catalog = HomeGridLayout.catalogFor(apps, localApps);
+      final dock = HomeGridLayout.dockForApps(
+        apps,
+        localApps,
+        current.dock.map((app) => app.id),
+      );
+      final hidden = _installed(current.hidden, catalog);
       final slots = HomeGridLayout.refreshSlotsForApps(
         current.slots,
         apps,
         localApps,
+        exclude: {..._idsOf(dock), ...hidden},
       );
-      state = AsyncData(current.copyWith(slots: slots));
-      _save(slots);
+      state = AsyncData(
+        current.copyWith(
+          slots: slots,
+          dock: dock,
+          hidden: hidden,
+          catalog: catalog,
+        ),
+      );
+      _save(slots, dock, hidden);
     } finally {
       if (_isBuildActive(generation)) {
         _desktopRefreshInFlight = false;
@@ -329,7 +394,7 @@ class HomeGridController extends AsyncNotifier<HomeGridState> {
     _orientation = orientation;
     if (shown == null) {
       // The slots are this orientation's layout from now on.
-      _save(current.slots);
+      _save(current.slots, current.dock, current.hidden);
       return;
     }
 
@@ -341,9 +406,10 @@ class HomeGridController extends AsyncNotifier<HomeGridState> {
             [for (final item in current.apps) ?item.app],
             ref.read(localFlutterApplicationRegistryProvider).applications,
             saved,
+            exclude: {..._idsOf(current.dock), ...current.hidden},
           );
     state = AsyncData(current.copyWith(slots: slots));
-    _save(slots);
+    _save(slots, current.dock, current.hidden);
   }
 
   void setPage(int page) {
@@ -471,24 +537,197 @@ class HomeGridController extends AsyncNotifier<HomeGridState> {
     _update((slots) => HomeGridLayout.renameFolder(slots, folderIndex, name));
   }
 
-  /// Applies one layout operation and saves its result; a null result is a
-  /// change that was not possible.
-  void _update(List<HomeGridItem?>? Function(List<HomeGridItem?> slots) edit) {
+  /// Moves the app at grid [fromIndex] into the dock at [position]; a full
+  /// dock of [capacity] trades it for the app there.
+  void moveToDock(int fromIndex, int position, int capacity) {
+    _updateWithDock(
+      (slots, dock) =>
+          HomeGridLayout.moveToDock(slots, dock, fromIndex, position, capacity),
+    );
+  }
+
+  void moveFromFolderToDock(
+    int folderIndex,
+    String appId,
+    int position,
+    int capacity,
+  ) {
+    _updateWithDock(
+      (slots, dock) => HomeGridLayout.moveFromFolderToDock(
+        slots,
+        dock,
+        folderIndex,
+        appId,
+        position,
+        capacity,
+      ),
+    );
+  }
+
+  void reorderDock(int from, int to) {
+    _updateWithDock((slots, dock) {
+      final next = HomeGridLayout.reorderDock(dock, from, to);
+      return next == null ? null : (slots: slots, dock: next);
+    });
+  }
+
+  void moveFromDock(int position, int toIndex) {
+    _updateWithDock(
+      (slots, dock) =>
+          HomeGridLayout.moveFromDock(slots, dock, position, toIndex),
+    );
+  }
+
+  /// Drops the dock's app at [position] on the app or folder at
+  /// [targetIndex]. A new folder is named [folderName].
+  void mergeFromDock(
+    int position,
+    int targetIndex, {
+    required String folderName,
+  }) {
+    _updateWithDock(
+      (slots, dock) => HomeGridLayout.mergeFromDock(
+        slots,
+        dock,
+        position,
+        targetIndex,
+        folderId: HomeGridLayout.newFolderId(slots),
+        folderName: folderName,
+      ),
+    );
+  }
+
+  /// Takes the app, or the folder and its apps, [id] off home. Its apps stay
+  /// in the app drawer.
+  void removeFromHome(String id) {
     final current = state.asData?.value;
     if (current == null) {
       return;
     }
-    final slots = edit(current.slots);
-    if (slots == null) {
+    final next = HomeGridLayout.removeFromHome(current.slots, current.dock, id);
+    if (next == null) {
       return;
     }
-    state = AsyncData(current.copyWith(slots: slots));
-    _save(slots);
+    final hidden = {...current.hidden, ...next.removed};
+    state = AsyncData(
+      current.copyWith(slots: next.slots, dock: next.dock, hidden: hidden),
+    );
+    _save(next.slots, next.dock, hidden);
   }
 
-  /// Saves [slots] as the shown orientation's layout, beside the others.
-  void _save(List<HomeGridItem?> slots) {
+  /// Puts the app [id], taken off home before, back on its first free cell
+  /// from [fromIndex] on.
+  void addToHome(String id, int fromIndex) {
+    final current = state.asData?.value;
+    final app = current == null ? null : _find(current.catalog, id);
+    if (current == null || app == null || !current.hidden.contains(id)) {
+      return;
+    }
+    final slots = HomeGridLayout.placeItemAfter(current.slots, fromIndex, app);
+    final hidden = {...current.hidden}..remove(id);
+    state = AsyncData(current.copyWith(slots: slots, hidden: hidden));
+    _save(slots, current.dock, hidden);
+  }
+
+  /// Puts the app [id], taken off home, on the free grid cell [index].
+  void addToHomeAt(String id, int index) {
+    _addHidden(id, (slots, dock, app) {
+      final placed = HomeGridLayout.placeItemAt(slots, index, app);
+      return identical(placed, slots) ? null : (slots: placed, dock: dock);
+    });
+  }
+
+  /// Puts the app [id], taken off home, in the dock at [position], when the
+  /// dock has room below [capacity].
+  void addToDock(String id, int position, int capacity) {
+    _addHidden(id, (slots, dock, app) {
+      if (dock.length >= capacity) return null;
+      return (
+        slots: slots,
+        dock: [...dock]..insert(position.clamp(0, dock.length), app),
+      );
+    });
+  }
+
+  /// Drops the app [id], taken off home, on the app or folder at
+  /// [targetIndex]. A new folder is named [folderName].
+  void addIntoFolder(String id, int targetIndex, {required String folderName}) {
+    _addHidden(id, (slots, dock, app) {
+      final next = HomeGridLayout.mergeFromDock(
+        slots,
+        [app],
+        0,
+        targetIndex,
+        folderId: HomeGridLayout.newFolderId(slots),
+        folderName: folderName,
+      );
+      return next == null ? null : (slots: next.slots, dock: dock);
+    });
+  }
+
+  void _addHidden(
+    String id,
+    ({List<HomeGridItem?> slots, List<HomeGridItem> dock})? Function(
+      List<HomeGridItem?> slots,
+      List<HomeGridItem> dock,
+      HomeGridItem app,
+    )
+    place,
+  ) {
+    final current = state.asData?.value;
+    final app = current == null ? null : _find(current.catalog, id);
+    if (current == null || app == null || !current.hidden.contains(id)) {
+      return;
+    }
+    final next = place(current.slots, current.dock, app);
+    if (next == null) {
+      return;
+    }
+    final hidden = {...current.hidden}..remove(id);
+    state = AsyncData(
+      current.copyWith(slots: next.slots, dock: next.dock, hidden: hidden),
+    );
+    _save(next.slots, next.dock, hidden);
+  }
+
+  /// Applies one layout operation and saves its result; a null result is a
+  /// change that was not possible.
+  void _update(List<HomeGridItem?>? Function(List<HomeGridItem?> slots) edit) {
+    _updateWithDock((slots, dock) {
+      final next = edit(slots);
+      return next == null ? null : (slots: next, dock: dock);
+    });
+  }
+
+  void _updateWithDock(
+    ({List<HomeGridItem?> slots, List<HomeGridItem> dock})? Function(
+      List<HomeGridItem?> slots,
+      List<HomeGridItem> dock,
+    )
+    edit,
+  ) {
+    final current = state.asData?.value;
+    if (current == null) {
+      return;
+    }
+    final next = edit(current.slots, current.dock);
+    if (next == null) {
+      return;
+    }
+    state = AsyncData(current.copyWith(slots: next.slots, dock: next.dock));
+    _save(next.slots, next.dock, current.hidden);
+  }
+
+  /// Saves [slots] as the shown orientation's layout, beside the others,
+  /// and the [dock] and [hidden] apps they share.
+  void _save(
+    List<HomeGridItem?> slots,
+    List<HomeGridItem> dock,
+    Set<String> hidden,
+  ) {
     final layout = _layoutOf(slots);
+    final dockIds = [for (final app in dock) app.id];
+    final hiddenIds = hidden.toList(growable: false);
     final orientation = _orientation;
     if (orientation != null) {
       _layouts[orientation] = layout;
@@ -498,12 +737,34 @@ class HomeGridController extends AsyncNotifier<HomeGridState> {
           .read(homeLayoutRepositoryProvider)
           .saveLayouts(
             orientation == null
-                ? HomeSavedLayouts(unassigned: layout)
-                : HomeSavedLayouts(layouts: {..._layouts}),
+                ? HomeSavedLayouts(
+                    unassigned: layout,
+                    dock: dockIds,
+                    hidden: hiddenIds,
+                  )
+                : HomeSavedLayouts(
+                    layouts: {..._layouts},
+                    dock: dockIds,
+                    hidden: hiddenIds,
+                  ),
           ),
     );
   }
 }
+
+HomeGridItem? _find(List<HomeGridItem> catalog, String id) =>
+    catalog.where((app) => app.id == id).firstOrNull;
+
+/// The apps of [ids] still installed.
+Set<String> _installed(Iterable<String> ids, List<HomeGridItem> catalog) {
+  final installed = {for (final app in catalog) app.id};
+  return {
+    for (final id in ids)
+      if (installed.contains(id)) id,
+  };
+}
+
+Set<String> _idsOf(List<HomeGridItem> dock) => {for (final app in dock) app.id};
 
 List<HomeLayoutSlot?> _layoutOf(List<HomeGridItem?> slots) => [
   for (final slot in slots) slot == null ? null : HomeLayoutSlot.of(slot),
@@ -544,12 +805,14 @@ bool _savedLayoutNeedsRefresh(
   Iterable<LocalFlutterApplication> localApps,
   List<HomeLayoutSlot?>? savedLayout,
   List<HomeGridItem?> slots,
+  List<HomeGridItem> dock,
 ) {
   if (savedLayout == null || savedLayout.length != slots.length) {
     return true;
   }
 
   final savedIds = <String>{
+    for (final app in dock) app.id,
     for (final slot in savedLayout) ...?slot?.children,
     for (final slot in savedLayout) ?slot?.id,
   };
