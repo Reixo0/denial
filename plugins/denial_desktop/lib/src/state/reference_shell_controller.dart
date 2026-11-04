@@ -155,6 +155,17 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
     _textInputStateSubscription = _bridge.textInputStates.listen((input) {
       if (isBuildGenerationActive(generation)) _handleTextInputState(input);
     });
+    listenSelf((previous, next) {
+      final window = _keyboardWindow;
+      if (window == null || next.primaryWindow?.objectId == window) return;
+      // Out of the app the keyboard stayed up for: it goes unless the app
+      // in front asks for it.
+      _keyboardWindow = null;
+      scheduleMicrotask(() {
+        if (!isBuildGenerationActive(generation)) return;
+        if (_lastTextInput?.inputPanelVisible != true) closeEdgePanel();
+      });
+    });
     ref.onDispose(() {
       _deck.presenting.removeListener(_deckPresentingChanged);
       _automaticSoftwareKeyboardCloseTimer?.cancel();
@@ -323,8 +334,14 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
   Timer? _automaticSoftwareKeyboardCloseTimer;
   StreamSubscription<DenialTextInputState>? _textInputStateSubscription;
 
+  /// The app window the keyboard opened for. Its editor going away, as when
+  /// a touch selects text, leaves the keyboard up for its edit bar; leaving
+  /// the app or dismissing the keyboard puts it away.
+  int? _keyboardWindow;
+
   void _resetBuildFields() {
     _lastTextInput = null;
+    _keyboardWindow = null;
     _edgePanelDismissalSerial = null;
     _automaticSoftwareKeyboardCloseTimer?.cancel();
     _automaticSoftwareKeyboardCloseTimer = null;
@@ -371,7 +388,16 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
       _automaticSoftwareKeyboardCloseTimer?.cancel();
       _automaticSoftwareKeyboardCloseTimer = null;
       openEdgePanel();
+      _keyboardWindow = state.primaryWindow?.objectId;
     } else {
+      final window = _keyboardWindow;
+      if (window != null &&
+          window == state.primaryWindow?.objectId &&
+          state.edgePanelVisible) {
+        _automaticSoftwareKeyboardCloseTimer?.cancel();
+        _automaticSoftwareKeyboardCloseTimer = null;
+        return;
+      }
       // Flutter retires the old TextInputClient just before registering the
       // next one during a field-to-field focus transfer. Preserve the panel
       // across that short protocol gap; a replacement editor cancels this
@@ -1404,6 +1430,7 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
   }
 
   void closeEdgePanel() {
+    _keyboardWindow = null;
     if (!state.edgePanelVisible &&
         state.edgePanelDrag == Offset.zero &&
         !state.edgePanelDragActive) {
