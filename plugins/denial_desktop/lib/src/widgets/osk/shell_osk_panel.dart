@@ -1685,83 +1685,83 @@ class _OskKeySpec {
 }
 
 const _qwertyTopRow = _OskRowData([
-    _OskKeySpec.text('q'),
-    _OskKeySpec.text('w'),
-    _OskKeySpec.text('e'),
-    _OskKeySpec.text('r'),
-    _OskKeySpec.text('t'),
-    _OskKeySpec.text('y'),
-    _OskKeySpec.text('u'),
-    _OskKeySpec.text('i'),
-    _OskKeySpec.text('o'),
-    _OskKeySpec.text('p'),
-  ]);
+  _OskKeySpec.text('q'),
+  _OskKeySpec.text('w'),
+  _OskKeySpec.text('e'),
+  _OskKeySpec.text('r'),
+  _OskKeySpec.text('t'),
+  _OskKeySpec.text('y'),
+  _OskKeySpec.text('u'),
+  _OskKeySpec.text('i'),
+  _OskKeySpec.text('o'),
+  _OskKeySpec.text('p'),
+]);
 
 const _qwertyHomeRow = _OskRowData([
-    _OskKeySpec.text('a'),
-    _OskKeySpec.text('s'),
-    _OskKeySpec.text('d'),
-    _OskKeySpec.text('f'),
-    _OskKeySpec.text('g'),
-    _OskKeySpec.text('h'),
-    _OskKeySpec.text('j'),
-    _OskKeySpec.text('k'),
-    _OskKeySpec.text('l'),
-  ], sideInset: 28);
+  _OskKeySpec.text('a'),
+  _OskKeySpec.text('s'),
+  _OskKeySpec.text('d'),
+  _OskKeySpec.text('f'),
+  _OskKeySpec.text('g'),
+  _OskKeySpec.text('h'),
+  _OskKeySpec.text('j'),
+  _OskKeySpec.text('k'),
+  _OskKeySpec.text('l'),
+], sideInset: 28);
 
 const _spanishHomeRow = _OskRowData([
-    _OskKeySpec.text('a'),
-    _OskKeySpec.text('s'),
-    _OskKeySpec.text('d'),
-    _OskKeySpec.text('f'),
-    _OskKeySpec.text('g'),
-    _OskKeySpec.text('h'),
-    _OskKeySpec.text('j'),
-    _OskKeySpec.text('k'),
-    _OskKeySpec.text('l'),
-    _OskKeySpec.text('ñ'),
-  ]);
+  _OskKeySpec.text('a'),
+  _OskKeySpec.text('s'),
+  _OskKeySpec.text('d'),
+  _OskKeySpec.text('f'),
+  _OskKeySpec.text('g'),
+  _OskKeySpec.text('h'),
+  _OskKeySpec.text('j'),
+  _OskKeySpec.text('k'),
+  _OskKeySpec.text('l'),
+  _OskKeySpec.text('ñ'),
+]);
 
 const _qwertyBottomRow = _OskRowData([
-    _OskKeySpec.control(
-      _OskControl.shift,
-      icon: Icons.keyboard_arrow_up_rounded,
-      flex: 15,
-    ),
-    _OskKeySpec.text('z'),
-    _OskKeySpec.text('x'),
-    _OskKeySpec.text('c'),
-    _OskKeySpec.text('v'),
-    _OskKeySpec.text('b'),
-    _OskKeySpec.text('n'),
-    _OskKeySpec.text('m'),
-    _OskKeySpec.control(
-      _OskControl.backspace,
-      icon: Icons.backspace_rounded,
-      flex: 15,
-    ),
-  ]);
+  _OskKeySpec.control(
+    _OskControl.shift,
+    icon: Icons.keyboard_arrow_up_rounded,
+    flex: 15,
+  ),
+  _OskKeySpec.text('z'),
+  _OskKeySpec.text('x'),
+  _OskKeySpec.text('c'),
+  _OskKeySpec.text('v'),
+  _OskKeySpec.text('b'),
+  _OskKeySpec.text('n'),
+  _OskKeySpec.text('m'),
+  _OskKeySpec.control(
+    _OskControl.backspace,
+    icon: Icons.backspace_rounded,
+    flex: 15,
+  ),
+]);
 
 const _letterSpaceRow = _OskRowData([
-    _OskKeySpec.control(_OskControl.symbols, flex: 17),
-    _OskKeySpec.control(
-      _OskControl.pcKeys,
-      icon: Icons.keyboard_rounded,
-      flex: 10,
-    ),
-    _OskKeySpec.text(',', flex: 10),
-    _OskKeySpec.control(
-      _OskControl.space,
-      icon: Icons.space_bar_rounded,
-      flex: 36,
-    ),
-    _OskKeySpec.text('.', flex: 10),
-    _OskKeySpec.control(
-      _OskControl.enter,
-      icon: Icons.keyboard_return_rounded,
-      flex: 17,
-    ),
-  ]);
+  _OskKeySpec.control(_OskControl.symbols, flex: 17),
+  _OskKeySpec.control(
+    _OskControl.pcKeys,
+    icon: Icons.keyboard_rounded,
+    flex: 10,
+  ),
+  _OskKeySpec.text(',', flex: 10),
+  _OskKeySpec.control(
+    _OskControl.space,
+    icon: Icons.space_bar_rounded,
+    flex: 36,
+  ),
+  _OskKeySpec.text('.', flex: 10),
+  _OskKeySpec.control(
+    _OskControl.enter,
+    icon: Icons.keyboard_return_rounded,
+    flex: 17,
+  ),
+]);
 
 const _letterRows = [
   _qwertyTopRow,
@@ -1789,10 +1789,10 @@ const _pcKeyRow = _OskRowData([
   _OskKeySpec.pc('End', value: 'End'),
   _OskKeySpec.pc('Prior', value: 'PgUp'),
   _OskKeySpec.pc('Next', value: 'PgDn'),
-  _OskKeySpec.pc('Left', value: '←'),
+  _OskKeySpec.pc('Left', icon: Icons.keyboard_arrow_left_rounded),
   _OskKeySpec.pc('Up', icon: Icons.keyboard_arrow_up_rounded),
   _OskKeySpec.pc('Down', icon: Icons.keyboard_arrow_down_rounded),
-  _OskKeySpec.pc('Right', value: '→'),
+  _OskKeySpec.pc('Right', icon: Icons.keyboard_arrow_right_rounded),
 ]);
 
 const _numberRows = [
@@ -1836,29 +1836,7 @@ const _numberRows = [
       flex: 15,
     ),
   ]),
-  _OskRowData([
-    _OskKeySpec.control(_OskControl.letters, flex: 17),
-    _OskKeySpec.control(
-      _OskControl.arrowUp,
-      icon: Icons.keyboard_arrow_up_rounded,
-      flex: 10,
-    ),
-    _OskKeySpec.control(
-      _OskControl.space,
-      icon: Icons.space_bar_rounded,
-      flex: 46,
-    ),
-    _OskKeySpec.control(
-      _OskControl.arrowDown,
-      icon: Icons.keyboard_arrow_down_rounded,
-      flex: 10,
-    ),
-    _OskKeySpec.control(
-      _OskControl.enter,
-      icon: Icons.keyboard_return_rounded,
-      flex: 17,
-    ),
-  ]),
+  _symbolSpaceRow,
 ];
 
 const _extraSymbolRows = [
@@ -1886,19 +1864,28 @@ const _extraSymbolRows = [
       flex: 17,
     ),
   ]),
-  _OskRowData([
-    _OskKeySpec.control(_OskControl.letters, flex: 17),
-    _OskKeySpec.text(',', flex: 10),
-    _OskKeySpec.control(
-      _OskControl.space,
-      icon: Icons.space_bar_rounded,
-      flex: 46,
-    ),
-    _OskKeySpec.text('.', flex: 10),
-    _OskKeySpec.control(
-      _OskControl.enter,
-      icon: Icons.keyboard_return_rounded,
-      flex: 17,
-    ),
-  ]),
+  _symbolSpaceRow,
 ];
+
+/// The letters' space row, with the way back to them: the PC keys toggle
+/// stays where it is.
+const _symbolSpaceRow = _OskRowData([
+  _OskKeySpec.control(_OskControl.letters, flex: 17),
+  _OskKeySpec.control(
+    _OskControl.pcKeys,
+    icon: Icons.keyboard_rounded,
+    flex: 10,
+  ),
+  _OskKeySpec.text(',', flex: 10),
+  _OskKeySpec.control(
+    _OskControl.space,
+    icon: Icons.space_bar_rounded,
+    flex: 36,
+  ),
+  _OskKeySpec.text('.', flex: 10),
+  _OskKeySpec.control(
+    _OskControl.enter,
+    icon: Icons.keyboard_return_rounded,
+    flex: 17,
+  ),
+]);
