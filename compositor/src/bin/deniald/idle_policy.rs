@@ -552,7 +552,8 @@ impl IdlePolicy {
         }
         if phone.dpms_triggered
             || !powered
-            || timeout.is_none_or(|timeout| now.saturating_duration_since(phone.last_touch) < timeout)
+            || timeout
+                .is_none_or(|timeout| now.saturating_duration_since(phone.last_touch) < timeout)
         {
             return None;
         }

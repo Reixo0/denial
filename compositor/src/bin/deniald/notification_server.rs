@@ -513,7 +513,10 @@ fn run_worker(
                         None,
                     );
                 } else {
-                    warn!(notification_id, "ignored a locked action on a non-call notification");
+                    warn!(
+                        notification_id,
+                        "ignored a locked action on a non-call notification"
+                    );
                 }
             }
             Ok(Command::InvokeAction {

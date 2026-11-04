@@ -841,7 +841,11 @@ fn power_button_beside_a_desk_toggles_only_the_phone_and_never_locks() {
     );
     assert!(!off.lock);
     // Typing at the desk does not light the phone again.
-    assert!(policy.note_activity(now + Duration::from_secs(1)).is_empty());
+    assert!(
+        policy
+            .note_activity(now + Duration::from_secs(1))
+            .is_empty()
+    );
     let on = policy.toggle_now([(output(1), false), (output(2), true)], now);
     assert_eq!(
         on.power_requests,

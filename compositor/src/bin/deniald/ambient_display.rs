@@ -378,10 +378,7 @@ fn next_minute(now: Instant) -> Instant {
 
 /// The lit output whose power-off the always-on display takes over, and
 /// whether a desk shares the session with it.
-fn power_off_to_hold(
-    scanouts: &[Scanout],
-    events: &mut RuntimeState,
-) -> Option<(OutputId, bool)> {
+fn power_off_to_hold(scanouts: &[Scanout], events: &mut RuntimeState) -> Option<(OutputId, bool)> {
     let frontend = events.wayland.as_ref()?;
     if !frontend.mobile_shell() {
         return None;

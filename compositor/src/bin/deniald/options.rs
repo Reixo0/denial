@@ -1262,7 +1262,13 @@ fn render_persisted_output_config(
     // entries an earlier version wrote for its connector.
     let connected = sorted
         .keys()
-        .flat_map(|name| [*name, name.split_once('@').map_or(*name, |(connector, _)| connector)])
+        .flat_map(|name| {
+            [
+                *name,
+                name.split_once('@')
+                    .map_or(*name, |(connector, _)| connector),
+            ]
+        })
         .collect::<BTreeSet<_>>();
 
     let mut lines = original
