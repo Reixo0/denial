@@ -389,6 +389,11 @@ class _EdgePanelContent extends ConsumerWidget {
         (settings) => settings.sound.keyboardVibration,
       ),
     );
+    final terminal = ref.watch(
+      referenceShellProvider.select(
+        (state) => _isTerminal(state.primaryWindow?.appId),
+      ),
+    );
     final theme = ShellTheme.of(context);
     // The keys sit beside the clipped glass, not in it: key popups rise
     // above the panel's top edge.
@@ -431,6 +436,7 @@ class _EdgePanelContent extends ConsumerWidget {
               layout: osk.layout,
               pcKeys: osk.pcKeys,
               autocorrect: osk.autocorrect,
+              terminal: terminal,
               onPcKeysChanged: (value) => ref
                   .read(shellSettingsProvider.notifier)
                   .setKeyboardPcKeys(value),
@@ -467,3 +473,28 @@ class _EdgePanelContent extends ConsumerWidget {
     }
   }
 }
+
+/// Terminals copy and paste with Ctrl+Shift: Ctrl+C there stops a program.
+const _terminalAppIds = {
+  'kitty',
+  'foot',
+  'footclient',
+  'alacritty',
+  'org.wezfurlong.wezterm',
+  'com.mitchellh.ghostty',
+  'org.gnome.console',
+  'org.gnome.terminal',
+  'org.gnome.ptyxis',
+  'org.kde.konsole',
+  'konsole',
+  'xfce4-terminal',
+  'io.elementary.terminal',
+  'com.raggesilver.blackbox',
+  'xterm',
+  'urxvt',
+  'st',
+  'st-256color',
+};
+
+bool _isTerminal(String? appId) =>
+    appId != null && _terminalAppIds.contains(appId.toLowerCase());

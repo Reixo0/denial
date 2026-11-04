@@ -112,6 +112,7 @@ class ShellOskPanel extends StatefulWidget {
     this.pcKeys = false,
     this.onPcKeysChanged,
     this.autocorrect = true,
+    this.terminal = false,
   });
 
   final ValueChanged<ShellOskKeyIntent>? onKey;
@@ -128,6 +129,10 @@ class ShellOskPanel extends StatefulWidget {
 
   /// Whether a misspelt word is replaced as a space or a mark follows it.
   final bool autocorrect;
+
+  /// The focused app is a terminal: copy and paste take Shift too, and it
+  /// has no Select all or Cut.
+  final bool terminal;
 
   /// A finger landed on a key.
   final VoidCallback? onKeyDown;
@@ -838,6 +843,15 @@ class _ShellOskPanelState extends State<ShellOskPanel> {
     }
   }
 
+  /// The app's own shortcut for [edit]: Ctrl with its letter, and Shift as
+  /// well in a terminal, where Ctrl+C stops a program.
+  void _sendEdit(_OskEdit edit) {
+    widget.onKeyDown?.call();
+    _sendCursorKey(
+      ShellOskKeyIntent.key(edit.letter, ctrl: true, shift: widget.terminal),
+    );
+  }
+
   void _tapShift(Duration? time) {
     final last = _lastShiftDown;
     final quick = time != null && last != null && time - last < _shiftDoubleTap;
@@ -1013,8 +1027,23 @@ class _ShellOskPanelState extends State<ShellOskPanel> {
               height: stripHeight,
               child: ValueListenableBuilder<List<String>>(
                 valueListenable: suggestions,
-                builder: (context, words, _) =>
-                    _SuggestionStrip(words: words, onSelected: _pickSuggestion),
+                builder: (context, words, _) => AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  switchInCurve: Curves.easeOut,
+                  switchOutCurve: Curves.easeIn,
+                  child: words.isEmpty
+                      // No word to suggest for: the editing shortcuts instead.
+                      ? _EditStrip(
+                          key: ValueKey(('edit', widget.terminal)),
+                          terminal: widget.terminal,
+                          onEdit: _sendEdit,
+                        )
+                      : _SuggestionStrip(
+                          key: const ValueKey('words'),
+                          words: words,
+                          onSelected: _pickSuggestion,
+                        ),
+                ),
               ),
             ),
             keys,
@@ -1463,9 +1492,177 @@ class _KeyPopup extends StatelessWidget {
   }
 }
 
+enum _OskEdit {
+  selectAll('a', Icons.select_all_rounded),
+  cut('x', Icons.content_cut_rounded),
+  copy('c', Icons.content_copy_rounded),
+  paste('v', Icons.content_paste_rounded);
+
+  const _OskEdit(this.letter, this.icon);
+
+  /// The letter Ctrl takes for it.
+  final String letter;
+  final IconData icon;
+
+  String get label => switch (this) {
+    selectAll => 'Select all',
+    cut => 'Cut',
+    copy => 'Copy',
+    paste => 'Paste',
+  };
+}
+
+/// Select all, Cut, Copy and Paste, where suggestions show while a word is
+/// typed. A terminal gets Copy and Paste.
+class _EditStrip extends StatelessWidget {
+  const _EditStrip({super.key, required this.terminal, required this.onEdit});
+
+  final bool terminal;
+  final ValueChanged<_OskEdit> onEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    final edits = terminal
+        ? const [_OskEdit.copy, _OskEdit.paste]
+        : _OskEdit.values;
+    final color = context.shellColors.panelText;
+    final divider = SizedBox(
+      width: 1,
+      height: 26,
+      child: ColoredBox(color: context.shellColors.hairline),
+    );
+    return Row(
+      children: [
+        for (var index = 0; index < edits.length; index++) ...[
+          if (index > 0) divider,
+          Expanded(
+            child: _EditButton(
+              edit: edits[index],
+              color: color,
+              onTap: () => onEdit(edits[index]),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// One edit shortcut. A press dips it and lights a pill behind it, so a
+/// tap that shows nothing in the app still answers.
+class _EditButton extends StatefulWidget {
+  const _EditButton({
+    required this.edit,
+    required this.color,
+    required this.onTap,
+  });
+
+  final _OskEdit edit;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  State<_EditButton> createState() => _EditButtonState();
+}
+
+class _EditButtonState extends State<_EditButton> {
+  /// A quick tap still shows its dip for this long.
+  static const Duration _minimumPress = Duration(milliseconds: 110);
+
+  bool _pressed = false;
+  final _held = Stopwatch();
+  Timer? _release;
+
+  @override
+  void dispose() {
+    _release?.cancel();
+    super.dispose();
+  }
+
+  // The finger itself, not the tap recognizer, which reports a quick tap's
+  // press only as it ends.
+  void _down(PointerDownEvent _) {
+    _release?.cancel();
+    _held
+      ..reset()
+      ..start();
+    if (!_pressed) setState(() => _pressed = true);
+  }
+
+  void _up(PointerEvent _) {
+    final left = _minimumPress - _held.elapsed;
+    _release?.cancel();
+    _release = Timer(left.isNegative ? Duration.zero : left, () {
+      if (mounted) setState(() => _pressed = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final edit = widget.edit;
+    return Semantics(
+      button: true,
+      label: edit.label,
+      excludeSemantics: true,
+      child: Listener(
+        onPointerDown: _down,
+        onPointerUp: _up,
+        onPointerCancel: _up,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
+            child: AnimatedContainer(
+              duration: Duration(milliseconds: _pressed ? 60 : 220),
+              curve: Curves.easeOut,
+              decoration: BoxDecoration(
+                color: widget.color.withValues(alpha: _pressed ? 0.14 : 0),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: AnimatedScale(
+                scale: _pressed ? 0.9 : 1,
+                duration: Duration(milliseconds: _pressed ? 80 : 260),
+                curve: _pressed ? Curves.easeOut : Curves.easeOutBack,
+                child: Center(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(edit.icon, size: 20, color: widget.color),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          edit.label,
+                          maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.ellipsis,
+                          style: ShellText.cardTitle.copyWith(
+                            color: widget.color,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w500,
+                            height: 1,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Three suggestions, the one a space commits in the middle.
 class _SuggestionStrip extends StatelessWidget {
-  const _SuggestionStrip({required this.words, required this.onSelected});
+  const _SuggestionStrip({
+    super.key,
+    required this.words,
+    required this.onSelected,
+  });
 
   final List<String> words;
   final ValueChanged<String>? onSelected;
