@@ -27,6 +27,7 @@ import '../widgets/input_layout_publisher.dart';
 import '../widgets/mobile_screenshot_flash.dart';
 import '../widgets/mobile_volume_hud.dart';
 import '../widgets/low_battery_notification_binding.dart';
+import '../widgets/rgb_lights_binding.dart';
 
 import 'package:denial_flutter_sdk/rendering.dart';
 
@@ -196,9 +197,11 @@ class DenialShell extends ConsumerWidget {
           locale: presentation.locale,
           twentyFourHourClock: presentation.twentyFourHourClock,
           child: LowBatteryNotificationBinding(
-            child: _ShellEnvironment(
-              profile: effectivePresentation,
-              child: DesktopBenchmarkBinding(child: content),
+            child: RgbLightsBinding(
+              child: _ShellEnvironment(
+                profile: effectivePresentation,
+                child: DesktopBenchmarkBinding(child: content),
+              ),
             ),
           ),
         ),

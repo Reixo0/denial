@@ -95,5 +95,12 @@ export 'src/settings/shell_settings.dart'
         scrollingLayoutWheelSpeedDefault,
         scrollingLayoutWheelSpeedMaximum,
         scrollingLayoutWheelSpeedMinimum;
+export 'src/settings/lights/rgb_lights.dart'
+    show
+        RgbLightEffect,
+        RgbLightSetting,
+        RgbLights,
+        RgbLightsSettings,
+        rgbLightsProvider;
 export 'src/settings/rotation_lock.dart'
     show RotationLockController, RotationLockState, rotationLockProvider;
