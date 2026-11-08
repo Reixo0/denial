@@ -223,7 +223,82 @@ class SignalGlyph extends StatelessWidget {
   }
 }
 
-/// The compact status cluster (signal · wifi · battery) shared by the status
+/// Marks while an app uses the camera, the microphone or the location: a
+/// green pill for the camera and microphone, the location pin in the status
+/// color. Empty while nothing is in use.
+class PrivacyUsageMarks extends ConsumerWidget {
+  const PrivacyUsageMarks({super.key, this.color, this.scale = 1});
+
+  final Color? color;
+  final double scale;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final usage = ref.watch(privacyUsageProvider);
+    if (!usage.any) return const SizedBox.shrink();
+    final foreground = color ?? context.shellColors.textPrimary;
+    final l10n = context.l10n;
+    String label(String text, List<String> apps) =>
+        apps.isEmpty ? text : '$text: ${apps.join(', ')}';
+    final media = usage.camera || usage.microphone;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (media)
+          Semantics(
+            label: [
+              if (usage.camera)
+                label(l10n.privacyCameraInUse, usage.cameraApps),
+              if (usage.microphone)
+                label(l10n.privacyMicrophoneInUse, usage.microphoneApps),
+            ].join('. '),
+            child: Container(
+              padding: EdgeInsets.symmetric(
+                horizontal: 5 * scale,
+                vertical: 2 * scale,
+              ),
+              decoration: BoxDecoration(
+                color: ShellPrivacyColors.inUse,
+                borderRadius: BorderRadius.circular(9 * scale),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (usage.camera)
+                    Icon(
+                      Icons.videocam_rounded,
+                      size: 12 * scale,
+                      color: ShellPrivacyColors.onInUse,
+                    ),
+                  if (usage.camera && usage.microphone)
+                    SizedBox(width: 2 * scale),
+                  if (usage.microphone)
+                    Icon(
+                      Icons.mic_rounded,
+                      size: 12 * scale,
+                      color: ShellPrivacyColors.onInUse,
+                    ),
+                ],
+              ),
+            ),
+          ),
+        if (media && usage.location) SizedBox(width: 6 * scale),
+        if (usage.location)
+          Semantics(
+            label: label(l10n.privacyLocationInUse, usage.locationApps),
+            child: Icon(
+              Icons.location_on_rounded,
+              size: 13 * scale,
+              color: foreground,
+            ),
+          ),
+        SizedBox(width: 10 * scale),
+      ],
+    );
+  }
+}
+
+/// The compact status cluster (privacy · signal · wifi · battery) shared by the status
 /// bar and the shade header.
 class StatusCluster extends StatelessWidget {
   const StatusCluster({
@@ -242,6 +317,7 @@ class StatusCluster extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        PrivacyUsageMarks(color: color, scale: scale),
         MobileConnectivityMarks(color: color, scale: scale),
         SizedBox(width: 12 * scale),
         BatteryMark(
@@ -266,6 +342,7 @@ class StatusIconCluster extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        PrivacyUsageMarks(color: color),
         MobileConnectivityMarks(color: color),
         const SizedBox(width: 12),
         BatteryIconMark(status: battery, scale: 1.18, color: color),

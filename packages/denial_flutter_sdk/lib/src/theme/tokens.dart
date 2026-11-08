@@ -45,6 +45,12 @@ abstract final class ShellTelemetryColors {
   static const Color nominal = Color(0xff8ee6c1);
 }
 
+/// The status bar's mark while an app uses the camera or the microphone.
+abstract final class ShellPrivacyColors {
+  static const Color inUse = Color(0xff3ddc84);
+  static const Color onInUse = Color(0xff0b2a17);
+}
+
 /// Default opacity for the shell's frosted surfaces.
 abstract final class ShellOpacity {
   static const double panel = 0.75;

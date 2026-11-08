@@ -1573,5 +1573,11 @@
   "colorPresetNight": "夜色",
   "colorPresetMono": "黑白",
   "colorTuningPresets": "预设",
-  "moveToMonitor": "移到显示器"
+  "moveToMonitor": "移到显示器",
+  "privacyMicrophoneInUse": "麦克风正在使用",
+  "@privacyMicrophoneInUse": {"description": "Status bar indicator, read by screen readers: an app is recording from the microphone."},
+  "privacyCameraInUse": "相机正在使用",
+  "@privacyCameraInUse": {"description": "Status bar indicator, read by screen readers: an app is using the camera."},
+  "privacyLocationInUse": "位置信息正在使用",
+  "@privacyLocationInUse": {"description": "Status bar indicator, read by screen readers: an app is getting the phone's location."}
 }

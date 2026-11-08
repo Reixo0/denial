@@ -9381,6 +9381,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Move to monitor'**
   String get moveToMonitor;
+
+  /// Status bar indicator, read by screen readers: an app is recording from the microphone.
+  ///
+  /// In en, this message translates to:
+  /// **'Microphone in use'**
+  String get privacyMicrophoneInUse;
+
+  /// Status bar indicator, read by screen readers: an app is using the camera.
+  ///
+  /// In en, this message translates to:
+  /// **'Camera in use'**
+  String get privacyCameraInUse;
+
+  /// Status bar indicator, read by screen readers: an app is getting the phone's location.
+  ///
+  /// In en, this message translates to:
+  /// **'Location in use'**
+  String get privacyLocationInUse;
 }
 
 class _AppLocalizationsDelegate

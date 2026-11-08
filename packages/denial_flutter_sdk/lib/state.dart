@@ -78,6 +78,8 @@ export 'src/state/output_configuration.dart'
         OutputConfigurationController,
         OutputConfigurationState,
         outputConfigurationProvider;
+export 'src/state/privacy_usage.dart'
+    show PrivacyUsage, PrivacyUsageController, privacyUsageProvider;
 export 'src/state/screen_recording.dart'
     show
         ScreenRecordingController,

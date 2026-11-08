@@ -5009,4 +5009,13 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get moveToMonitor => '移到显示器';
+
+  @override
+  String get privacyMicrophoneInUse => '麦克风正在使用';
+
+  @override
+  String get privacyCameraInUse => '相机正在使用';
+
+  @override
+  String get privacyLocationInUse => '位置信息正在使用';
 }

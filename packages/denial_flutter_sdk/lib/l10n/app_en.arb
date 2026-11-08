@@ -6943,5 +6943,11 @@
   "colorTuningPresets": "Presets",
   "@colorTuningPresets": {"description": "Color tuning: shows the built-in looks."},
   "moveToMonitor": "Move to monitor",
-  "@moveToMonitor": {"description": "Button on a phone recents card: moves the app to the external monitor."}
+  "@moveToMonitor": {"description": "Button on a phone recents card: moves the app to the external monitor."},
+  "privacyMicrophoneInUse": "Microphone in use",
+  "@privacyMicrophoneInUse": {"description": "Status bar indicator, read by screen readers: an app is recording from the microphone."},
+  "privacyCameraInUse": "Camera in use",
+  "@privacyCameraInUse": {"description": "Status bar indicator, read by screen readers: an app is using the camera."},
+  "privacyLocationInUse": "Location in use",
+  "@privacyLocationInUse": {"description": "Status bar indicator, read by screen readers: an app is getting the phone's location."}
 }

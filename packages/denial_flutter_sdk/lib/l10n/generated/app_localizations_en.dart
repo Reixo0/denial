@@ -5264,4 +5264,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get moveToMonitor => 'Move to monitor';
+
+  @override
+  String get privacyMicrophoneInUse => 'Microphone in use';
+
+  @override
+  String get privacyCameraInUse => 'Camera in use';
+
+  @override
+  String get privacyLocationInUse => 'Location in use';
 }

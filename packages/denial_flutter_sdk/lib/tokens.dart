@@ -3,6 +3,7 @@ export 'src/theme/tokens.dart'
         ShellBrandColors,
         ShellMediaColors,
         ShellOpacity,
+        ShellPrivacyColors,
         ShellRadii,
         ShellRoundness,
         ShellTelemetryColors,
