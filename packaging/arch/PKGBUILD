@@ -60,6 +60,7 @@ backup=(
   'etc/denial/outputs.conf'
   'etc/denial/session.conf'
   'etc/xdg/xdg-desktop-portal-wlr/Denial'
+  'etc/geoclue/conf.d/90-denial.conf'
 )
 options=('!strip' '!debug')
 source=(
@@ -75,6 +76,7 @@ source=(
   'outputs.conf'
   'session.conf'
   'xdg-desktop-portal-wlr-Denial'
+  'geoclue-denial.conf'
 )
 sha256sums=(
   'ee7f248d8fed9cad0df9c931087600fa0ded75eb7082c351593ef97265a589ef'
@@ -82,13 +84,14 @@ sha256sums=(
   '57c146e3579dd87e12c332a180cca32c17602c823fcd39767a7c737f2688fc71'
   'b4fa50a715fdf36737a72241596c307534cb8665d42b8a947b28df54ab04a0b1'
   'f8acf498ad592dcbf1ee31955264b068c27846f99cded6055a6b64aaf7f4fe07'
-  'e0b01affe089a35821475cba9f8e2d982e0abbeafcdfe320fa43411d77c82390'
+  '22b63be47906afdc5998d1709c963ce6513bbb895a50c9e34e7ee3fba6a636f1'
   'ccc136decb96a6d0ef58e0c53827cf39ca6a7d7b810fa0be4196e5db7ade36e3'
   '81d87c497aa4b4c47d2104d3f2be34eac482655a3addfba686a7d9f3e5fe341c'
   '4a60d3ff767caf9d84c1a35b0d76d04e9e135cbabc384d1daac3f358398760de'
   '7b7e463f4156ded01e5dde1cefd288c0798cb06299e79aba29732fbdbd743524'
   '920bd9b698a108d0f07ec6d00a2fc36d4d91853eab81ecfc213807533c4ca916'
   'c555e40d258c9875ba70266084bd373983534abf769be872398f25a60462052f'
+  'ab9b00af58ba334a0c98cadd52c7ba6560fae735a2cd8c45f870dac9a3b03eea'
 )
 
 package() {
@@ -165,6 +168,11 @@ package() {
     "$pkgdir/usr/lib/systemd/user/denial-session.target"
   install -Dm644 "$srcdir/denial-portal.service" \
     "$pkgdir/usr/lib/systemd/user/denial-portal.service"
+  install -dm755 "$pkgdir/usr/lib/systemd/user/denial-session.target.wants"
+  ln -s ../denial-portal.service \
+    "$pkgdir/usr/lib/systemd/user/denial-session.target.wants/denial-portal.service"
+  install -Dm644 "$srcdir/geoclue-denial.conf" \
+    "$pkgdir/etc/geoclue/conf.d/90-denial.conf"
   install -Dm755 "$srcdir/denial-suspend-mode" \
     "$pkgdir/usr/lib/systemd/system-sleep/denial-suspend-mode"
   install -Dm755 "$srcdir/denial-suspend-mode" \

@@ -2,6 +2,7 @@
 #![deny(clippy::undocumented_unsafe_blocks)]
 
 mod access;
+mod geoclue;
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -142,8 +143,22 @@ fn main() -> Result<(), Box<dyn Error>> {
                 cache: Arc::clone(&cache),
             },
         )?
-        .serve_at(OBJECT_PATH, access::AccessInterface { bundle })?
+        .serve_at(
+            OBJECT_PATH,
+            access::AccessInterface {
+                bundle: bundle.clone(),
+            },
+        )?
         .build()?;
+    // Location for apps that ask geoclue directly. Without geoclue on the
+    // system the rest of the backend still works.
+    thread::Builder::new()
+        .name("geoclue-agent".to_owned())
+        .spawn(move || {
+            if let Err(error) = geoclue::run(bundle) {
+                tracing::warn!(%error, "no geoclue agent");
+            }
+        })?;
     info!(
         service = SERVICE_NAME,
         revision = initial.revision,

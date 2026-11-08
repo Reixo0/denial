@@ -10,3 +10,8 @@ BusName=org.freedesktop.impl.portal.desktop.denial
 ExecStart=/usr/bin/denial-portal
 Restart=on-failure
 RestartSec=250ms
+
+# Started with the session, not only on first use: its geoclue agent has to
+# be registered before an app asks for location.
+[Install]
+WantedBy=denial-session.target

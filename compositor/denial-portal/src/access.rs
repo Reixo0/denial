@@ -31,7 +31,7 @@ use tracing::{info, warn};
 use zbus::object_server::ObjectServer;
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 
-const SCHEMA: u32 = 1;
+pub(crate) const SCHEMA: u32 = 1;
 const MAX_MESSAGE_BYTES: usize = 16_384;
 /// The dialog connects within moments of starting. The bound only ends a
 /// request whose dialog never came up.
@@ -181,7 +181,7 @@ impl RequestInterface {
     }
 }
 
-enum Outcome {
+pub(crate) enum Outcome {
     Answered {
         granted: bool,
         selected: HashMap<String, String>,
@@ -191,7 +191,7 @@ enum Outcome {
 }
 
 /// Runs one dialog to its answer. Blocks; called on a worker thread.
-fn ask(
+pub(crate) fn ask(
     bundle: &DialogBundle,
     request: &Json,
     close_requested: &async_channel::Receiver<()>,
