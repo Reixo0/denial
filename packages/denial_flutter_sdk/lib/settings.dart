@@ -98,9 +98,12 @@ export 'src/settings/shell_settings.dart'
 export 'src/settings/lights/rgb_lights.dart'
     show
         RgbLightEffect,
+        RgbLightEvent,
         RgbLightSetting,
         RgbLights,
         RgbLightsSettings,
         rgbLightsProvider;
+export 'src/settings/lights/rgb_light_signals.dart'
+    show RgbLightSignals, rgbLightSignalsProvider;
 export 'src/settings/rotation_lock.dart'
     show RotationLockController, RotationLockState, rotationLockProvider;

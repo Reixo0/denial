@@ -25,6 +25,8 @@ class RgbLightSetting {
     this.brightness = 1,
     this.effect = RgbLightEffect.solid,
     this.speed = 0.5,
+    this.groups,
+    this.seconds = 30,
   });
 
   final bool on;
@@ -39,6 +41,39 @@ class RgbLightSetting {
   /// How fast breathing and blinking go: 0 slowest to 1 fastest.
   final double speed;
 
+  /// An event's effect: the lights it shows on (logo, gamemode,
+  /// trigger-left, trigger-right, fan for every fan zone); null for all.
+  final Set<String>? groups;
+
+  /// A notification's effect: how long it shows.
+  final int seconds;
+
+  /// Whether an event's effect shows on `led`.
+  bool covers(String led) {
+    final groups = this.groups;
+    if (groups == null) return true;
+    return groups.contains(led.startsWith('$_fan-') ? _fan : led);
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is RgbLightSetting &&
+      other.on == on &&
+      other.color == color &&
+      other.brightness == brightness &&
+      other.effect == effect &&
+      other.speed == speed &&
+      other.seconds == seconds &&
+      _sameGroups(other.groups, groups);
+
+  @override
+  int get hashCode =>
+      Object.hash(on, color, brightness, effect, speed, seconds);
+
+  static bool _sameGroups(Set<String>? a, Set<String>? b) => a == null
+      ? b == null
+      : b != null && a.length == b.length && a.containsAll(b);
+
   static RgbLightSetting fromJson(Object? json) {
     if (json is! Map) {
       return const RgbLightSetting();
@@ -46,7 +81,11 @@ class RgbLightSetting {
     final color = json['color'];
     final brightness = json['brightness'];
     final speed = json['speed'];
+    final groups = json['lights'];
+    final seconds = json['seconds'];
     return RgbLightSetting(
+      groups: groups is List ? {...groups.whereType<String>()} : null,
+      seconds: seconds is int ? seconds.clamp(1, 3600) : 30,
       on: json['on'] == true,
       color: color is int ? color & 0xffffff : 0xff0000,
       brightness: brightness is num ? brightness.toDouble().clamp(0.0, 1.0) : 1,
@@ -59,16 +98,24 @@ class RgbLightSetting {
   }
 }
 
+/// The events the lights can show an effect for, most important first: one
+/// going on hides those after it.
+enum RgbLightEvent { call, alarm, notification, charging }
+
 class RgbLightsSettings {
   const RgbLightsSettings({
     this.lights = const {},
     this.fanZonesSeparate = false,
+    this.events = const {},
   });
 
   /// By light: logo, gamemode, trigger-left, trigger-right, fan (all its
   /// zones together) and fan-1 to fan-4 (zones on their own).
   final Map<String, RgbLightSetting> lights;
   final bool fanZonesSeparate;
+
+  /// By event: the effect every light shows while it goes on.
+  final Map<RgbLightEvent, RgbLightSetting> events;
 
   /// What `led` shows: a fan zone takes the fan's setting unless the zones
   /// are set on their own.
@@ -82,8 +129,16 @@ class RgbLightsSettings {
       return const RgbLightsSettings();
     }
     final lights = json['lights'];
+    final events = json['events'];
     return RgbLightsSettings(
       fanZonesSeparate: json['fanZonesSeparate'] == true,
+      events: events is Map
+          ? {
+              for (final event in RgbLightEvent.values)
+                if (events[event.name] != null)
+                  event: RgbLightSetting.fromJson(events[event.name]),
+            }
+          : const {},
       lights: lights is Map
           ? {
               for (final entry in lights.entries)
@@ -103,6 +158,9 @@ class RgbLights {
 
   File get _file =>
       File(p.join(_paths.configHome, 'denial', 'rgb-lights.json'));
+
+  /// Where the settings are kept, to follow their changes.
+  String get settingsPath => _file.path;
 
   /// The LEDs present, without the `rgb:` prefix (logo, fan-1, ...).
   Future<List<String>> leds() async {
@@ -132,6 +190,17 @@ class RgbLights {
   Future<void> applyAll(RgbLightsSettings settings) async {
     for (final led in await leds()) {
       await apply(led, settings.forLed(led));
+    }
+  }
+
+  /// Show an event's [effect] on the LEDs it covers, and [settings] on the
+  /// rest.
+  Future<void> applyEffect(
+    RgbLightSetting effect,
+    RgbLightsSettings settings,
+  ) async {
+    for (final led in await leds()) {
+      await apply(led, effect.covers(led) ? effect : settings.forLed(led));
     }
   }
 
