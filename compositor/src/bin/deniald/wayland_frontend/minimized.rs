@@ -117,12 +117,18 @@ impl WaylandFrontend {
         let window = app_id
             .filter(|_| self.mobile_shell && self.minimized_windows.covered)
             .and_then(|app_id| {
+                // The newest of the app's windows: an alarm's screen opens in
+                // a window of its own beside the app's main one.
                 self.space
                     .elements()
-                    .find(|window| {
+                    .filter(|window| {
                         ManagedWindow::new(window)
                             .and_then(|managed| managed.identity())
                             .is_some_and(|identity| identity.app_id() == app_id)
+                    })
+                    .max_by_key(|window| {
+                        self.window_root_surface(window)
+                            .and_then(|root| self.surface_id(&root))
                     })
                     .cloned()
             });

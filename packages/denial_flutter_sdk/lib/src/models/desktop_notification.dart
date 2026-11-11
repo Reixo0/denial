@@ -131,6 +131,11 @@ class DesktopNotification {
   /// A call ringing or going on: `call.incoming` or `call`.
   bool get call => incomingCall || category == 'call';
 
+  /// An alarm going off: the `alarm` category Android gives a ringing alarm
+  /// or timer. Its upcoming-alarm notices are low urgency.
+  bool get ringingAlarm =>
+      category == 'alarm' && urgency != DesktopNotificationUrgency.low;
+
   /// A tap opens something: the default action, else the desktop entry's app.
   bool get opensApp =>
       desktopEntry.isNotEmpty ||

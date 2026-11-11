@@ -158,6 +158,10 @@ pub(super) struct RuntimeState {
     /// the calls app's window shows over the lock screen while one does.
     #[cfg(feature = "flutter")]
     pub(super) call_notifications: HashMap<u32, String>,
+    /// The ringing alarms, with the app id of the window each one's app
+    /// shows: that window shows over the lock screen while one rings.
+    #[cfg(feature = "flutter")]
+    pub(super) alarm_notifications: HashMap<u32, String>,
     #[cfg(feature = "flutter")]
     pub(super) control: ControlRequests,
     #[cfg(feature = "flutter")]
@@ -274,15 +278,27 @@ impl RuntimeState {
                     self.call_notifications
                         .insert(event.notification_id, notification.desktop_entry.clone());
                 }
+                Some(notification)
+                    if notification.category == "alarm"
+                        && notification.urgency
+                            != notification_server::NotificationUrgency::Low =>
+                {
+                    self.alarm_notifications.insert(
+                        event.notification_id,
+                        window_app_id(&notification.desktop_entry),
+                    );
+                }
                 _ => {
                     self.call_notifications.remove(&event.notification_id);
+                    self.alarm_notifications.remove(&event.notification_id);
                 }
             }
         }
     }
 
-    /// The calls app whose window shows over the lock screen: the one the
-    /// settings name, while the phone is locked and one of its calls stands.
+    /// The app whose window shows over the lock screen while the phone is
+    /// locked: the calls app the settings name while one of its calls stands,
+    /// else the app of a ringing alarm.
     #[cfg(feature = "flutter")]
     pub(super) fn over_lock_app(&self) -> Option<String> {
         if !self.secure_session_locked() {
@@ -290,10 +306,17 @@ impl RuntimeState {
         }
         let frontend = self.wayland.as_ref()?;
         let calls_app = frontend.settings.calls_app();
-        self.call_notifications
+        if self
+            .call_notifications
             .values()
             .any(|entry| entry == calls_app)
-            .then(|| calls_app.to_owned())
+        {
+            return Some(calls_app.to_owned());
+        }
+        self.alarm_notifications
+            .values()
+            .find(|app_id| !app_id.is_empty())
+            .cloned()
     }
 
     pub(super) fn queue_shell_action(
@@ -497,4 +520,37 @@ mod tests {
         state.queue_replacement_flutter_rehydration_if_ready(true);
         assert!(!state.replacement_flutter_rehydration_pending);
     }
+}
+
+/// The app id the windows of `desktop_entry`'s app carry: its desktop file's
+/// StartupWMClass when it has one, as an Android app's window names its
+/// package, else the entry itself.
+#[cfg(feature = "flutter")]
+fn window_app_id(desktop_entry: &str) -> String {
+    if desktop_entry.is_empty() || desktop_entry.contains('/') || desktop_entry.starts_with('.') {
+        return desktop_entry.to_owned();
+    }
+    let home = std::env::var_os("XDG_DATA_HOME")
+        .filter(|dir| !dir.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| std::path::Path::new(&home).join(".local/share"))
+        });
+    let dirs = std::env::var("XDG_DATA_DIRS")
+        .ok()
+        .filter(|dirs| !dirs.is_empty())
+        .unwrap_or_else(|| "/usr/local/share:/usr/share".to_owned());
+    home.into_iter()
+        .chain(dirs.split(':').map(std::path::PathBuf::from))
+        .find_map(|dir| {
+            let file = dir
+                .join("applications")
+                .join(format!("{desktop_entry}.desktop"));
+            let text = std::fs::read_to_string(file).ok()?;
+            text.lines()
+                .find_map(|line| line.strip_prefix("StartupWMClass="))
+                .map(|class| class.trim().to_owned())
+                .filter(|class| !class.is_empty())
+        })
+        .unwrap_or_else(|| desktop_entry.to_owned())
 }
