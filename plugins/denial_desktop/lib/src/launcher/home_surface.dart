@@ -314,6 +314,10 @@ class _HomeSurfaceState extends ConsumerState<HomeSurface>
   }
 
   @override
+  void launchNewWindow(HomeGridItem app, Rect iconRect) =>
+      unawaited(launchHomeAppNewWindow(ref, app, iconRect));
+
+  @override
   void openFolder(HomeGridItem folder, Rect iconRect) {
     if (_swallowTap || drag.active) return;
     folders.show(folder.id, iconRect);

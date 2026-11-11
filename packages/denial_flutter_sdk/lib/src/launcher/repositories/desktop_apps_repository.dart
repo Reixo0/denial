@@ -142,6 +142,8 @@ class DesktopAppsRepository {
   ) async {
     final fields = <String, String>{};
     var inDesktopEntry = false;
+    var inNewWindow = false;
+    String? newWindowExec;
 
     for (final rawLine in await file.readAsLines()) {
       final line = rawLine.trim();
@@ -151,15 +153,23 @@ class DesktopAppsRepository {
 
       if (line.startsWith('[') && line.endsWith(']')) {
         inDesktopEntry = line == '[Desktop Entry]';
-        continue;
-      }
-
-      if (!inDesktopEntry) {
+        inNewWindow = _newWindowActions.contains(line);
         continue;
       }
 
       final equals = line.indexOf('=');
       if (equals <= 0) {
+        continue;
+      }
+
+      if (inNewWindow) {
+        if (line.substring(0, equals) == 'Exec') {
+          newWindowExec = line.substring(equals + 1);
+        }
+        continue;
+      }
+
+      if (!inDesktopEntry) {
         continue;
       }
 
@@ -213,8 +223,17 @@ class DesktopAppsRepository {
       icon: icon,
       iconPath: iconPath,
       startupWmClass: fields['StartupWMClass']?.trim(),
+      newWindowExec: newWindowExec == null || newWindowExec.isEmpty
+          ? null
+          : newWindowExec,
     );
   }
+
+  /// The desktop actions that open another window of the app.
+  static const Set<String> _newWindowActions = {
+    '[Desktop Action new-window]',
+    '[Desktop Action NewWindow]',
+  };
 
   String? _localizedDesktopValue(Map<String, String> fields, String key) {
     final locale = _paths.environment['LANG'] ?? '';

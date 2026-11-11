@@ -72,6 +72,39 @@ Future<void> launchHomeApp(
   if (!started) shell.failAppLaunch(requestId);
 }
 
+/// Opens another window of [app] even while one is open, from its icon at
+/// [iconRect].
+Future<void> launchHomeAppNewWindow(
+  WidgetRef ref,
+  HomeGridItem app,
+  Rect iconRect,
+) async {
+  final desktop = app.app;
+  if (desktop == null) return;
+  final shell = ref.read(referenceShellProvider.notifier);
+  ref
+      .read(applicationRecentsProvider.notifier)
+      .record(desktopApplicationRecentId(desktop.id));
+  final launcher = ref.read(appLauncherProvider);
+  final expectedAppIds = launcher.expectedWindowAppIds(desktop);
+  if (launcher.usesLegacyTextInput(desktop)) {
+    shell.registerLegacyTextInputAppIds(expectedAppIds);
+  }
+  final requestId = shell.beginAppLaunch(
+    appName: desktop.name,
+    iconPath: desktop.iconPath,
+    expectedAppIds: expectedAppIds,
+    sourceRect: iconRect,
+    sourceItemId: app.id,
+  );
+  if (requestId == null) return;
+  final started = await launcher.launchNewWindow(
+    desktop,
+    launchRequestId: requestId,
+  );
+  if (!started) shell.failAppLaunch(requestId);
+}
+
 void _launchLocal(
   BuildContext context,
   WidgetRef ref,

@@ -43,6 +43,7 @@ abstract class HomeItemAction {
 const List<HomeItemAction> homeItemActions = [
   AddToHomeAction(),
   RemoveFromHomeAction(),
+  NewWindowAction(),
 ];
 
 /// Puts an app taken off home back, on the current page or the first free
@@ -93,6 +94,31 @@ class RemoveFromHomeAction extends HomeItemAction {
   @override
   void invoke(HomeItemMenuRequest request, HomeGridHost home) =>
       home.gridController.removeFromHome(request.item.id);
+}
+
+/// Opens another window of an app, even while one is open: through the
+/// app's own new-window action when its desktop entry has one, else by
+/// starting it again. Android apps do not open a second window yet.
+class NewWindowAction extends HomeItemAction {
+  const NewWindowAction();
+
+  @override
+  IconData get icon => Icons.open_in_new_rounded;
+
+  @override
+  String label(BuildContext context) => 'New window';
+
+  @override
+  bool appliesTo(HomeItemMenuRequest request, HomeGridState grid) {
+    final app = request.item.app;
+    return request.item.isApp &&
+        app != null &&
+        !app.id.startsWith('droidloom-');
+  }
+
+  @override
+  void invoke(HomeItemMenuRequest request, HomeGridHost home) =>
+      home.launchNewWindow(request.item, request.iconRect);
 }
 
 /// The menu itself: the options that apply, beside the held icon.

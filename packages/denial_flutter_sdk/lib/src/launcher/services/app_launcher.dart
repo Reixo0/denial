@@ -80,6 +80,21 @@ class AppLauncher {
     );
   }
 
+  /// Starts another window of [app]: its `new-window` action when it has
+  /// one, else the app again.
+  Future<bool> launchNewWindow(DesktopApp app, {int? launchRequestId}) async {
+    final argv = _execParser.parse(app.newWindowExec ?? app.exec, app);
+    if (argv.isEmpty) {
+      return false;
+    }
+
+    return _bridge.launchDesktopApplication(
+      app.id,
+      argv,
+      launchRequestId: launchRequestId,
+    );
+  }
+
   String? _executableFrom(List<String> argv) {
     if (argv.isEmpty) {
       return null;

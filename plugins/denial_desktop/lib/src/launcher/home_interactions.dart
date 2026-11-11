@@ -75,6 +75,9 @@ abstract interface class HomeGridHost {
   String folderNameFor(List<HomeGridItem> apps);
 
   HomeFolderController get folders;
+
+  /// Opens another window of [app], from its icon at [iconRect].
+  void launchNewWindow(HomeGridItem app, Rect iconRect);
 }
 
 /// The open folder.

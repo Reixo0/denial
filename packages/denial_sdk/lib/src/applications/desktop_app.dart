@@ -12,6 +12,9 @@ class const DesktopApp({
   final String? icon,
   final String? iconPath,
   final String? startupWmClass,
+
+  /// The Exec of the entry's `new-window` action, when it has one.
+  final String? newWindowExec,
 }) {
   String get searchableText =>
       <String>[id, name, ...categories, ...keywords].join(' ').toLowerCase();

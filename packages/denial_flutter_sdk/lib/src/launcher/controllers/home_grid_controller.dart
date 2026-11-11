@@ -782,6 +782,7 @@ bool _sameDesktopApp(DesktopApp a, DesktopApp b) {
       a.icon != b.icon ||
       a.iconPath != b.iconPath ||
       a.startupWmClass != b.startupWmClass ||
+      a.newWindowExec != b.newWindowExec ||
       a.categories.length != b.categories.length ||
       a.keywords.length != b.keywords.length) {
     return false;
