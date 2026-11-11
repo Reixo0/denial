@@ -38,6 +38,11 @@ pub(super) fn start_notification_server(
                             .lock()
                             .unwrap_or_else(std::sync::PoisonError::into_inner);
                         state.note_call_notifications(queue.iter());
+                        let quiet = state
+                            .wayland
+                            .as_ref()
+                            .is_some_and(|frontend| frontend.settings.do_not_disturb());
+                        crate::notification_sound::play(queue.iter(), quiet);
                         state.pending_notification_events.extend(queue.drain(..));
                     }
                 },

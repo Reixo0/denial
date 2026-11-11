@@ -884,6 +884,16 @@ impl SettingsManager {
             .unwrap_or(DEFAULT_CALLS_APP)
     }
 
+    /// Do not disturb: notifications hold back their popups and sound.
+    pub(super) fn do_not_disturb(&self) -> bool {
+        self.document
+            .get("notifications")
+            .and_then(Value::as_object)
+            .and_then(|notifications| notifications.get("doNotDisturb"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }
+
     pub(super) fn workspace_settings(&self) -> WorkspaceSettings {
         parse_workspace_settings(&self.document).unwrap_or_default()
     }

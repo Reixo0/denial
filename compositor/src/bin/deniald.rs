@@ -92,6 +92,9 @@ mod native_shortcut;
 #[cfg(feature = "flutter")]
 #[path = "deniald/notification_server.rs"]
 mod notification_server;
+#[cfg(feature = "flutter")]
+#[path = "deniald/notification_sound.rs"]
+mod notification_sound;
 #[path = "deniald/options.rs"]
 mod options;
 #[cfg(feature = "flutter")]
