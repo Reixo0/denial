@@ -298,20 +298,6 @@ pub(super) fn synchronize_notification_events(
 
     let commands = runtime.drain_notification_commands().collect::<Vec<_>>();
     if events.secure_session_locked() {
-        // A call answers from the lock screen. Nothing else a locked shell
-        // asks of notifications goes through.
-        if let Some(server) = events.notification_server.as_ref() {
-            for command in commands {
-                if let wire::NotificationCommand::InvokeAction {
-                    notification_id,
-                    action_key,
-                } = command
-                    && !server.invoke_call_action(notification_id, action_key)
-                {
-                    warn!(notification_id, "could not queue a locked call action");
-                }
-            }
-        }
         return Ok(());
     }
     let Some(server) = events.notification_server.as_ref() else {
