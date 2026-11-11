@@ -633,10 +633,15 @@ impl Session<'_, '_> {
             ..
         } = self;
         let pending_sensor_rotation = *pending_sensor_rotation;
-        let requested_rotation = orientation_sensor::select_rotation(
-            pending_sensor_rotation,
-            events.frontend().settings.locked_sensor_rotation(),
-        );
+        let frontend = events.frontend();
+        // With home rotation off, home and the lock screen stay upright; apps
+        // follow the sensor.
+        let held = frontend.settings.locked_sensor_rotation().or_else(|| {
+            (!frontend.settings.home_rotates() && frontend.home_showing())
+                .then_some(OutputTransform::Normal)
+        });
+        let requested_rotation =
+            orientation_sensor::select_rotation(pending_sensor_rotation, held);
         if requested_rotation == output_configuration.sensor_rotation
             || scheduler.has_pending_scanout_work()
             || flutter.output_rotation_animation_active()

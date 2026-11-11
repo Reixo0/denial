@@ -872,6 +872,17 @@ impl SettingsManager {
             .unwrap_or(true)
     }
 
+    /// Whether the phone's home and lock screens turn with the phone; off
+    /// keeps them upright while apps still follow the sensor.
+    pub(super) fn home_rotates(&self) -> bool {
+        self.document
+            .get("home")
+            .and_then(Value::as_object)
+            .and_then(|home| home.get("rotate"))
+            .and_then(Value::as_bool)
+            .unwrap_or(true)
+    }
+
     /// The desktop entry of the calls app, the one app whose call window may
     /// show over the lock screen while its call notification stands.
     pub(super) fn calls_app(&self) -> &str {
