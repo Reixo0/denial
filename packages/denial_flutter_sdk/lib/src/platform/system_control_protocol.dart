@@ -2,12 +2,21 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import '../models/audio.dart' show AudioRole;
 import 'denial_bridge_models.dart';
 
 /// Decodes native system-control messages independently of transport and state.
 /// Records contain only wire data; the bridge determines which reads complete.
 abstract final class SystemControlProtocol {
-  static ({double level, int requestSerial, bool muted, bool limitReached})?
+  /// `quiet`: the level is another sound's now (a ringtone started or
+  /// stopped), not a change anyone made.
+  static ({
+    double level,
+    int requestSerial,
+    bool muted,
+    bool limitReached,
+    bool quiet,
+  })?
   decodeAudioState(ByteData? data) {
     if (data == null || data.lengthInBytes < 1) return null;
     return (
@@ -17,6 +26,7 @@ abstract final class SystemControlProtocol {
           : 0,
       muted: data.lengthInBytes >= 6 && data.getUint8(5) != 0,
       limitReached: data.lengthInBytes >= 7 && data.getUint8(6) != 0,
+      quiet: data.lengthInBytes >= 8 && data.getUint8(7) != 0,
     );
   }
 
@@ -80,6 +90,26 @@ abstract final class SystemControlProtocol {
       offset += nameLength + descriptionLength;
     }
     return UnmodifiableListView(devices);
+  }
+
+  /// Four bytes per role: role, level percent, muted, active. Empty without
+  /// role volumes.
+  static List<DenialAudioRole>? decodeAudioRoles(ByteData? data) {
+    if (data == null || data.lengthInBytes % 4 != 0) return null;
+    final roles = <DenialAudioRole>[];
+    for (var offset = 0; offset < data.lengthInBytes; offset += 4) {
+      final role = data.getUint8(offset);
+      if (role >= AudioRole.values.length) return null;
+      roles.add(
+        DenialAudioRole(
+          role: AudioRole.values[role],
+          level: _percent(data, offset + 1),
+          muted: data.getUint8(offset + 2) != 0,
+          active: data.getUint8(offset + 3) != 0,
+        ),
+      );
+    }
+    return UnmodifiableListView(roles);
   }
 
   static ({int monitorId, double level})? decodeBrightness(ByteData? data) {

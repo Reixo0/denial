@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import '../../models/audio.dart' show AudioRole;
 import '../denial_bridge_models.dart';
 import '../system_control_protocol.dart';
 import 'context.dart';
@@ -18,6 +19,8 @@ final class BridgeAudioClient {
       StreamController<List<DenialAudioStream>>.broadcast(sync: true);
   final StreamController<List<DenialAudioDevice>> _audioDeviceStates =
       StreamController<List<DenialAudioDevice>>.broadcast(sync: true);
+  final StreamController<List<DenialAudioRole>> _audioRoleStates =
+      StreamController<List<DenialAudioRole>>.broadcast(sync: true);
 
   Future<double?> readAudioLevel() async {
     if (!_context.useControlSocket) return _readAudioLevelFromPlatform();
@@ -212,6 +215,23 @@ final class BridgeAudioClient {
     );
   }
 
+  void requestAudioRoles() {
+    final payload = ByteData(1)..setUint8(0, 6);
+    _context.platform
+        .send(_audioChannel, payload)
+        ?.catchError((Object _) => null);
+  }
+
+  void setAudioRoleLevel(AudioRole role, int percent) {
+    final payload = ByteData(3)
+      ..setUint8(0, 7)
+      ..setUint8(1, role.index)
+      ..setUint8(2, percent.clamp(0, 100));
+    _context.platform
+        .send(_audioChannel, payload)
+        ?.catchError((Object _) => null);
+  }
+
   void _setAudioDeviceFromPlatform(List<int> nameBytes) {
     final payload = ByteData(3 + nameBytes.length)
       ..setUint8(0, 5)
@@ -297,7 +317,8 @@ final class BridgeAudioClient {
           requestSerial: update.requestSerial,
           muted: update.muted,
           limitReached: update.limitReached,
-          completesRead: pending != null,
+          // A quiet update moves the baseline like a read does, unseen.
+          completesRead: pending != null || update.quiet,
         ),
       );
     }
@@ -325,6 +346,13 @@ final class BridgeAudioClient {
     return null;
   }
 
+  Future<ByteData?> handleRoles(ByteData? data) async {
+    if (_audioRoleStates.isClosed) return null;
+    final roles = SystemControlProtocol.decodeAudioRoles(data);
+    if (roles != null) _audioRoleStates.add(roles);
+    return null;
+  }
+
   Stream<DenialAudioState> get audioStates => _audioStates.stream;
 
   Stream<List<DenialAudioStream>> get audioStreamStates =>
@@ -332,6 +360,8 @@ final class BridgeAudioClient {
 
   Stream<List<DenialAudioDevice>> get audioDeviceStates =>
       _audioDeviceStates.stream;
+
+  Stream<List<DenialAudioRole>> get audioRoleStates => _audioRoleStates.stream;
   void dispose() {
     for (final pending in _pendingAudioReads) {
       if (!pending.isCompleted) pending.complete(null);
@@ -340,5 +370,6 @@ final class BridgeAudioClient {
     unawaited(_audioStates.close());
     unawaited(_audioStreamStates.close());
     unawaited(_audioDeviceStates.close());
+    unawaited(_audioRoleStates.close());
   }
 }

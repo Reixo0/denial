@@ -154,7 +154,9 @@ pub(super) fn synchronize_system_control_events(
                         }
                         system_controls::AudioRequest::SetLevel { .. }
                         | system_controls::AudioRequest::SetStreamLevel { .. }
-                        | system_controls::AudioRequest::SetDevice { .. } => None,
+                        | system_controls::AudioRequest::SetDevice { .. }
+                        | system_controls::AudioRequest::RequestRoles
+                        | system_controls::AudioRequest::SetRoleLevel { .. } => None,
                     };
                     (controls.handle_audio_request(request), wait)
                 }
@@ -230,6 +232,7 @@ fn resolve_system_control_waits(
             muted,
             limit_reached,
             request_serial,
+            ..
         } => (
             SystemControlWaitKind::AudioLevel,
             json!({
@@ -261,6 +264,8 @@ fn resolve_system_control_waits(
                 })).collect::<Vec<_>>(),
             }),
         ),
+        // Nothing waits on role levels yet.
+        system_controls::SystemControlEvent::AudioRoles(_) => return,
         system_controls::SystemControlEvent::BrightnessLevel { monitor_id, level } => (
             SystemControlWaitKind::Brightness(*monitor_id),
             json!({

@@ -44,6 +44,7 @@ class DenialShellActionEvent {
 typedef DenialAudioState = AudioLevelState;
 typedef DenialAudioStream = AppAudioStream;
 typedef DenialAudioDevice = AudioOutputDevice;
+typedef DenialAudioRole = AudioRoleLevel;
 
 class DenialBrightnessState {
   const DenialBrightnessState({

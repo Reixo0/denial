@@ -59,3 +59,31 @@ class AudioOutputDevice {
   final bool active;
   final bool available;
 }
+
+/// A kind of sound with a volume of its own, as on Android. The values are
+/// deniald's role numbers.
+enum AudioRole { media, notification, ringtone, alarm, call }
+
+class AudioRoleLevel {
+  const AudioRoleLevel({
+    required this.role,
+    required this.level,
+    required this.muted,
+    required this.active,
+  });
+
+  final AudioRole role;
+  final double level;
+  final bool muted;
+
+  /// The main level (volume keys, the level slider) sets this role now: the
+  /// call during a call, a sounding alarm or ringtone, else media.
+  final bool active;
+
+  AudioRoleLevel copyWith({double? level}) => AudioRoleLevel(
+    role: role,
+    level: level ?? this.level,
+    muted: muted,
+    active: active,
+  );
+}

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 
 import '../input/input_layout.dart';
+import '../models/audio.dart' show AudioRole;
 import '../models/denial_cursor_state.dart';
 import '../models/denial_drag_icon.dart';
 import '../models/denial_pet.dart';
@@ -75,6 +76,7 @@ class DenialBridge {
       'denial/audio_state': _audio.handleState,
       'denial/audio_streams_state': _audio.handleStreams,
       'denial/audio_devices_state': _audio.handleDevices,
+      'denial/audio_roles_state': _audio.handleRoles,
       'denial/brightness_state': _brightness.handleBrightnessState,
       'denial/software_dimming_state': _brightness.handleSoftwareDimmingState,
       denialUiDevelopmentStateChannel: _session.handleDevelopmentState,
@@ -129,6 +131,8 @@ class DenialBridge {
 
   Stream<List<DenialAudioDevice>> get audioDeviceStates =>
       _audio.audioDeviceStates;
+
+  Stream<List<DenialAudioRole>> get audioRoleStates => _audio.audioRoleStates;
 
   Stream<DenialBrightnessState> get brightnessStates =>
       _brightness.brightnessStates;
@@ -631,6 +635,11 @@ class DenialBridge {
   void requestAudioDevices() => _audio.requestAudioDevices();
 
   void setAudioDevice(String name) => _audio.setAudioDevice(name);
+
+  void requestAudioRoles() => _audio.requestAudioRoles();
+
+  void setAudioRoleLevel(AudioRole role, int percent) =>
+      _audio.setAudioRoleLevel(role, percent);
 
   void dispose() {
     if (_context.platform.isDisposed) return;

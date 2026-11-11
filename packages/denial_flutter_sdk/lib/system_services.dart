@@ -8,7 +8,12 @@ export 'package:denial_sdk/system.dart'
     show MprisPlaybackState, MprisPlaybackStatus;
 
 export 'src/models/audio.dart'
-    show AppAudioStream, AudioLevelState, AudioOutputDevice;
+    show
+        AppAudioStream,
+        AudioLevelState,
+        AudioOutputDevice,
+        AudioRole,
+        AudioRoleLevel;
 export 'src/models/logind.dart'
     show
         LogindAction,

@@ -127,6 +127,7 @@ const AUDIO_CHANNEL: &CStr = c"denial/audio";
 const AUDIO_STATE_CHANNEL: &CStr = c"denial/audio_state";
 const AUDIO_STREAMS_STATE_CHANNEL: &CStr = c"denial/audio_streams_state";
 const AUDIO_DEVICES_STATE_CHANNEL: &CStr = c"denial/audio_devices_state";
+const AUDIO_ROLES_STATE_CHANNEL: &CStr = c"denial/audio_roles_state";
 const BRIGHTNESS_CHANNEL: &CStr = c"denial/brightness";
 const BRIGHTNESS_STATE_CHANNEL: &CStr = c"denial/brightness_state";
 const SOFTWARE_DIMMING_CHANNEL: &CStr = c"denial/software_dimming";

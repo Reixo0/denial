@@ -52,6 +52,54 @@ pub(super) struct AudioDeviceState {
     pub(super) available: bool,
 }
 
+/// A kind of sound with a volume of its own, as on Android. The session
+/// manager provides one virtual sink per role (`input.loopback.sink.role.*`)
+/// that streams reach by their `media.role`; without those sinks there are no
+/// roles and the main level is the default output's.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum AudioRole {
+    Media = 0,
+    Notification = 1,
+    Ringtone = 2,
+    Alarm = 3,
+    Call = 4,
+}
+
+impl AudioRole {
+    pub(super) const ALL: [Self; 5] = [
+        Self::Media,
+        Self::Notification,
+        Self::Ringtone,
+        Self::Alarm,
+        Self::Call,
+    ];
+
+    pub(super) fn from_wire(value: u8) -> Option<Self> {
+        Self::ALL.into_iter().find(|role| *role as u8 == value)
+    }
+
+    /// The role's sink name after the shared prefix.
+    pub(super) fn sink_suffix(self) -> &'static str {
+        match self {
+            Self::Media => "media",
+            Self::Notification => "notification",
+            Self::Ringtone => "ringtone",
+            Self::Alarm => "alarm",
+            Self::Call => "call",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct AudioRoleState {
+    pub(super) role: AudioRole,
+    pub(super) level_percent: u8,
+    pub(super) muted: bool,
+    /// The main level (volume keys, the level slider) currently sets this
+    /// role: the call during a call, a sounding alarm or ringtone, else media.
+    pub(super) active: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum SystemControlEvent {
     AudioLevel {
@@ -59,9 +107,14 @@ pub(super) enum SystemControlEvent {
         muted: bool,
         limit_reached: bool,
         request_serial: u32,
+        /// The main level moved to another role's sink (a ringtone started or
+        /// stopped) without anyone changing a level: nothing to show.
+        quiet: bool,
     },
     AudioStreams(Vec<AudioStreamState>),
     AudioDevices(Vec<AudioDeviceState>),
+    /// Empty when the session manager has no role sinks.
+    AudioRoles(Vec<AudioRoleState>),
     BrightnessLevel {
         monitor_id: i64,
         level: f64,
@@ -76,12 +129,15 @@ pub(super) enum AudioRequest {
     SetStreamLevel { stream_id: u32, level: f64 },
     RequestDevices,
     SetDevice { name: String },
+    RequestRoles,
+    SetRoleLevel { role: AudioRole, level: f64 },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum AudioRequestDecodeError {
     InvalidSize(usize),
     UnsupportedCommand(u8),
+    UnsupportedRole(u8),
 }
 
 impl fmt::Display for AudioRequestDecodeError {
@@ -91,6 +147,7 @@ impl fmt::Display for AudioRequestDecodeError {
             Self::UnsupportedCommand(command) => {
                 write!(formatter, "unsupported audio command {command}")
             }
+            Self::UnsupportedRole(role) => write!(formatter, "unsupported audio role {role}"),
         }
     }
 }
@@ -144,7 +201,13 @@ pub(super) fn decode_audio_request(packet: &[u8]) -> Result<AudioRequest, AudioR
                 name: name.to_owned(),
             })
         }
-        [command, ..] if matches!(*command, 0..=5) || packet.is_empty() => {
+        [6] => Ok(AudioRequest::RequestRoles),
+        [7, role, percent] => Ok(AudioRequest::SetRoleLevel {
+            role: AudioRole::from_wire(*role)
+                .ok_or(AudioRequestDecodeError::UnsupportedRole(*role))?,
+            level: f64::from((*percent).min(100)) / 100.0,
+        }),
+        [command, ..] if matches!(*command, 0..=7) || packet.is_empty() => {
             Err(AudioRequestDecodeError::InvalidSize(packet.len()))
         }
         [command, ..] => Err(AudioRequestDecodeError::UnsupportedCommand(*command)),
@@ -248,6 +311,8 @@ enum AudioCommand {
     SetStreamLevel { stream_id: u32, level: f64 },
     RequestDevices,
     SetDevice { name: String },
+    RequestRoles,
+    SetRoleLevel { role: AudioRole, level: f64 },
     Stop,
 }
 
@@ -567,6 +632,10 @@ impl SystemControls {
             }
             AudioRequest::RequestDevices => AudioCommand::RequestDevices,
             AudioRequest::SetDevice { name } => AudioCommand::SetDevice { name },
+            AudioRequest::RequestRoles => AudioCommand::RequestRoles,
+            AudioRequest::SetRoleLevel { role, level } => {
+                AudioCommand::SetRoleLevel { role, level }
+            }
         };
         self.audio_commands.try_send(command).is_ok()
     }

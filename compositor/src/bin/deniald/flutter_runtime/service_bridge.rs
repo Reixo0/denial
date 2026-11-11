@@ -503,12 +503,14 @@ impl FlutterRuntime {
                 muted,
                 limit_reached,
                 request_serial,
+                quiet,
             } => {
-                let mut packet = [0u8; 7];
+                let mut packet = [0u8; 8];
                 packet[0] = (level.clamp(0.0, 1.0) * 100.0).round() as u8;
                 packet[1..5].copy_from_slice(&request_serial.to_le_bytes());
                 packet[5] = u8::from(*muted);
                 packet[6] = u8::from(*limit_reached);
+                packet[7] = u8::from(*quiet);
                 self.host()
                     .engine()
                     .send_platform_message(AUDIO_STATE_CHANNEL, &packet)?;
@@ -573,6 +575,19 @@ impl FlutterRuntime {
                 self.host()
                     .engine()
                     .send_platform_message(AUDIO_DEVICES_STATE_CHANNEL, &packet)?;
+            }
+            crate::system_controls::SystemControlEvent::AudioRoles(roles) => {
+                // Per role: role, level percent, muted, active.
+                let mut packet = Vec::with_capacity(roles.len() * 4);
+                for role in roles {
+                    packet.push(role.role as u8);
+                    packet.push(role.level_percent.min(100));
+                    packet.push(u8::from(role.muted));
+                    packet.push(u8::from(role.active));
+                }
+                self.host()
+                    .engine()
+                    .send_platform_message(AUDIO_ROLES_STATE_CHANNEL, &packet)?;
             }
             crate::system_controls::SystemControlEvent::BrightnessLevel { monitor_id, level } => {
                 let mut packet = [0u8; 9];

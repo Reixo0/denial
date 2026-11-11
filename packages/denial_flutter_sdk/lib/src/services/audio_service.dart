@@ -27,6 +27,9 @@ class AudioService {
   Stream<List<AudioOutputDevice>> get outputDeviceStates =>
       _bridge.audioDeviceStates;
 
+  /// A volume per kind of sound; empty when the system has none.
+  Stream<List<AudioRoleLevel>> get roleStates => _bridge.audioRoleStates;
+
   void apply(int percent, {required int requestSerial}) {
     _bridge.setAudioLevel(percent, requestSerial: requestSerial);
   }
@@ -40,4 +43,10 @@ class AudioService {
   }
 
   void selectOutputDevice(String name) => _bridge.setAudioDevice(name);
+
+  void requestRoles() => _bridge.requestAudioRoles();
+
+  void applyRole(AudioRole role, int percent) {
+    _bridge.setAudioRoleLevel(role, percent);
+  }
 }

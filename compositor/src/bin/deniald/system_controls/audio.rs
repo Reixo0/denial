@@ -285,6 +285,12 @@ const PA_SUBSCRIPTION_EVENT_SINK: u32 = 0;
 const PA_SUBSCRIPTION_EVENT_SINK_INPUT: u32 = 2;
 const PA_SUBSCRIPTION_EVENT_SERVER: u32 = 7;
 const PA_PORT_AVAILABLE_NO: c_int = 1;
+const PA_SINK_RUNNING: c_int = 0;
+
+/// The session manager's per-role sinks, and the streams that carry each one
+/// on to the real output; see `AudioRole`.
+const ROLE_SINK_PREFIX: &str = "input.loopback.sink.role.";
+const ROLE_STREAM_PREFIX: &str = "output.loopback.sink.role.";
 
 unsafe extern "C" fn on_subscription_event(
     _context: *mut PaContext,
@@ -301,6 +307,7 @@ unsafe extern "C" fn on_subscription_event(
     match event_type & PA_SUBSCRIPTION_EVENT_FACILITY_MASK {
         PA_SUBSCRIPTION_EVENT_SINK => {
             let _ = subscription.commands.try_send(AudioCommand::ReadLevel);
+            let _ = subscription.commands.try_send(AudioCommand::RequestRoles);
             if event_type & PA_SUBSCRIPTION_EVENT_TYPE_MASK != PA_SUBSCRIPTION_EVENT_CHANGE {
                 let _ = subscription.commands.try_send(AudioCommand::RequestDevices);
             }
@@ -519,6 +526,7 @@ struct PulseSinkState {
 struct SinkListQuery {
     mainloop: *mut PaThreadedMainloop,
     signal: unsafe extern "C" fn(*mut PaThreadedMainloop, c_int),
+    cvolume_avg: unsafe extern "C" fn(*const PaCVolume) -> u32,
     default_sink: CString,
     state: Mutex<SinkListQueryState>,
 }
@@ -527,6 +535,32 @@ struct SinkListQueryState {
     done: bool,
     success: bool,
     devices: Vec<AudioDeviceState>,
+    roles: Vec<RoleSinkState>,
+}
+
+struct RoleSinkState {
+    role: AudioRole,
+    level: f64,
+    muted: bool,
+    running: bool,
+}
+
+/// The real outputs and the role sinks in front of them.
+struct SinkList {
+    devices: Vec<AudioDeviceState>,
+    roles: Vec<RoleSinkState>,
+}
+
+fn role_of_sink(name: &CStr) -> Option<AudioRole> {
+    let suffix = name.to_str().ok()?.strip_prefix(ROLE_SINK_PREFIX)?;
+    AudioRole::ALL
+        .into_iter()
+        .find(|role| role.sink_suffix() == suffix)
+}
+
+fn role_sink_name(role: AudioRole) -> CString {
+    CString::new(format!("{ROLE_SINK_PREFIX}{}", role.sink_suffix()))
+        .expect("role sink names have no NUL")
 }
 
 fn pulse_description(value: *const c_char) -> Option<String> {
@@ -576,22 +610,33 @@ unsafe extern "C" fn on_sink_list(
     } else if end_of_list > 0 {
         state.done = true;
         state.success = true;
-    } else if !info.is_null() && state.devices.len() < MAX_AUDIO_DEVICES {
+    } else if !info.is_null() {
         // SAFETY: libpulse supplies this record and its strings for callback life.
         let info = unsafe { &*info };
         if !info.name.is_null() {
             // SAFETY: PulseAudio callback strings are NUL-terminated.
             let name = unsafe { CStr::from_ptr(info.name) };
-            let description = sink_description(info, name);
-            state.devices.push(AudioDeviceState {
-                name: truncate_utf8(
-                    name.to_string_lossy().into_owned(),
-                    MAX_AUDIO_DEVICE_NAME_BYTES,
-                ),
-                description: truncate_utf8(description, MAX_AUDIO_DEVICE_DESCRIPTION_BYTES),
-                active: name == query.default_sink.as_c_str(),
-                available: sink_is_available(info),
-            });
+            if let Some(role) = role_of_sink(name) {
+                // SAFETY: volume is a complete pa_cvolume copied from libpulse.
+                let average = unsafe { (query.cvolume_avg)(&info.volume) };
+                state.roles.push(RoleSinkState {
+                    role,
+                    level: (f64::from(average) / 65_536.0).clamp(0.0, 1.0),
+                    muted: info.mute != 0,
+                    running: info.state == PA_SINK_RUNNING,
+                });
+            } else if state.devices.len() < MAX_AUDIO_DEVICES {
+                let description = sink_description(info, name);
+                state.devices.push(AudioDeviceState {
+                    name: truncate_utf8(
+                        name.to_string_lossy().into_owned(),
+                        MAX_AUDIO_DEVICE_NAME_BYTES,
+                    ),
+                    description: truncate_utf8(description, MAX_AUDIO_DEVICE_DESCRIPTION_BYTES),
+                    active: name == query.default_sink.as_c_str(),
+                    available: sink_is_available(info),
+                });
+            }
         }
     }
     let done = state.done;
@@ -728,15 +773,20 @@ unsafe extern "C" fn on_sink_input_list(
     } else if !info.is_null() && state.streams.len() < MAX_AUDIO_STREAMS {
         // SAFETY: libpulse supplies the stable sink-input prefix for callback life.
         let info = unsafe { &*info };
-        // SAFETY: volume is a complete pa_cvolume copied from libpulse.
-        let average = unsafe { (query.cvolume_avg)(&info.volume) };
-        state.streams.push(AudioStreamState {
-            id: info.index,
-            // SAFETY: every inspected string is owned by libpulse for callback life.
-            name: unsafe { pulse_stream_name(query.proplist_gets, info) },
-            level_percent: ((f64::from(average) / 65_536.0).clamp(0.0, 1.0) * 100.0).round() as u8,
-            muted: info.mute != 0,
-        });
+        // A role sink carrying its sound on to the output is not an app.
+        // SAFETY: the proplist belongs to this callback record.
+        if !unsafe { is_role_stream(query.proplist_gets, info) } {
+            // SAFETY: volume is a complete pa_cvolume copied from libpulse.
+            let average = unsafe { (query.cvolume_avg)(&info.volume) };
+            state.streams.push(AudioStreamState {
+                id: info.index,
+                // SAFETY: every inspected string is owned by libpulse for callback life.
+                name: unsafe { pulse_stream_name(query.proplist_gets, info) },
+                level_percent: ((f64::from(average) / 65_536.0).clamp(0.0, 1.0) * 100.0).round()
+                    as u8,
+                muted: info.mute != 0,
+            });
+        }
     }
     let done = state.done;
     drop(state);
@@ -744,6 +794,22 @@ unsafe extern "C" fn on_sink_input_list(
         // SAFETY: this is the live mainloop associated with the query.
         unsafe { (query.signal)(query.mainloop, 0) };
     }
+}
+
+unsafe fn is_role_stream(
+    proplist_gets: unsafe extern "C" fn(*const PaProplist, *const c_char) -> *const c_char,
+    info: &PaSinkInputInfoPrefix,
+) -> bool {
+    if info.proplist.is_null() {
+        return false;
+    }
+    // SAFETY: proplist and the key are valid for the active callback.
+    let value = unsafe { proplist_gets(info.proplist, c"node.name".as_ptr()) };
+    // SAFETY: a non-null value is a callback-lifetime NUL-terminated string.
+    !value.is_null()
+        && unsafe { CStr::from_ptr(value) }
+            .to_bytes()
+            .starts_with(ROLE_STREAM_PREFIX.as_bytes())
 }
 
 unsafe fn pulse_stream_name(
@@ -884,6 +950,10 @@ fn query_audio_devices(
     api: &PulseApi,
     connection: &PulseConnection,
 ) -> Option<Vec<AudioDeviceState>> {
+    query_sink_list(api, connection).map(|list| list.devices)
+}
+
+fn query_sink_list(api: &PulseApi, connection: &PulseConnection) -> Option<SinkList> {
     let default_sink = query_default_sink(api, connection)?;
     // SAFETY: the threaded-mainloop lock serializes the list operation and
     // the callback copies all server-owned strings before returning.
@@ -891,11 +961,13 @@ fn query_audio_devices(
         let query = SinkListQuery {
             mainloop: connection.mainloop,
             signal: api.mainloop_signal,
+            cvolume_avg: api.cvolume_avg,
             default_sink,
             state: Mutex::new(SinkListQueryState {
                 done: false,
                 success: false,
                 devices: Vec::with_capacity(8),
+                roles: Vec::with_capacity(AudioRole::ALL.len()),
             }),
         };
         (api.mainloop_lock)(connection.mainloop);
@@ -919,8 +991,51 @@ fn query_audio_devices(
         state
             .devices
             .sort_by_cached_key(|device| device.description.to_lowercase());
-        state.success.then(|| std::mem::take(&mut state.devices))
+        state.success.then(|| SinkList {
+            devices: std::mem::take(&mut state.devices),
+            roles: std::mem::take(&mut state.roles),
+        })
     }
+}
+
+/// The role the main level sets, as Android picks the stream for its volume
+/// keys: the call during a call, else a sounding alarm or ringtone, else media.
+/// None when there are no role sinks.
+fn active_role(roles: &[RoleSinkState], call_active: bool) -> Option<AudioRole> {
+    if roles.is_empty() {
+        return None;
+    }
+    let running = |role| roles.iter().any(|sink| sink.role == role && sink.running);
+    [AudioRole::Call, AudioRole::Alarm, AudioRole::Ringtone]
+        .into_iter()
+        .find(|role| (*role == AudioRole::Call && call_active) || running(*role))
+        .or(Some(AudioRole::Media))
+}
+
+/// The sink the main level sets: the active role's, or without role sinks the
+/// default output.
+fn level_sink(api: &PulseApi, connection: &PulseConnection, call_active: bool) -> Option<CString> {
+    let list = query_sink_list(api, connection)?;
+    match active_role(&list.roles, call_active) {
+        Some(role) => Some(role_sink_name(role)),
+        None => query_default_sink(api, connection),
+    }
+}
+
+fn audio_role_states(roles: &[RoleSinkState], call_active: bool) -> Vec<AudioRoleState> {
+    let active = active_role(roles, call_active);
+    AudioRole::ALL
+        .into_iter()
+        .filter_map(|role| {
+            let sink = roles.iter().find(|sink| sink.role == role)?;
+            Some(AudioRoleState {
+                role,
+                level_percent: (sink.level * 100.0).round() as u8,
+                muted: sink.muted,
+                active: active == Some(role),
+            })
+        })
+        .collect()
 }
 
 fn query_sink_input(
@@ -1023,17 +1138,24 @@ fn wait_for_success(
     lock_unpoisoned(&query.state).success
 }
 
-fn read_pulse_state(api: &PulseApi, connection: &PulseConnection) -> Option<(f64, bool)> {
-    let sink = query_default_sink(api, connection)?;
-    let state = query_sink(api, connection, &sink)?;
+fn read_pulse_state(
+    api: &PulseApi,
+    connection: &PulseConnection,
+    sink: &CStr,
+) -> Option<(f64, bool)> {
+    let state = query_sink(api, connection, sink)?;
     // SAFETY: state.volume is a complete pa_cvolume copied from libpulse.
     let current = unsafe { (api.cvolume_avg)(&state.volume) } as f64 / 65_536.0;
     Some((current.clamp(0.0, 1.0), state.muted))
 }
 
-fn set_pulse_level(api: &PulseApi, connection: &PulseConnection, target: f64) -> Option<f64> {
-    let sink = query_default_sink(api, connection)?;
-    let state = query_sink(api, connection, &sink)?;
+fn set_pulse_level(
+    api: &PulseApi,
+    connection: &PulseConnection,
+    sink: &CStr,
+    target: f64,
+) -> Option<f64> {
+    let state = query_sink(api, connection, sink)?;
     let target = target.clamp(0.0, MAX_AUDIO_LEVEL);
     let pulse_level = (target * 65_536.0).round() as u32;
     let mut volume = PaCVolume::default();
@@ -1101,18 +1223,21 @@ fn set_pulse_level(api: &PulseApi, connection: &PulseConnection, target: f64) ->
     Some(target.clamp(0.0, 1.0))
 }
 
-fn adjust_pulse_level(api: &PulseApi, connection: &PulseConnection, delta: f64) -> Option<f64> {
-    let sink = query_default_sink(api, connection)?;
-    let state = query_sink(api, connection, &sink)?;
+fn adjust_pulse_level(
+    api: &PulseApi,
+    connection: &PulseConnection,
+    sink: &CStr,
+    delta: f64,
+) -> Option<f64> {
+    let state = query_sink(api, connection, sink)?;
     // SAFETY: state.volume is a valid pa_cvolume copied from libpulse.
     let current = unsafe { (api.cvolume_avg)(&state.volume) } as f64 / 65_536.0;
     let target = (current + delta).clamp(0.0, MAX_AUDIO_LEVEL);
-    set_pulse_level(api, connection, target)
+    set_pulse_level(api, connection, sink, target)
 }
 
-fn toggle_pulse_mute(api: &PulseApi, connection: &PulseConnection) -> Option<f64> {
-    let sink = query_default_sink(api, connection)?;
-    let state = query_sink(api, connection, &sink)?;
+fn toggle_pulse_mute(api: &PulseApi, connection: &PulseConnection, sink: &CStr) -> Option<f64> {
+    let state = query_sink(api, connection, sink)?;
     // SAFETY: the context operation is serialized by the threaded-mainloop lock.
     unsafe { (api.mainloop_lock)(connection.mainloop) };
     let query = SuccessQuery {
@@ -1288,13 +1413,78 @@ fn set_pulse_output_device(api: &PulseApi, connection: &PulseConnection, name: &
     }
 
     // A default sink affects new streams. Move current application streams as
-    // well so the Dashboard selection is audible immediately.
+    // well so the Dashboard selection is audible immediately. Role sinks follow
+    // the default output by themselves, and their streams must stay on them.
+    if query_sink_list(api, connection).is_some_and(|list| !list.roles.is_empty()) {
+        return Some(());
+    }
     if let Some(streams) = query_sink_inputs(api, connection) {
         for stream in streams {
             let _ = move_pulse_stream(api, connection, stream.id, &sink);
         }
     }
     Some(())
+}
+
+/// callaudio, which holds the call's own volume: the modem's voice reaches the
+/// DSP directly, so the call role's sink carries no call sound and its level
+/// is copied here instead.
+struct CallAudio {
+    proxy: Option<zbus::blocking::Proxy<'static>>,
+    pushed: Option<u32>,
+}
+
+impl CallAudio {
+    const SERVICE: &'static str = "org.callaudio";
+    const PATH: &'static str = "/org/callaudio";
+    const INTERFACE: &'static str = "org.callaudio.CallAudio1";
+
+    fn new() -> Self {
+        Self {
+            proxy: None,
+            pushed: None,
+        }
+    }
+
+    fn proxy(&mut self) -> Option<&zbus::blocking::Proxy<'static>> {
+        if self.proxy.is_none() {
+            let connection = zbus::blocking::Connection::session().ok()?;
+            self.proxy = zbus::blocking::Proxy::new_owned(
+                connection,
+                Self::SERVICE,
+                Self::PATH,
+                Self::INTERFACE,
+            )
+            .ok();
+        }
+        self.proxy.as_ref()
+    }
+
+    /// A call is up; false without callaudio.
+    fn active(&mut self) -> bool {
+        self.proxy()
+            .and_then(|proxy| proxy.get_property::<bool>("Active").ok())
+            .unwrap_or(false)
+    }
+
+    /// Gives the call the call role's level, when it changed.
+    fn follow(&mut self, level: f64) {
+        let Some(proxy) = self.proxy() else {
+            return;
+        };
+        let Ok(maximum) = proxy.get_property::<u32>("VolumeMax") else {
+            return;
+        };
+        let volume = (level.clamp(0.0, 1.0) * f64::from(maximum)).round() as u32;
+        if self.pushed == Some(volume) {
+            return;
+        }
+        if let Some(proxy) = self.proxy.as_ref()
+            && proxy.set_property("Volume", volume).is_ok()
+        {
+            self.pushed = Some(volume);
+        }
+    }
 }
 
 pub(super) fn run_audio_worker(
@@ -1312,6 +1502,10 @@ pub(super) fn run_audio_worker(
     };
     let mut connection: Option<PulseConnection> = None;
     let mut failure_latched = false;
+    let mut call_audio = CallAudio::new();
+    // The sink of the last level sent: a report moves the shell's baseline,
+    // and a batch that reports nothing must not.
+    let mut reported_target: Option<CString> = None;
     'worker: while let Ok(first) = commands.recv() {
         let mut level = None;
         let mut delta = 0.0;
@@ -1323,6 +1517,8 @@ pub(super) fn run_audio_worker(
         let mut stream_levels = HashMap::<u32, f64>::new();
         let mut devices_requested = false;
         let mut selected_device = None;
+        let mut roles_requested = false;
+        let mut role_levels = Vec::<(AudioRole, f64)>::new();
 
         let mut absorb = |command: AudioCommand| -> bool {
             match command {
@@ -1364,6 +1560,13 @@ pub(super) fn run_audio_worker(
                     state_requested = true;
                     streams_requested = true;
                 }
+                AudioCommand::RequestRoles => roles_requested = true,
+                AudioCommand::SetRoleLevel { role, level } => {
+                    role_levels.retain(|(pending, _)| *pending != role);
+                    role_levels.push((role, level.clamp(0.0, 1.0)));
+                    roles_requested = true;
+                    state_requested = true;
+                }
                 AudioCommand::Stop => return false,
             }
             true
@@ -1391,15 +1594,38 @@ pub(super) fn run_audio_worker(
         let Some(active) = connection.as_ref() else {
             continue;
         };
+        let call_active = call_audio.active();
+        let Some(target) = level_sink(&api, active, call_active) else {
+            if !std::mem::replace(&mut failure_latched, true) {
+                warn!("native PulseAudio operation failed; reconnecting");
+            }
+            if let Some(mut active) = connection.take() {
+                active.close(&api);
+            }
+            continue;
+        };
+        let changed_here =
+            level.is_some() || delta != 0.0 || toggle_mute || !role_levels.is_empty();
+        let retargeted = reported_target
+            .as_ref()
+            .is_some_and(|reported| *reported != target);
+        let quiet = retargeted && !changed_here;
         let mut operation_failed = false;
         if let Some(level) = level {
-            operation_failed |= set_pulse_level(&api, active, level).is_none();
+            operation_failed |= set_pulse_level(&api, active, &target, level).is_none();
         }
         if !operation_failed && delta != 0.0 {
-            operation_failed |= adjust_pulse_level(&api, active, delta).is_none();
+            operation_failed |= adjust_pulse_level(&api, active, &target, delta).is_none();
         }
         if !operation_failed && toggle_mute {
-            operation_failed |= toggle_pulse_mute(&api, active).is_none();
+            operation_failed |= toggle_pulse_mute(&api, active, &target).is_none();
+        }
+        for (role, role_level) in role_levels {
+            if operation_failed {
+                break;
+            }
+            operation_failed |=
+                set_pulse_level(&api, active, &role_sink_name(role), role_level).is_none();
         }
         if !operation_failed {
             for (stream_id, stream_level) in stream_levels {
@@ -1415,12 +1641,14 @@ pub(super) fn run_audio_worker(
             operation_failed |= set_pulse_output_device(&api, active, &name).is_none();
         }
         if !operation_failed && state_requested {
-            if let Some((level, muted)) = read_pulse_state(&api, active) {
+            if let Some((level, muted)) = read_pulse_state(&api, active, &target) {
+                reported_target = Some(target.clone());
                 let _ = events.try_send(SystemControlEvent::AudioLevel {
                     level,
                     muted,
                     limit_reached: adjusted && (level <= 0.0 || level >= 1.0),
                     request_serial,
+                    quiet,
                 });
             } else {
                 operation_failed = true;
@@ -1436,6 +1664,19 @@ pub(super) fn run_audio_worker(
         if !operation_failed && devices_requested {
             if let Some(devices) = query_audio_devices(&api, active) {
                 let _ = events.try_send(SystemControlEvent::AudioDevices(devices));
+            } else {
+                operation_failed = true;
+            }
+        }
+        if !operation_failed && (roles_requested || state_requested) {
+            if let Some(list) = query_sink_list(&api, active) {
+                if let Some(call) = list.roles.iter().find(|sink| sink.role == AudioRole::Call) {
+                    call_audio.follow(if call.muted { 0.0 } else { call.level });
+                }
+                if roles_requested {
+                    let roles = audio_role_states(&list.roles, call_active);
+                    let _ = events.try_send(SystemControlEvent::AudioRoles(roles));
+                }
             } else {
                 operation_failed = true;
             }
