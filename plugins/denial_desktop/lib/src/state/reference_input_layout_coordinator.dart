@@ -26,6 +26,9 @@ class ReferenceInputLayoutCoordinator {
   /// away.
   bool _observeClientPointerPresses = false;
 
+  /// Whether the phone shows home, with no app in front.
+  bool _homeShown = false;
+
   void invalidate() {
     _lastInputLayoutSnapshot = null;
   }
@@ -46,6 +49,7 @@ class ReferenceInputLayoutCoordinator {
     _sceneOrigin = sceneOrigin;
     _composer = composer;
     _observeClientPointerPresses = interactions.observesClientPointerPresses;
+    _homeShown = state.foregroundObjectId == null && !state.lockLayerVisible;
 
     final quickSettingsActive = state.quickSettingsEngaged;
     final edgePanelActive =
@@ -354,6 +358,7 @@ class ReferenceInputLayoutCoordinator {
       exclusiveShellMode: exclusiveShellMode,
       observeClientPointerPresses: _observeClientPointerPresses,
       mobilePresentation: true,
+      homeShown: _homeShown,
     );
     if (_lastInputLayoutSnapshot?.hasSameRoutingAs(snapshot) ?? false) {
       return;

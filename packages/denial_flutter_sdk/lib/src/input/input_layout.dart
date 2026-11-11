@@ -14,6 +14,7 @@ class InputLayoutSnapshot {
     this.exclusiveShellMode = false,
     this.observeClientPointerPresses = false,
     this.mobilePresentation,
+    this.homeShown = false,
   });
 
   final int epoch;
@@ -33,11 +34,16 @@ class InputLayoutSnapshot {
   /// compositor's current mode for shells which do not select a presentation.
   final bool? mobilePresentation;
 
+  /// The phone shows its home screen, with no app in front: Denial keeps
+  /// it upright when home rotation is off.
+  final bool homeShown;
+
   bool hasSameRoutingAs(InputLayoutSnapshot other) {
     if (keyboardCapture != other.keyboardCapture ||
         exclusiveShellMode != other.exclusiveShellMode ||
         observeClientPointerPresses != other.observeClientPointerPresses ||
         mobilePresentation != other.mobilePresentation ||
+        homeShown != other.homeShown ||
         shellRegions.length != other.shellRegions.length ||
         softwareKeyboardRegions.length !=
             other.softwareKeyboardRegions.length ||

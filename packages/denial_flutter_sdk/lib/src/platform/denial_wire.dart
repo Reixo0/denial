@@ -50,6 +50,7 @@ const String denialWireToFlutterChannel = 'denial/wire/to_flutter';
 const int _inputLayoutKeyboardCapture = 1 << 0;
 const int _inputLayoutExclusiveShell = 1 << 1;
 const int _inputLayoutObserveClientPointerPresses = 1 << 2;
+const int _inputLayoutHomeShown = 1 << 5;
 const int _inputLayoutPresentationSpecified = 1 << 3;
 const int _inputLayoutMobilePresentation = 1 << 4;
 const int _inputWindowVisible = 1 << 0;
@@ -254,6 +255,9 @@ class DenialWireCodec {
     }
     if (snapshot.observeClientPointerPresses) {
       flags |= _inputLayoutObserveClientPointerPresses;
+    }
+    if (snapshot.homeShown) {
+      flags |= _inputLayoutHomeShown;
     }
     if (snapshot.mobilePresentation case final mobile?) {
       flags |= _inputLayoutPresentationSpecified;

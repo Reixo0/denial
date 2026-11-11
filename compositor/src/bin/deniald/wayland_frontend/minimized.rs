@@ -95,7 +95,7 @@ impl WaylandFrontend {
     }
 
     /// Whether the phone shows its home or lock screen: locked with no app
-    /// shown over it, or unlocked with every app it left minimized.
+    /// shown over it, or unlocked with no app in front, as the shell says.
     pub(crate) fn home_showing(&self) -> bool {
         if !self.mobile_shell {
             return false;
@@ -103,10 +103,9 @@ impl WaylandFrontend {
         if self.minimized_windows.covered {
             return self.minimized_windows.over_lock.is_none();
         }
-        self.space.elements().all(|window| {
-            self.window_root_surface(window)
-                .is_none_or(|root| self.surface_is_minimized(&root.id()))
-        })
+        self.input_layout
+            .as_ref()
+            .is_some_and(|layout| layout.home_shown())
     }
 
     /// Whether the lock screen keeps `window` suspended: every window but the
