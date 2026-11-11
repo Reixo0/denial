@@ -22,6 +22,10 @@ class ReferenceInputLayoutCoordinator {
   PhoneDeskInputComposer? _composer;
   InputLayoutSnapshot? _lastInputLayoutSnapshot;
 
+  /// Whether a shell panel wants to hear of presses on apps, to put itself
+  /// away.
+  bool _observeClientPointerPresses = false;
+
   void invalidate() {
     _lastInputLayoutSnapshot = null;
   }
@@ -41,6 +45,7 @@ class ReferenceInputLayoutCoordinator {
     }
     _sceneOrigin = sceneOrigin;
     _composer = composer;
+    _observeClientPointerPresses = interactions.observesClientPointerPresses;
 
     final quickSettingsActive = state.quickSettingsEngaged;
     final edgePanelActive =
@@ -347,6 +352,7 @@ class ReferenceInputLayoutCoordinator {
       visibleSurfaceIds: visibleSurfaceIds.toList(growable: false),
       keyboardCapture: keyboardCapture,
       exclusiveShellMode: exclusiveShellMode,
+      observeClientPointerPresses: _observeClientPointerPresses,
       mobilePresentation: true,
     );
     if (_lastInputLayoutSnapshot?.hasSameRoutingAs(snapshot) ?? false) {

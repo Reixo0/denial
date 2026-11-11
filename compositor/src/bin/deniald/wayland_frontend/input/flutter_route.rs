@@ -402,6 +402,19 @@ pub(super) fn process_flutter_input_event(
                     // screen: a touch does not activate the window.
                     let scene_changed =
                         !secure_locked && activate_client_route(state, &route, serial);
+                    // A touch on an app tells the shell, as a press does, so
+                    // its transient panels put themselves away.
+                    if state
+                        .wayland
+                        .as_ref()
+                        .and_then(|frontend| frontend.input_layout.as_ref())
+                        .is_some_and(InputLayoutSnapshot::observes_client_pointer_presses)
+                    {
+                        state.queue_shell_action(
+                            super::super::super::wire::ShellAction::ClientPointerPressed,
+                            None,
+                        );
+                    }
                     state.frontend_mut().text_input.note_client_touch();
                     let (focus, location) = route.touch_at(position);
                     let touch = state
