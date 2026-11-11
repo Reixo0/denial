@@ -1654,6 +1654,30 @@
   "@outputVolumeSemantics": {
     "description": "English UI text for outputVolumeSemantics."
   },
+  "volumeRoleMedia": "Media",
+  "@volumeRoleMedia": {
+    "description": "Volume slider label for music, video and games."
+  },
+  "volumeRoleNotifications": "Notifications",
+  "@volumeRoleNotifications": {
+    "description": "Volume slider label for notification sounds."
+  },
+  "volumeRoleRingtone": "Ringtone",
+  "@volumeRoleRingtone": {
+    "description": "Volume slider label for the incoming call ringtone."
+  },
+  "volumeRoleAlarms": "Alarms",
+  "@volumeRoleAlarms": {
+    "description": "Volume slider label for alarm sounds."
+  },
+  "volumeRoleCalls": "Calls",
+  "@volumeRoleCalls": {
+    "description": "Volume slider label for the voice during calls."
+  },
+  "volumeRolesShow": "Volume for each kind of sound",
+  "@volumeRolesShow": {
+    "description": "Button that shows the volume sliders for media, notifications, ringtone, alarms and calls."
+  },
   "overviewNoWindows": "No windows",
   "@overviewNoWindows": {
     "description": "English UI text for overviewNoWindows."

@@ -2076,6 +2076,42 @@ abstract class AppLocalizations {
   /// **'Output volume'**
   String get outputVolumeSemantics;
 
+  /// Volume slider label for music, video and games.
+  ///
+  /// In en, this message translates to:
+  /// **'Media'**
+  String get volumeRoleMedia;
+
+  /// Volume slider label for notification sounds.
+  ///
+  /// In en, this message translates to:
+  /// **'Notifications'**
+  String get volumeRoleNotifications;
+
+  /// Volume slider label for the incoming call ringtone.
+  ///
+  /// In en, this message translates to:
+  /// **'Ringtone'**
+  String get volumeRoleRingtone;
+
+  /// Volume slider label for alarm sounds.
+  ///
+  /// In en, this message translates to:
+  /// **'Alarms'**
+  String get volumeRoleAlarms;
+
+  /// Volume slider label for the voice during calls.
+  ///
+  /// In en, this message translates to:
+  /// **'Calls'**
+  String get volumeRoleCalls;
+
+  /// Button that shows the volume sliders for media, notifications, ringtone, alarms and calls.
+  ///
+  /// In en, this message translates to:
+  /// **'Volume for each kind of sound'**
+  String get volumeRolesShow;
+
   /// English UI text for overviewNoWindows.
   ///
   /// In en, this message translates to:

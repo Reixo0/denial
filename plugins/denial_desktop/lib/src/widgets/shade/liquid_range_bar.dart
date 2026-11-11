@@ -28,6 +28,8 @@ class LiquidRangeBar extends StatefulWidget {
     required this.onChangeEnd,
     this.onChangeStart,
     this.iconScale = 1,
+    this.radius,
+    this.palette,
   });
 
   final IconData icon;
@@ -37,6 +39,14 @@ class LiquidRangeBar extends StatefulWidget {
   final ValueChanged<double> onChangeEnd;
   final VoidCallback? onChangeStart;
   final double iconScale;
+
+  /// Corner radius; the theme's card radius when null.
+  final double? radius;
+
+  /// Colours to use instead of the quick settings' own, for a bar that has
+  /// to match something else.
+  final ({Color track, Color rim, Color fill, Color ink, Color inkOnFill})?
+  palette;
 
   @override
   State<LiquidRangeBar> createState() => _LiquidRangeBarState();
@@ -148,13 +158,22 @@ class _LiquidRangeBarState extends State<LiquidRangeBar>
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
     final colors = context.shellColors;
-    final palette = _LiquidBarColors(
-      track: theme.cardColor(widget.trackColor),
-      rim: colors.hairlineSoft,
-      fill: theme.accent,
-      ink: colors.panelText,
-      inkOnFill: theme.accentPalette.onPrimary,
-    );
+    final custom = widget.palette;
+    final palette = custom != null
+        ? _LiquidBarColors(
+            track: custom.track,
+            rim: custom.rim,
+            fill: custom.fill,
+            ink: custom.ink,
+            inkOnFill: custom.inkOnFill,
+          )
+        : _LiquidBarColors(
+            track: theme.cardColor(widget.trackColor),
+            rim: colors.hairlineSoft,
+            fill: theme.accent,
+            ink: colors.panelText,
+            inkOnFill: theme.accentPalette.onPrimary,
+          );
     final percent = (_motion.target * 100).round();
     final media = MediaQuery.of(context);
     return Semantics(
@@ -167,7 +186,7 @@ class _LiquidRangeBarState extends State<LiquidRangeBar>
       child: LayoutBuilder(
         builder: (context, constraints) {
           final height = constraints.maxHeight;
-          final radius = theme.scaledRadius(20);
+          final radius = widget.radius ?? theme.scaledRadius(20);
           return Listener(
             onPointerSignal: _handlePointerSignal,
             // A short slop: the bar answers almost at once, and the travel

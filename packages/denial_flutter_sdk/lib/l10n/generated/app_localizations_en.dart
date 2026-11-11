@@ -1161,6 +1161,24 @@ class AppLocalizationsEn extends AppLocalizations {
   String get outputVolumeSemantics => 'Output volume';
 
   @override
+  String get volumeRoleMedia => 'Media';
+
+  @override
+  String get volumeRoleNotifications => 'Notifications';
+
+  @override
+  String get volumeRoleRingtone => 'Ringtone';
+
+  @override
+  String get volumeRoleAlarms => 'Alarms';
+
+  @override
+  String get volumeRoleCalls => 'Calls';
+
+  @override
+  String get volumeRolesShow => 'Volume for each kind of sound';
+
+  @override
   String get overviewNoWindows => 'No windows';
 
   @override

@@ -1122,6 +1122,24 @@ class AppLocalizationsZh extends AppLocalizations {
   String get outputVolumeSemantics => '输出音量';
 
   @override
+  String get volumeRoleMedia => '媒体';
+
+  @override
+  String get volumeRoleNotifications => '通知';
+
+  @override
+  String get volumeRoleRingtone => '铃声';
+
+  @override
+  String get volumeRoleAlarms => '闹钟';
+
+  @override
+  String get volumeRoleCalls => '通话';
+
+  @override
+  String get volumeRolesShow => '各类声音的音量';
+
+  @override
   String get overviewNoWindows => '没有窗口';
 
   @override

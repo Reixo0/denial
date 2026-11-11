@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart' show GestureBinding;
+import 'package:flutter/material.dart' show Icons;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,19 +10,35 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:denial_flutter_sdk/effects.dart';
 import 'package:denial_flutter_sdk/input.dart';
 import 'package:denial_flutter_sdk/localization.dart';
+import 'package:denial_flutter_sdk/platform.dart';
+import 'package:denial_flutter_sdk/state.dart' show denialBridgeProvider;
 import 'package:denial_flutter_sdk/shell_theme.dart';
 import 'package:denial_flutter_sdk/system_services.dart';
 
 import '../state/quick_settings.dart';
 import '../state/system_level_hud.dart';
 import 'liquid/liquid.dart';
+import 'shade/liquid_range_bar.dart';
 import '../state/phone_desk.dart';
+
+/// The volume of each kind of sound, while the indicator is up; empty when
+/// the system has no separate volumes.
+final _audioRolesProvider = StreamProvider.autoDispose<List<AudioRoleLevel>>((
+  ref,
+) {
+  final audio = ref.watch(audioServiceProvider);
+  audio.requestRoles();
+  return audio.roleStates;
+});
 
 /// The phone's volume indicator: a liquid-filled capsule on the right edge,
 /// centred in the top three quarters of the screen. It drops in from the
 /// edge as a bead and stretches into a capsule; the level pours in on a
 /// spring and its surface sloshes when it moves. A finger on it sets the
-/// volume directly. Brightness changes show nothing on a phone.
+/// volume directly. Brightness changes show nothing on a phone. Where the
+/// system keeps a volume per kind of sound, a button under the capsule opens
+/// one slider each for media, notifications, the ringtone, alarms and calls;
+/// the capsule itself sets whichever of them is sounding.
 class MobileVolumeHud extends ConsumerStatefulWidget {
   const MobileVolumeHud({super.key});
 
@@ -29,14 +47,33 @@ class MobileVolumeHud extends ConsumerStatefulWidget {
 }
 
 class _MobileVolumeHudState extends ConsumerState<MobileVolumeHud>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   static const Duration _visibleFor = Duration(milliseconds: 1500);
+
+  /// Longer with the sliders open: there is more to read and reach.
+  static const Duration _rolesVisibleFor = Duration(seconds: 4);
+  static const double _rolesButtonSize = 44;
 
   /// Movement under this, released quickly, is a tap that sets the level.
   static const double _tapSlop = 8;
   static const Duration _tapTime = Duration(milliseconds: 250);
 
   late final _VolumeMotion _motion = _VolumeMotion(this);
+
+  /// The sliders' menu opening out of its button, and closing back into it.
+  late final AnimationController _menu = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 300),
+    reverseDuration: const Duration(milliseconds: 240),
+  );
+
+  /// The menu is closing back into its button; otherwise it fades where it
+  /// is, because the button is leaving with the rest.
+  bool _menuToButton = false;
+
+  /// Where the indicator takes touches, from the last build.
+  List<Rect> _hitRects = const [];
+  StreamSubscription<DenialShellActionEvent>? _shellActions;
   Timer? _hideTimer;
   int _revision = 0;
   bool _muted = false;
@@ -47,17 +84,42 @@ class _MobileVolumeHudState extends ConsumerState<MobileVolumeHud>
   Duration _pointerDownAt = Duration.zero;
   final Stopwatch _clock = Stopwatch()..start();
   bool _atLimit = false;
+  bool _rolesOpen = false;
+
+  /// A finger is on one of the menu's sliders.
+  bool _menuHeld = false;
 
   @override
   void initState() {
     super.initState();
     _motion.addStatusListener(_motionStatusChanged);
+    // A touch anywhere else puts the indicator away and still reaches
+    // whatever it touched: apps' presses arrive as shell actions, the
+    // shell's own through the global route.
+    _shellActions = ref.read(denialBridgeProvider).shellActions.listen((event) {
+      if (event.action == DenialShellAction.clientPointerPressed) _dismissAll();
+    });
+    GestureBinding.instance.pointerRouter.addGlobalRoute(_globalPointer);
+  }
+
+  void _globalPointer(PointerEvent event) {
+    if (event is! PointerDownEvent || !_motion.shown) return;
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return;
+    final local = box.globalToLocal(event.position);
+    if (_hitRects.any((rect) => rect.contains(local))) return;
+    scheduleMicrotask(() {
+      if (mounted) _dismissAll();
+    });
   }
 
   @override
   void dispose() {
     _hideTimer?.cancel();
+    unawaited(_shellActions?.cancel());
+    GestureBinding.instance.pointerRouter.removeGlobalRoute(_globalPointer);
     _motion.dispose();
+    _menu.dispose();
     super.dispose();
   }
 
@@ -98,9 +160,46 @@ class _MobileVolumeHudState extends ConsumerState<MobileVolumeHud>
 
   void _armHide() {
     _hideTimer?.cancel();
-    _hideTimer = Timer(_visibleFor, () {
-      if (mounted && _pointer == null) _motion.dismiss();
+    _hideTimer = Timer(_rolesOpen ? _rolesVisibleFor : _visibleFor, () {
+      if (!mounted || _pointer != null || _menuHeld) return;
+      _closeRoles();
+      _motion.dismiss();
     });
+  }
+
+  void _toggleRoles() {
+    if (_rolesOpen) {
+      _closeRoles(toButton: true);
+    } else {
+      setState(() => _rolesOpen = true);
+      if (MediaQuery.disableAnimationsOf(context)) {
+        _menu.value = 1;
+      } else {
+        _menu.forward();
+      }
+    }
+    _armHide();
+  }
+
+  void _closeRoles({bool toButton = false}) {
+    if (!_rolesOpen) return;
+    _menuToButton = toButton;
+    // Leaving with the capsule takes two steps, so it gets longer.
+    _menu.reverseDuration = Duration(milliseconds: toButton ? 240 : 360);
+    setState(() => _rolesOpen = false);
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _menu.value = 0;
+    } else {
+      _menu.reverse();
+    }
+  }
+
+  /// A touch anywhere else puts the indicator and its menu away.
+  void _dismissAll() {
+    if (_pointer != null || _menuHeld) return;
+    _hideTimer?.cancel();
+    _closeRoles();
+    _motion.dismiss();
   }
 
   double _trackHeight(Rect rest) => rest.height * 0.92;
@@ -168,6 +267,8 @@ class _MobileVolumeHudState extends ConsumerState<MobileVolumeHud>
       }
     });
     if (!_motion.onScreen) return const SizedBox.shrink();
+    final roles =
+        ref.watch(_audioRolesProvider).value ?? const <AudioRoleLevel>[];
 
     final view = MediaQuery.sizeOf(context);
     final padding = MediaQuery.viewPaddingOf(context);
@@ -192,10 +293,43 @@ class _MobileVolumeHudState extends ConsumerState<MobileVolumeHud>
       view.width,
       rest.bottom + 10,
     );
+    final showRoles = roles.isNotEmpty && _motion.shown;
+    final rolesButton = Rect.fromCenter(
+      center: Offset(rest.center.dx, rest.bottom + 16 + _rolesButtonSize / 2),
+      width: _rolesButtonSize,
+      height: _rolesButtonSize,
+    );
+    final rolesPanel = Rect.fromLTRB(
+      rest.left - 16 - _RolePanel.widthFor(roles.length),
+      rest.top - 28,
+      rest.left - 16,
+      rest.bottom + 28,
+    );
+    _hitRects = [
+      touch,
+      if (showRoles) rolesButton,
+      if (showRoles && _rolesOpen) rolesPanel,
+    ];
+    // From the menu's right side past the screen's edge.
+    final menuExit = view.width - rolesPanel.left;
+    // The menu grows from, and shrinks back into, its button.
+    final menuOrigin = Alignment(
+      (rolesButton.center.dx - rolesPanel.center.dx) / (rolesPanel.width / 2),
+      (rolesButton.center.dy - rolesPanel.center.dy) / (rolesPanel.height / 2),
+    );
 
     return Stack(
       fit: StackFit.expand,
       children: [
+        Positioned.fill(
+          child: ShellInputRegion(
+            debugLabel: 'Mobile volume dismissal',
+            active: _motion.shown,
+            pointerPolicy: ShellPointerPolicy.none,
+            observeClientPointerPresses: true,
+            child: const SizedBox.shrink(),
+          ),
+        ),
         // Shadow and capsule move together; only this layer repaints.
         IgnorePointer(
           child: RepaintBoundary(
@@ -260,7 +394,222 @@ class _MobileVolumeHudState extends ConsumerState<MobileVolumeHud>
             ),
           ),
         ),
+        if (showRoles)
+          Positioned.fromRect(
+            rect: rolesButton,
+            child: ShellInputRegion(
+              debugLabel: 'Mobile volume roles',
+              active: true,
+              child: Semantics(
+                button: true,
+                toggled: _rolesOpen,
+                label: context.l10n.volumeRolesShow,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _toggleRoles,
+                  child: ShellBackdropBlur(
+                    borderRadius: BorderRadius.circular(_rolesButtonSize / 2),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: _rolesOpen ? colors.fill : colors.smoke,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: colors.rim),
+                      ),
+                      child: Icon(
+                        Icons.tune_rounded,
+                        size: 22,
+                        color: _rolesOpen ? colors.inkOnFill : colors.ink,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        if (roles.isNotEmpty)
+          Positioned.fromRect(
+            rect: rolesPanel,
+            child: AnimatedBuilder(
+              animation: _menu,
+              builder: (context, child) {
+                final t = _menu.value;
+                if (t <= 0) return const SizedBox.shrink();
+                final double scale;
+                final double opacity;
+                if (_menu.status != AnimationStatus.reverse &&
+                    _menu.status != AnimationStatus.dismissed) {
+                  scale = 0.12 + 0.88 * Curves.easeOutBack.transform(t);
+                  opacity = Curves.easeOut.transform(t);
+                } else if (_menuToButton) {
+                  // Gathers slowly, then drops into the button; it fades
+                  // only near the end so its shape stays readable.
+                  scale = 0.12 + 0.88 * Curves.easeOutCubic.transform(t);
+                  opacity = Curves.easeOut.transform((t / 0.55).clamp(0, 1));
+                } else {
+                  // Leaves like the capsule: draws in toward the edge, then
+                  // slides off it.
+                  final shrink = ((t - 0.5) / 0.5).clamp(0.0, 1.0);
+                  final slide = 1 - (t / 0.5).clamp(0.0, 1.0);
+                  scale = 0.3 + 0.7 * Curves.easeOutCubic.transform(shrink);
+                  return ShellInputRegion(
+                    debugLabel: 'Mobile volume role sliders',
+                    active: false,
+                    child: Transform.translate(
+                      offset: Offset(
+                        menuExit * Curves.easeInCubic.transform(slide),
+                        0,
+                      ),
+                      child: Transform.scale(
+                        scale: scale,
+                        alignment: Alignment.centerRight,
+                        child: child,
+                      ),
+                    ),
+                  );
+                }
+                return ShellInputRegion(
+                  debugLabel: 'Mobile volume role sliders',
+                  active: _rolesOpen && _motion.shown,
+                  child: Opacity(
+                    opacity: opacity,
+                    child: Transform.scale(
+                      scale: scale,
+                      alignment: menuOrigin,
+                      child: child,
+                    ),
+                  ),
+                );
+              },
+              child: _RolePanel(
+                roles: roles,
+                colors: colors,
+                onInteraction: () {
+                  _menuHeld = true;
+                  _hideTimer?.cancel();
+                },
+                onSettled: () {
+                  _menuHeld = false;
+                  _armHide();
+                },
+              ),
+            ),
+          ),
       ],
+    );
+  }
+}
+
+/// One vertical slider per kind of sound, beside the capsule.
+class _RolePanel extends ConsumerWidget {
+  const _RolePanel({
+    required this.roles,
+    required this.colors,
+    required this.onInteraction,
+    required this.onSettled,
+  });
+
+  final List<AudioRoleLevel> roles;
+  final _VolumeColors colors;
+  final VoidCallback onInteraction;
+  final VoidCallback onSettled;
+
+  static const double _barWidth = 56;
+  static const double _gap = 12;
+  static const double _padding = 16;
+
+  static double widthFor(int count) =>
+      count * _barWidth + math.max(0, count - 1) * _gap + 2 * _padding;
+
+  static IconData _icon(AudioRole role) => switch (role) {
+    AudioRole.media => Icons.music_note_rounded,
+    AudioRole.notification => Icons.notifications_rounded,
+    AudioRole.ringtone => Icons.ring_volume_rounded,
+    AudioRole.alarm => Icons.alarm_rounded,
+    AudioRole.call => Icons.call_rounded,
+  };
+
+  static String _label(BuildContext context, AudioRole role) => switch (role) {
+    AudioRole.media => context.l10n.volumeRoleMedia,
+    AudioRole.notification => context.l10n.volumeRoleNotifications,
+    AudioRole.ringtone => context.l10n.volumeRoleRingtone,
+    AudioRole.alarm => context.l10n.volumeRoleAlarms,
+    AudioRole.call => context.l10n.volumeRoleCalls,
+  };
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final audio = ref.read(audioServiceProvider);
+    void apply(AudioRole role, double level) =>
+        audio.applyRole(role, (level * 100).round());
+
+    return ShellBackdropBlur(
+      borderRadius: BorderRadius.circular(32),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.smoke,
+          borderRadius: BorderRadius.circular(32),
+          border: Border.all(color: colors.rim),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(_padding),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final (index, role) in roles.indexed) ...[
+                if (index > 0) const SizedBox(width: _gap),
+                SizedBox(
+                  width: _barWidth,
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: LiquidRangeBar(
+                          // Round and coloured like the capsule beside it.
+                          radius: _barWidth / 2,
+                          // A little see-through, like the capsule, but
+                          // still apart from the menu behind.
+                          palette: (
+                            track: colors.smoke.withValues(
+                              alpha: colors.smoke.a * 0.6,
+                            ),
+                            rim: colors.rim,
+                            fill: colors.fill.withValues(alpha: 0.8),
+                            ink: colors.ink,
+                            inkOnFill: colors.inkOnFill,
+                          ),
+                          icon: _icon(role.role),
+                          value: role.muted ? 0 : role.level,
+                          trackColor: context.shellColors.volumeTrack,
+                          onChangeStart: onInteraction,
+                          onChanged: (level) => apply(role.role, level),
+                          onChangeEnd: (level) {
+                            apply(role.role, level);
+                            onSettled();
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _label(context, role.role),
+                        maxLines: 1,
+                        overflow: TextOverflow.fade,
+                        softWrap: false,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: colors.ink,
+                          fontWeight: role.active
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
