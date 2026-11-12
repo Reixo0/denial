@@ -1012,10 +1012,27 @@ fn active_role(roles: &[RoleSinkState], call_active: bool) -> Option<AudioRole> 
         .or(Some(AudioRole::Media))
 }
 
+fn sink_is_headphone(name: &str) -> bool {
+    name.starts_with("bluez_output.")
+        || name.contains("Headphones")
+        || name.contains("Headset")
+        || name.starts_with("alsa_output.usb-")
+}
+
 /// The sink the main level sets: the active role's, or without role sinks the
-/// default output.
-fn level_sink(api: &PulseApi, connection: &PulseConnection, call_active: bool) -> Option<CString> {
+/// default output. Also refreshes `headphones_connected` from `list.devices`.
+fn level_sink(
+    api: &PulseApi,
+    connection: &PulseConnection,
+    call_active: bool,
+    headphones_connected: &AtomicBool,
+) -> Option<CString> {
     let list = query_sink_list(api, connection)?;
+    let connected = list
+        .devices
+        .iter()
+        .any(|device| device.active && sink_is_headphone(&device.name));
+    headphones_connected.store(connected, Ordering::Relaxed);
     match active_role(&list.roles, call_active) {
         Some(role) => Some(role_sink_name(role)),
         None => query_default_sink(api, connection),
@@ -1491,6 +1508,7 @@ pub(super) fn run_audio_worker(
     commands: Receiver<AudioCommand>,
     events: SystemControlEventSender,
     subscription_commands: SyncSender<AudioCommand>,
+    headphones_connected: Arc<AtomicBool>,
 ) {
     let api = match PulseApi::load() {
         Ok(api) => api,
@@ -1595,7 +1613,7 @@ pub(super) fn run_audio_worker(
             continue;
         };
         let call_active = call_audio.active();
-        let Some(target) = level_sink(&api, active, call_active) else {
+        let Some(target) = level_sink(&api, active, call_active, &headphones_connected) else {
             if !std::mem::replace(&mut failure_latched, true) {
                 warn!("native PulseAudio operation failed; reconnecting");
             }

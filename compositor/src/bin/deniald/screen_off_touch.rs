@@ -28,6 +28,10 @@ impl Filter {
         self.dark = dark;
     }
 
+    pub(super) fn is_dark(&self) -> bool {
+        self.dark
+    }
+
     pub(super) fn suppress(&mut self, device: &str, event: Event, powered: bool) -> bool {
         let powered = powered && !self.dark;
         let blocked = self.held.iter().any(|(name, _)| name == device);

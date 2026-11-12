@@ -1340,7 +1340,9 @@ fn process_keyboard_transition(
     key_state: KeyState,
     time: InputTime,
 ) -> bool {
-    state.note_user_activity();
+    if !(is_volume_or_media_key(keycode) && all_outputs_powered_off(state)) {
+        state.note_user_activity();
+    }
     if intercept_native_escape(state, keycode.raw(), key_state) {
         return true;
     }
@@ -2529,7 +2531,7 @@ fn start_system_control_repeat(state: &mut RuntimeState, keycode: u32) {
 
 #[cfg(feature = "flutter")]
 fn dispatch_system_control_repeat(state: &mut RuntimeState, xkb_keycode: u32) -> bool {
-    if !state.flutter_active || state.secure_session_locked() {
+    if !state.flutter_active {
         return false;
     }
     let Some(evdev_keycode) = xkb_keycode.checked_sub(8) else {
@@ -2539,7 +2541,54 @@ fn dispatch_system_control_repeat(state: &mut RuntimeState, xkb_keycode: u32) ->
     if !disposition.repeats_with_timer() {
         return false;
     }
+    if state.secure_session_locked()
+        && !matches!(
+            disposition,
+            ShortcutDisposition::RequestVolumeUp | ShortcutDisposition::RequestVolumeDown
+        )
+    {
+        return false;
+    }
     execute_shortcut_disposition(state, disposition)
+}
+
+#[cfg(feature = "flutter")]
+fn all_outputs_powered_off(state: &RuntimeState) -> bool {
+    if state.screen_off_touch.is_dark() {
+        return true;
+    }
+    state.wayland.as_ref().is_some_and(|frontend| {
+        !frontend.outputs.is_empty()
+            && frontend.outputs.iter().all(|output| {
+                !state
+                    .output_power_requests
+                    .get(&output.id)
+                    .copied()
+                    .unwrap_or(output.powered)
+            })
+    })
+}
+
+#[cfg(feature = "flutter")]
+fn is_volume_or_media_key(keycode: Keycode) -> bool {
+    matches!(
+        keycode.raw().checked_sub(8),
+        Some(113 | 114 | 115 | 163 | 164 | 165 | 166 | 200 | 201 | 226)
+    )
+}
+
+#[cfg(feature = "flutter")]
+fn volume_key_allowed(state: &RuntimeState) -> bool {
+    !all_outputs_powered_off(state)
+        || state
+            .system_controls
+            .as_ref()
+            .is_some_and(super::super::system_controls::SystemControls::headphones_connected)
+}
+
+#[cfg(not(feature = "flutter"))]
+fn volume_key_allowed(_state: &RuntimeState) -> bool {
+    true
 }
 
 fn intercept_native_escape(
@@ -2569,6 +2618,11 @@ fn intercept_native_escape(
     if let ShortcutDisposition::RequestVtSwitch(vt) = &disposition {
         return execute_shortcut_disposition(state, ShortcutDisposition::RequestVtSwitch(*vt));
     }
+    if matches!(disposition, ShortcutDisposition::Forward)
+        && handle_hardware_media_key(state, evdev_keycode, key_state == KeyState::Pressed)
+    {
+        return true;
+    }
     #[cfg(feature = "flutter")]
     if state.secure_session_locked() {
         return match disposition {
@@ -2583,6 +2637,16 @@ fn intercept_native_escape(
                 state
                     .lifecycle
                     .request_shutdown(ShutdownReason::NativeEscapeShortcut);
+                true
+            }
+            ShortcutDisposition::RequestVolumeUp
+            | ShortcutDisposition::RequestVolumeDown
+            | ShortcutDisposition::RequestMute => {
+                let repeats = key_state == KeyState::Pressed && disposition.repeats_with_timer();
+                let handled = execute_shortcut_disposition(state, disposition);
+                if handled && repeats {
+                    start_system_control_repeat(state, xkb_keycode);
+                }
                 true
             }
             // Shortcut state still observes every transition so releases stay
@@ -2619,6 +2683,47 @@ fn intercept_native_escape(
         start_system_control_repeat(state, xkb_keycode);
     }
     handled
+}
+
+fn handle_hardware_media_key(
+    #[allow(unused_variables)] state: &RuntimeState,
+    evdev_keycode: u32,
+    pressed: bool,
+) -> bool {
+    const KEY_NEXTSONG: u32 = 163;
+    const KEY_PLAYPAUSE: u32 = 164;
+    const KEY_PREVIOUSSONG: u32 = 165;
+    const KEY_STOPCD: u32 = 166;
+    const KEY_PLAYCD: u32 = 200;
+    const KEY_PAUSECD: u32 = 201;
+    const KEY_MEDIA: u32 = 226;
+
+    let handled = matches!(
+        evdev_keycode,
+        KEY_NEXTSONG
+            | KEY_PLAYPAUSE
+            | KEY_PREVIOUSSONG
+            | KEY_STOPCD
+            | KEY_PLAYCD
+            | KEY_PAUSECD
+            | KEY_MEDIA
+    );
+    if !handled || !pressed {
+        return handled;
+    }
+
+    #[cfg(feature = "flutter")]
+    if let Some(controls) = state.system_controls.as_ref() {
+        match evdev_keycode {
+            KEY_PLAYPAUSE | KEY_PLAYCD | KEY_PAUSECD => controls.media_play_pause(),
+            KEY_NEXTSONG => controls.media_next(),
+            KEY_PREVIOUSSONG => controls.media_previous(),
+            KEY_STOPCD => controls.media_stop(),
+            KEY_MEDIA => controls.media_headset_hook(),
+            _ => {}
+        }
+    }
+    true
 }
 
 pub(super) fn execute_shortcut_disposition(
@@ -2908,19 +3013,25 @@ fn execute_shortcut_disposition_at(
             true
         }
         ShortcutDisposition::RequestVolumeUp => {
-            if let Some(controls) = state.system_controls.as_ref() {
+            if volume_key_allowed(state)
+                && let Some(controls) = state.system_controls.as_ref()
+            {
                 controls.volume_up();
             }
             true
         }
         ShortcutDisposition::RequestVolumeDown => {
-            if let Some(controls) = state.system_controls.as_ref() {
+            if volume_key_allowed(state)
+                && let Some(controls) = state.system_controls.as_ref()
+            {
                 controls.volume_down();
             }
             true
         }
         ShortcutDisposition::RequestMute => {
-            if let Some(controls) = state.system_controls.as_ref() {
+            if volume_key_allowed(state)
+                && let Some(controls) = state.system_controls.as_ref()
+            {
                 controls.toggle_mute();
             }
             true

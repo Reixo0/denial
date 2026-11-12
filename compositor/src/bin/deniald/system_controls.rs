@@ -494,6 +494,9 @@ impl SystemControlEventSender {
 pub(super) struct SystemControls {
     audio_commands: SyncSender<AudioCommand>,
     brightness_commands: SyncSender<BrightnessCommand>,
+    headphones_connected: Arc<AtomicBool>,
+    #[cfg(feature = "flutter")]
+    media_commands: SyncSender<MediaCommand>,
     #[cfg(feature = "flutter")]
     session_commands: SyncSender<SessionCommand>,
     #[cfg(feature = "flutter")]
@@ -503,6 +506,8 @@ pub(super) struct SystemControls {
     events_pending: Arc<AtomicBool>,
     audio_worker: Option<JoinHandle<()>>,
     brightness_worker: Option<JoinHandle<()>>,
+    #[cfg(feature = "flutter")]
+    media_worker: Option<JoinHandle<()>>,
     #[cfg(feature = "flutter")]
     session_worker: Option<JoinHandle<()>>,
     #[cfg(feature = "flutter")]
@@ -521,11 +526,18 @@ impl SystemControls {
         let (audio_commands, audio_rx) = mpsc::sync_channel(COMMAND_QUEUE_CAPACITY);
         let audio_events = events_tx.clone();
         let subscription_commands = audio_commands.clone();
+        let headphones_connected = Arc::new(AtomicBool::new(false));
+        let audio_headphones = Arc::clone(&headphones_connected);
         let audio_worker = thread::Builder::new()
             .name("denial-audio".into())
             .spawn(move || {
                 crate::cpu_scheduling::normalize_current_worker("audio");
-                run_audio_worker(audio_rx, audio_events, subscription_commands);
+                run_audio_worker(
+                    audio_rx,
+                    audio_events,
+                    subscription_commands,
+                    audio_headphones,
+                );
             })?;
 
         let (brightness_commands, brightness_rx) = mpsc::sync_channel(COMMAND_QUEUE_CAPACITY);
@@ -584,9 +596,35 @@ impl SystemControls {
             }
         };
 
+        #[cfg(feature = "flutter")]
+        let (media_commands, media_rx) = mpsc::sync_channel(16);
+        #[cfg(feature = "flutter")]
+        let media_worker = match thread::Builder::new()
+            .name("denial-media".into())
+            .spawn(move || {
+                crate::cpu_scheduling::normalize_current_worker("media");
+                run_media_worker(media_rx);
+            }) {
+            Ok(worker) => worker,
+            Err(error) => {
+                let _ = audio_commands.send(AudioCommand::Stop);
+                let _ = brightness_commands.send(BrightnessCommand::Stop);
+                let _ = session_commands.send(SessionCommand::Stop);
+                sleep_monitor.request_stop();
+                let _ = audio_worker.join();
+                let _ = brightness_worker.join();
+                let _ = session_worker.join();
+                let _ = sleep_monitor_worker.join();
+                return Err(error);
+            }
+        };
+
         Ok(Self {
             audio_commands,
             brightness_commands,
+            headphones_connected,
+            #[cfg(feature = "flutter")]
+            media_commands,
             #[cfg(feature = "flutter")]
             session_commands,
             #[cfg(feature = "flutter")]
@@ -595,6 +633,8 @@ impl SystemControls {
             events_pending,
             audio_worker: Some(audio_worker),
             brightness_worker: Some(brightness_worker),
+            #[cfg(feature = "flutter")]
+            media_worker: Some(media_worker),
             #[cfg(feature = "flutter")]
             session_worker: Some(session_worker),
             #[cfg(feature = "flutter")]
@@ -614,6 +654,36 @@ impl SystemControls {
 
     pub(super) fn toggle_mute(&self) {
         let _ = self.audio_commands.try_send(AudioCommand::ToggleMute);
+    }
+
+    #[cfg(feature = "flutter")]
+    pub(super) fn headphones_connected(&self) -> bool {
+        self.headphones_connected.load(Ordering::Relaxed)
+    }
+
+    #[cfg(feature = "flutter")]
+    pub(super) fn media_play_pause(&self) {
+        let _ = self.media_commands.try_send(MediaCommand::PlayPause);
+    }
+
+    #[cfg(feature = "flutter")]
+    pub(super) fn media_next(&self) {
+        let _ = self.media_commands.try_send(MediaCommand::Next);
+    }
+
+    #[cfg(feature = "flutter")]
+    pub(super) fn media_previous(&self) {
+        let _ = self.media_commands.try_send(MediaCommand::Previous);
+    }
+
+    #[cfg(feature = "flutter")]
+    pub(super) fn media_stop(&self) {
+        let _ = self.media_commands.try_send(MediaCommand::Stop);
+    }
+
+    #[cfg(feature = "flutter")]
+    pub(super) fn media_headset_hook(&self) {
+        let _ = self.media_commands.try_send(MediaCommand::HeadsetHook);
     }
 
     pub(super) fn handle_audio_request(&self, request: AudioRequest) -> bool {
@@ -763,7 +833,10 @@ impl Drop for SystemControls {
         let _ = self.audio_commands.send(AudioCommand::Stop);
         let _ = self.brightness_commands.send(BrightnessCommand::Stop);
         #[cfg(feature = "flutter")]
-        let _ = self.session_commands.send(SessionCommand::Stop);
+        {
+            let _ = self.media_commands.send(MediaCommand::StopWorker);
+            let _ = self.session_commands.send(SessionCommand::Stop);
+        }
         if self
             .audio_worker
             .take()
@@ -780,6 +853,13 @@ impl Drop for SystemControls {
         }
         #[cfg(feature = "flutter")]
         {
+            if self
+                .media_worker
+                .take()
+                .is_some_and(|worker| worker.join().is_err())
+            {
+                warn!("native media worker panicked during shutdown");
+            }
             if self
                 .session_worker
                 .take()
@@ -803,11 +883,16 @@ mod audio;
 #[path = "system_controls/brightness.rs"]
 mod brightness;
 #[cfg(feature = "flutter")]
+#[path = "system_controls/media.rs"]
+mod media;
+#[cfg(feature = "flutter")]
 #[path = "system_controls/session.rs"]
 mod session;
 
 use audio::run_audio_worker;
 use brightness::run_brightness_worker;
+#[cfg(feature = "flutter")]
+use media::{MediaCommand, run_media_worker};
 #[cfg(feature = "flutter")]
 use session::{run_session_worker, run_sleep_monitor};
 
