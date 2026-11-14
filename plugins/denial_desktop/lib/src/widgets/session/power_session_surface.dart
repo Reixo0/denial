@@ -9,6 +9,8 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:denial_flutter_sdk/localization.dart';
+import 'package:denial_flutter_sdk/platform.dart';
+import 'package:denial_flutter_sdk/system_services.dart';
 import 'package:denial_flutter_sdk/input.dart';
 import 'package:denial_flutter_sdk/state.dart';
 import 'package:denial_flutter_sdk/motion.dart';
@@ -29,6 +31,38 @@ void showPowerSessionSurface(WidgetRef ref) {
         dismissPolicy: ShellDismissPolicy.outsideTapAndEscape,
         builder: (_, handle) => PowerSessionSurface(onClose: handle.close),
       );
+}
+
+/// Opens the power menu when the power button is held on an unlocked
+/// phone, with a haptic pulse, as Android does.
+class PowerMenuShortcut extends ConsumerStatefulWidget {
+  const PowerMenuShortcut({super.key});
+
+  @override
+  ConsumerState<PowerMenuShortcut> createState() => _PowerMenuShortcutState();
+}
+
+class _PowerMenuShortcutState extends ConsumerState<PowerMenuShortcut> {
+  late final StreamSubscription<DenialShellActionEvent> _shellActions;
+
+  @override
+  void initState() {
+    super.initState();
+    _shellActions = ref.read(denialBridgeProvider).shellActions.listen((event) {
+      if (event.action != DenialShellAction.powerMenu) return;
+      ref.read(hapticsServiceProvider).pulse();
+      showPowerSessionSurface(ref);
+    });
+  }
+
+  @override
+  void dispose() {
+    unawaited(_shellActions.cancel());
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
 }
 
 class PowerSessionSurface extends StatelessWidget {

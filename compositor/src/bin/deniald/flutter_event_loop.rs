@@ -412,6 +412,10 @@ impl Session<'_, '_> {
         timeout = events.idle_policy.limit_dispatch_timeout(now, timeout);
         timeout = events.dpms_topology.limit_dispatch_timeout(now, timeout);
         timeout = events.ambient_display.limit_dispatch_timeout(now, timeout);
+        // A held power button asks for the menu without other input.
+        if let Some(deadline) = events.power_button.hold_deadline() {
+            timeout = timeout.min(deadline.saturating_duration_since(now));
+        }
         if let Some(expiry) = events
             .control
             .system_waits

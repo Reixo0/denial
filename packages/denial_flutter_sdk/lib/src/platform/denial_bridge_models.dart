@@ -22,6 +22,9 @@ enum DenialShellAction {
 
   /// deniald captured a full-screen screenshot (Power plus Volume Down).
   screenshotCaptured,
+
+  /// The power button was held: the phone shows its power menu.
+  powerMenu,
 }
 
 class DenialShellActionEvent {

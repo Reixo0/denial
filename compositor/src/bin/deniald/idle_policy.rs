@@ -353,7 +353,8 @@ fn decode_timeout(
 /// Physical power keys are consumed before ordinary input-to-wake handling.
 /// Releases and duplicate presses must never reverse the requested transition.
 /// With `chords` (the mobile shell), Power and Volume Down together, in
-/// either order, take a screenshot instead.
+/// either order, take a screenshot instead, and Power held for
+/// [`POWER_MENU_HOLD`] asks for the power menu.
 #[derive(Default)]
 pub(super) struct PowerButton {
     held_devices: BTreeSet<String>,
@@ -364,7 +365,12 @@ pub(super) struct PowerButton {
     /// Volume Down's press went to a screenshot, so its release does too.
     volume_down_taken: bool,
     screenshot_requested: bool,
+    /// When Power went down, while a hold can still ask for the menu.
+    held_since: Option<Instant>,
 }
+
+/// How long Power is held for the power menu, as on Android.
+pub(super) const POWER_MENU_HOLD: Duration = Duration::from_millis(500);
 
 /// Where a Volume Down transition goes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -388,13 +394,39 @@ impl PowerButton {
                     self.screenshot_requested = true;
                     // A press that still waits never reaches the seat.
                     self.volume_down_taken = std::mem::take(&mut self.volume_down_held_back);
+                    self.held_since = None;
                 } else {
                     self.toggle_pending = !self.toggle_pending;
+                    self.held_since = chords.then(Instant::now);
                 }
             }
         } else {
             self.held_devices.remove(device);
+            if self.held_devices.is_empty() {
+                self.held_since = None;
+            }
         }
+    }
+
+    /// When a held Power asks for the power menu, while it can.
+    pub(super) fn hold_deadline(&self) -> Option<Instant> {
+        self.held_since.map(|since| since + POWER_MENU_HOLD)
+    }
+
+    /// Whether Power has been held long enough for the power menu: once per
+    /// press, and the press then leaves the screen as it is.
+    pub(super) fn take_hold(&mut self, now: Instant) -> bool {
+        if self.hold_deadline().is_none_or(|deadline| now < deadline) {
+            return false;
+        }
+        self.held_since = None;
+        self.toggle_pending = false;
+        true
+    }
+
+    /// A press that cannot ask for the menu (a locked phone) stays a toggle.
+    pub(super) fn forget_hold(&mut self) {
+        self.held_since = None;
     }
 
     pub(super) fn note_volume_down(&mut self, pressed: bool, chords: bool) -> VolumeDownRoute {

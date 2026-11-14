@@ -202,6 +202,18 @@ pub(super) fn synchronize_power_button(scanouts: &[Scanout], events: &mut Runtim
         .as_ref()
         .is_some_and(|frontend| frontend.mobile_shell());
     let lit = power_button_screen_lit(phone, scanouts, events);
+    // Held on a lit, unlocked phone, Power asks for the shell's power menu
+    // instead of turning the screen off.
+    #[cfg(feature = "flutter")]
+    if mobile && lit {
+        if events.secure_session_locked() {
+            events.power_button.forget_hold();
+        } else if events.power_button.take_hold(Instant::now()) {
+            events.queue_shell_action(wire::ShellAction::PowerMenu, None);
+            info!("power button held: power menu");
+            return;
+        }
+    }
     if !events.power_button.take_toggle(mobile && lit) {
         return;
     }

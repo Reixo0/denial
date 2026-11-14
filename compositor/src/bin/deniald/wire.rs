@@ -384,6 +384,7 @@ pub enum ShellAction {
     FocusUp,
     FocusDown,
     ScreenshotCaptured,
+    PowerMenu,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -422,6 +423,7 @@ impl ShellAction {
             Self::FocusUp => fb::ShellActionKind::FocusUp,
             Self::FocusDown => fb::ShellActionKind::FocusDown,
             Self::ScreenshotCaptured => fb::ShellActionKind::ScreenshotCaptured,
+            Self::PowerMenu => fb::ShellActionKind::PowerMenu,
         }
     }
 }
