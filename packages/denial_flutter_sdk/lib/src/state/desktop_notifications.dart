@@ -28,7 +28,7 @@ class DesktopNotificationsController extends Notifier<DesktopNotificationsState>
     _dismiss = bridge.dismissNotification;
     _invokeAction = bridge.invokeNotificationAction;
     _invokeDefaultAction = bridge.invokeDefaultNotificationAction;
-    _lightDisplay = bridge.requestDisplayOn;
+    _lightDisplay = bridge.requestAmbientPulse;
     _logger = ref.watch(desktopNotificationLoggerProvider);
     _invokedActions.clear();
     _reducer = DesktopNotificationReducer();
@@ -305,7 +305,9 @@ class DesktopNotificationsController extends Notifier<DesktopNotificationsState>
   }
 
   /// A notification that pops up turns the screen on, when the settings
-  /// ask for it; Do not disturb keeps it dark.
+  /// ask for it; Do not disturb keeps it dark. On a locked phone with an
+  /// always-on profile, deniald shows it for a few seconds at low
+  /// brightness instead, as a Pixel does.
   void _wakeFor(DesktopNotificationEvent event) {
     final notification = event.notification;
     if (event.kind == DesktopNotificationEventKind.closed ||

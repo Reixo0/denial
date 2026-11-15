@@ -29,6 +29,14 @@
 //! always-on state. A wake clears the switch, and the shell fades the rest
 //! back in beside the backlight.
 //!
+//! A profile with `"always_on": false` blanks as usual instead, and with
+//! `"pulse_ms"` the shell may ask for a pulse while the output is dark and
+//! the session locked, for a notification that came in: the output lights
+//! with the always-on picture (and the lock screen's notifications) at the
+//! picture's backlight code for that long, then goes dark again, as a
+//! Pixel's ambient display does. A pulse is dark to everything else, like
+//! a refresh: touches stay out, and a wake ends it lit.
+//!
 //! The session must be able to write the switch. An edited profile applies
 //! from the next blank.
 
@@ -53,7 +61,10 @@ pub(super) const CHANNEL: &CStr = c"denial/ambient_display";
 const PROFILE_PATH: &str = "/etc/denial/ambient-display.json";
 const ENTER: u8 = 1;
 const LEAVE: u8 = 2;
+/// ENTER, for a pulse: the shell keeps the lock screen's notifications.
+const ENTER_PULSE: u8 = 3;
 const READY: u8 = 1;
+const PULSE: u8 = 2;
 
 /// The shell's fade, which the backlight's follows.
 const SHELL_FADE: Duration = Duration::from_millis(420);
@@ -75,6 +86,16 @@ struct Profile {
     brightness: u32,
     #[serde(default)]
     settle_ms: u64,
+    /// False: the output blanks as usual, and only pulses show the picture.
+    #[serde(default = "always_on_default")]
+    always_on: bool,
+    /// How long a pulse shows; None takes no pulses.
+    #[serde(default)]
+    pulse_ms: Option<u64>,
+}
+
+fn always_on_default() -> bool {
+    true
 }
 
 impl Profile {
@@ -94,6 +115,29 @@ impl Profile {
 
 pub(super) fn decode_ready(packet: &[u8]) -> bool {
     packet == [READY]
+}
+
+pub(super) fn decode_pulse(packet: &[u8]) -> bool {
+    packet == [PULSE]
+}
+
+/// Where a pulse is.
+#[derive(Clone, Copy, Debug)]
+enum PulseStage {
+    /// The shell fades to the picture while the backlight dims, until this.
+    Preparing { deadline: Instant },
+    /// The output is coming on.
+    Lighting { started: Instant },
+    /// Lit with the picture until this.
+    Showing { until: Instant },
+    /// Turning off again.
+    Ending,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Pulse {
+    output: OutputId,
+    stage: PulseStage,
 }
 
 /// An output lit only to draw the next minute.
@@ -129,6 +173,7 @@ pub(super) struct AmbientDisplay {
     /// When the next minute's frame is due.
     refresh_due: Option<Instant>,
     refresh: Option<Refresh>,
+    pulse: Option<Pulse>,
 }
 
 impl AmbientDisplay {
@@ -185,10 +230,11 @@ impl AmbientDisplay {
     /// Lit only to draw the next minute: still dark to everything else.
     pub(super) fn refreshing(&self, output: OutputId) -> bool {
         self.refresh.is_some_and(|refresh| refresh.output == output)
+            || self.pulse.is_some_and(|pulse| pulse.output == output)
     }
 
     pub(super) fn refresh_under_way(&self) -> bool {
-        self.refresh.is_some()
+        self.refresh.is_some() || self.pulse.is_some()
     }
 
     pub(super) fn limit_dispatch_timeout(&self, now: Instant, timeout: Duration) -> Duration {
@@ -196,6 +242,12 @@ impl AmbientDisplay {
             self.held.map(|(_, deadline)| deadline),
             self.refresh_due,
             self.refresh.map(|refresh| refresh.started + REFRESH_LIMIT),
+            self.pulse.and_then(|pulse| match pulse.stage {
+                PulseStage::Preparing { deadline } => Some(deadline),
+                PulseStage::Lighting { started } => Some(started + REFRESH_LIMIT),
+                PulseStage::Showing { until } => Some(until),
+                PulseStage::Ending => None,
+            }),
         ]
         .into_iter()
         .flatten()
@@ -216,11 +268,15 @@ pub(super) fn hold_power_off(
     now: Instant,
 ) {
     let ready = runtime.take_ambient_display_ready();
+    let pulse_requested = runtime.take_ambient_pulse();
     events.ambient_display.client_off.retain(|output| {
         scanouts
             .iter()
             .any(|scanout| scanout.output.id == *output && scanout.powered)
     });
+    if pulse(runtime, scheduler, scanouts, events, now, ready, pulse_requested) {
+        return;
+    }
     if refresh(runtime, scheduler, scanouts, events, now) {
         return;
     }
@@ -366,6 +422,132 @@ fn refresh(
     true
 }
 
+/// Runs a pulse the shell asked for: the picture lit at its backlight code
+/// for the profile's `pulse_ms`, then dark again. True while one is under
+/// way.
+fn pulse(
+    runtime: &mut FlutterRuntime,
+    scheduler: &OutputScheduler,
+    scanouts: &[Scanout],
+    events: &mut RuntimeState,
+    now: Instant,
+    ready: bool,
+    requested: bool,
+) -> bool {
+    if let Some(mut pulse) = events.ambient_display.pulse {
+        let output = pulse.output;
+        let Some(scanout) = scanouts.iter().find(|scanout| scanout.output.id == output) else {
+            events.ambient_display.pulse = None;
+            return false;
+        };
+        let woken = events.output_power_requests.get(&output) == Some(&true);
+        match pulse.stage {
+            PulseStage::Preparing { .. } | PulseStage::Showing { .. } if woken => {
+                // Woken during the pulse: it stays lit, as a wake leaves it.
+                events.ambient_display.pulse = None;
+                leave(runtime, events);
+                info!("ambient pulse ended by a wake");
+                return false;
+            }
+            PulseStage::Preparing { deadline } => {
+                if ready || now >= deadline {
+                    pulse.stage = PulseStage::Lighting { started: now };
+                    events.output_power_requests.insert(output, true);
+                }
+            }
+            PulseStage::Lighting { started } => {
+                if scanout.powered && !scheduler.power_on_pending(output) {
+                    let shown = events
+                        .ambient_display
+                        .profile()
+                        .and_then(|profile| profile.pulse_ms)
+                        .unwrap_or(3000);
+                    pulse.stage = PulseStage::Showing {
+                        until: now + Duration::from_millis(shown),
+                    };
+                } else if now >= started + REFRESH_LIMIT {
+                    warn!("ambient pulse: the output did not light in time");
+                    pulse.stage = PulseStage::Ending;
+                    events.output_power_requests.insert(output, false);
+                }
+            }
+            PulseStage::Showing { until } => {
+                if now >= until {
+                    pulse.stage = PulseStage::Ending;
+                    events.output_power_requests.insert(output, false);
+                }
+            }
+            PulseStage::Ending => {
+                if !scanout.powered {
+                    events.ambient_display.pulse = None;
+                    leave(runtime, events);
+                    return false;
+                }
+            }
+        }
+        events.ambient_display.pulse = Some(pulse);
+        return true;
+    }
+
+    if !requested {
+        return false;
+    }
+    if !start_pulse(runtime, scanouts, events, now) {
+        // No pulse here: the notification wakes the screen as it used to.
+        let requests = events.idle_policy.note_activity(now);
+        events.queue_idle_power_requests(requests);
+        info!("notification woke the screen");
+        return false;
+    }
+    true
+}
+
+/// Starts a pulse when the phone is locked with its always-on output dark.
+fn start_pulse(
+    runtime: &mut FlutterRuntime,
+    scanouts: &[Scanout],
+    events: &mut RuntimeState,
+    now: Instant,
+) -> bool {
+    let state = &mut events.ambient_display;
+    if state.held.is_some() || state.refresh.is_some() || !state.entered.is_empty() {
+        // The always-on picture already shows, or is on its way.
+        return false;
+    }
+    let Some(name) = state
+        .profile()
+        .filter(|profile| profile.pulse_ms.is_some())
+        .map(|profile| profile.output.clone())
+    else {
+        return false;
+    };
+    let Some(output) = scanouts
+        .iter()
+        .find(|scanout| scanout.output.name == name && !scanout.powered)
+        .map(|scanout| scanout.output.id)
+    else {
+        // Lit already: the notification shows as usual.
+        return false;
+    };
+    let locked = events
+        .authentication
+        .as_ref()
+        .is_some_and(|authentication| authentication.lock_automatically());
+    if !locked || events.output_power_requests.contains_key(&output) {
+        return false;
+    }
+    events.ambient_display.pulse = Some(Pulse {
+        output,
+        stage: PulseStage::Preparing {
+            deadline: now + FADE_LIMIT,
+        },
+    });
+    send(runtime, ENTER_PULSE);
+    fade_backlight(events, true);
+    info!("ambient pulse for a notification");
+    true
+}
+
 /// The instant the shell's clock shows the next minute.
 fn next_minute(now: Instant) -> Instant {
     let into = SystemTime::now()
@@ -384,7 +566,12 @@ fn power_off_to_hold(scanouts: &[Scanout], events: &mut RuntimeState) -> Option<
         return None;
     }
     let beside_desk = frontend.phone_with_desk();
-    let name = events.ambient_display.profile()?.output.clone();
+    let name = events
+        .ambient_display
+        .profile()
+        .filter(|profile| profile.always_on)?
+        .output
+        .clone();
     let scanout = scanouts
         .iter()
         .find(|scanout| scanout.output.name == name && scanout.powered)?;
@@ -425,7 +612,7 @@ pub(super) fn synchronize_wake(
     if woke {
         leave(runtime, events);
     }
-    let refreshing = events.ambient_display.refresh.is_some();
+    let refreshing = events.ambient_display.refresh_under_way();
     events.screen_off_touch.set_dark(refreshing);
 }
 

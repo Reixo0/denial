@@ -57,6 +57,7 @@ class _LockScreenPane extends ConsumerStatefulWidget {
     required this.desktop,
     this.ambient = kAlwaysDismissedAnimation,
     this.ambientOnly = false,
+    this.pulse = false,
   });
 
   final Animation<double> unlockProgress;
@@ -70,6 +71,10 @@ class _LockScreenPane extends ConsumerStatefulWidget {
   /// wallpaper's subject and the fingerprint mark. Everything else fades
   /// with it.
   final Animation<double> ambient;
+
+  /// The always-on picture is a notification's pulse: the notifications
+  /// stay in it.
+  final bool pulse;
 
   @override
   ConsumerState<_LockScreenPane> createState() => _LockScreenPaneState();
@@ -447,20 +452,21 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
                         ),
                       ),
                     ],
-                    if (!widget.desktop && widget.authenticationEnabled)
+                    if (!widget.desktop && widget.authenticationEnabled) ...[
                       _AmbientHidden(
-                        opacity: _ambientHidden,
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            _LockNotifications(
-                              scale: lockSettings.clockScale,
-                              onOpen: _openAfterUnlock,
-                            ),
-                            const _LockGlyph(),
-                          ],
+                        opacity: widget.pulse
+                            ? kAlwaysCompleteAnimation
+                            : _ambientHidden,
+                        child: _LockNotifications(
+                          scale: lockSettings.clockScale,
+                          onOpen: _openAfterUnlock,
                         ),
                       ),
+                      _AmbientHidden(
+                        opacity: _ambientHidden,
+                        child: const _LockGlyph(),
+                      ),
+                    ],
                     if (widget.desktop &&
                         widget.authenticationEnabled &&
                         !simPending &&

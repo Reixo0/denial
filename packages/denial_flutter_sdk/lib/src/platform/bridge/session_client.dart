@@ -22,7 +22,9 @@ final class BridgeSessionClient {
   static const String ambientDisplayChannel = 'denial/ambient_display';
   static const int _ambientEnter = 1;
   static const int _ambientLeave = 2;
+  static const int _ambientEnterPulse = 3;
   static const int _ambientReady = 1;
+  static const int _ambientPulse = 2;
   static final Uint8List _hapticPrewarmPayload = Uint8List.fromList(const <int>[
     0,
   ]);
@@ -118,16 +120,22 @@ final class BridgeSessionClient {
   bool get ambientDisplayActive => _ambientDisplayActive;
   bool _ambientDisplayActive = false;
 
+  /// Whether the picture last entered is a notification's pulse.
+  bool get ambientDisplayPulse => _ambientDisplayPulse;
+  bool _ambientDisplayPulse = false;
+
   Future<ByteData?> handleAmbientDisplay(ByteData? data) async {
     if (data == null || data.lengthInBytes != 1 || _ambientDisplay.isClosed) {
       return null;
     }
     switch (data.getUint8(0)) {
-      case _ambientEnter:
+      case _ambientEnter || _ambientEnterPulse:
         _ambientDisplayActive = true;
+        _ambientDisplayPulse = data.getUint8(0) == _ambientEnterPulse;
         _ambientDisplay.add(true);
       case _ambientLeave:
         _ambientDisplayActive = false;
+        _ambientDisplayPulse = false;
         _ambientDisplay.add(false);
     }
     return null;
@@ -136,6 +144,15 @@ final class BridgeSessionClient {
   /// The always-on picture is on screen: deniald may turn the output off.
   void ambientDisplayReady() {
     final data = ByteData(1)..setUint8(0, _ambientReady);
+    _context.platform
+        .send(ambientDisplayChannel, data)
+        ?.catchError((Object _) => null);
+  }
+
+  /// A notification came while the screen is dark: light the always-on
+  /// picture for a few seconds.
+  void requestAmbientPulse() {
+    final data = ByteData(1)..setUint8(0, _ambientPulse);
     _context.platform
         .send(ambientDisplayChannel, data)
         ?.catchError((Object _) => null);

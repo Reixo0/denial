@@ -547,6 +547,7 @@ pub struct FlutterRuntime {
     pending_idle_policy: Option<idle_policy::IdlePolicyConfiguration>,
     pending_display_power: Option<idle_policy::DisplayPowerRequest>,
     pending_ambient_display_ready: bool,
+    pending_ambient_pulse: bool,
     pending_vm_service_uri: Option<String>,
     generation: u64,
     scheduled_tasks: BinaryHeap<QueuedPlatformTask>,

@@ -190,6 +190,10 @@ impl FlutterRuntime {
         std::mem::take(&mut self.pending_ambient_display_ready)
     }
 
+    pub fn take_ambient_pulse(&mut self) -> bool {
+        std::mem::take(&mut self.pending_ambient_pulse)
+    }
+
     pub fn send_ambient_display(&mut self, command: u8) -> Result<(), Box<dyn Error>> {
         self.host()
             .engine()

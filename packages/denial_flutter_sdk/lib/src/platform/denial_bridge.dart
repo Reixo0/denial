@@ -529,6 +529,16 @@ class DenialBridge {
 
   void ambientDisplayReady() => _session.ambientDisplayReady();
 
+  /// Whether the picture [ambientDisplay] last brought is a pulse: a
+  /// notification's few seconds lit, which show the lock screen's
+  /// notifications too.
+  bool get ambientDisplayPulse => _session.ambientDisplayPulse;
+
+  /// Wakes the screen for a notification. On a locked phone whose screen is
+  /// dark, deniald lights the always-on picture for a few seconds when its
+  /// profile has a pulse; otherwise the screen turns on as usual.
+  void requestAmbientPulse() => _session.requestAmbientPulse();
+
   int queryUiDevelopmentState() => _session.queryUiDevelopmentState();
 
   int enableLiveUiDevelopment() => _session.enableLiveUiDevelopment();

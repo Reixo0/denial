@@ -134,6 +134,10 @@ class _LockScreenLayerState extends ConsumerState<LockScreenLayer>
 
   /// Whether any of the always-on look shows, for the parts drawn only then.
   bool _ambientShown = false;
+
+  /// The always-on picture is a notification's pulse: it shows the
+  /// notifications too.
+  bool _pulse = false;
   StreamSubscription<bool>? _ambientChanges;
 
   /// The lock backdrop frosted once: the PIN keys draw their glass from it,
@@ -185,6 +189,8 @@ class _LockScreenLayerState extends ConsumerState<LockScreenLayer>
   /// deniald turns the output off once the picture is on screen, and lights
   /// it again before it asks for the rest back.
   void _ambientChanged(bool active) {
+    final pulse = active && ref.read(denialBridgeProvider).ambientDisplayPulse;
+    if (pulse != _pulse && mounted) setState(() => _pulse = pulse);
     final fade = widget.ambientOnly ? _reveal : _ambient;
     if (!active) {
       fade.animateBack(0.0, curve: Curves.easeOutCubic);
@@ -305,6 +311,7 @@ class _LockScreenLayerState extends ConsumerState<LockScreenLayer>
                     ambientOnly: ambientOnly,
                     desktop: desktop,
                     ambient: desktop ? kAlwaysDismissedAnimation : _ambient,
+                    pulse: _pulse && !desktop,
                   ),
                 ],
               ),

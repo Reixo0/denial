@@ -228,6 +228,8 @@ impl FlutterRuntime {
         } else if message.channel.as_bytes() == ambient_display::CHANNEL.to_bytes() {
             if ambient_display::decode_ready(&message.data) {
                 self.pending_ambient_display_ready = true;
+            } else if ambient_display::decode_pulse(&message.data) {
+                self.pending_ambient_pulse = true;
             } else {
                 warn!("rejected malformed always-on display message from Flutter");
             }
