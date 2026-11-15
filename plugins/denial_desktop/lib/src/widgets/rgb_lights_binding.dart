@@ -10,8 +10,11 @@ import 'package:denial_flutter_sdk/state.dart';
 
 /// Puts the RGB lights back as the Lights settings page left them when the
 /// shell starts, and plays the light effects set for events over them: an
-/// incoming call or a ringing alarm while it goes on, a new notification for
-/// the time set, charging while the phone charges. Calls and charging come
+/// incoming call or a ringing alarm while it goes on, charging while the
+/// phone charges, and notifications that came while the screen was off until
+/// someone turns the screen on, the notifications go away, or
+/// [_notificationLimit] passes, as RedMagic OS does. Those notifications
+/// also light the dark screen for a few seconds (an ambient pulse). Calls and charging come
 /// from the system bus, so they show with the screen off too. The most
 /// important event going on shows, on the lights it is set for; when none
 /// does, the lights go back. The settings app changes the lights live
@@ -37,7 +40,16 @@ class _RgbLightsBindingState extends ConsumerState<RgbLightsBinding> {
   /// first write.
   RgbLightEvent? _shown;
   bool _shownAny = false;
-  Timer? _notification;
+
+  /// How long the notification effect shows at most after the last
+  /// notification it shows for.
+  static const _notificationLimit = Duration(minutes: 30);
+
+  /// Notifications that came while the screen was off, not yet seen.
+  final Set<int> _unseen = {};
+  Timer? _notificationLimitTimer;
+  late final AppLifecycleListener _lifecycle;
+  bool _screenOn = _visible(WidgetsBinding.instance.lifecycleState);
   Timer? _reloadSoon;
   bool _ringing = false;
   bool _charging = false;
@@ -46,12 +58,30 @@ class _RgbLightsBindingState extends ConsumerState<RgbLightsBinding> {
   /// Writes go one after another.
   Future<void> _writes = Future<void>.value();
 
+  /// deniald reports Flutter's `hidden` lifecycle while every output is off.
+  static bool _visible(AppLifecycleState? lifecycle) =>
+      lifecycle == null ||
+      lifecycle == AppLifecycleState.resumed ||
+      lifecycle == AppLifecycleState.inactive;
+
   @override
   void initState() {
     super.initState();
+    _lifecycle = AppLifecycleListener(
+      onStateChange: (lifecycle) => _screenChanged(_visible(lifecycle)),
+    );
     ref.listenManual(
       desktopNotificationsProvider.select((state) => state.lastEvent),
       (_, event) => _noteNotification(event),
+    );
+    // Notifications dismissed or withdrawn take their effect with them.
+    ref.listenManual(
+      desktopNotificationsProvider.select((state) => state.active),
+      (_, active) {
+        final before = _unseen.length;
+        _unseen.removeWhere((id) => !active.containsKey(id));
+        if (_unseen.length != before) _unseenChanged();
+      },
     );
     ref.listenManual(
       desktopNotificationsProvider.select(
@@ -108,11 +138,36 @@ class _RgbLightsBindingState extends ConsumerState<RgbLightsBinding> {
     _show(force: shown != null && _settings.events[shown] != before);
   }
 
+  /// Turning the screen on shows the notifications: their effect stops.
+  void _screenChanged(bool on) {
+    if (on == _screenOn) return;
+    // A notification's pulse lights the screen without anyone looking.
+    if (on && ref.read(denialBridgeProvider).ambientDisplayActive) return;
+    _screenOn = on;
+    if (on && _unseen.isNotEmpty) {
+      _unseen.clear();
+      _unseenChanged();
+    }
+  }
+
+  void _unseenChanged() {
+    if (_unseen.isEmpty) {
+      _notificationLimitTimer?.cancel();
+      _notificationLimitTimer = null;
+    }
+    _show();
+  }
+
   void _noteNotification(DesktopNotificationEvent? event) {
-    final note = event?.notification;
-    if (event == null ||
-        note == null ||
-        event.kind == DesktopNotificationEventKind.closed ||
+    if (event == null) return;
+    if (event.kind == DesktopNotificationEventKind.closed) {
+      if (_unseen.remove(event.notificationId)) _unseenChanged();
+      return;
+    }
+    final note = event.notification;
+    // Notifications that come while the screen is on are seen already.
+    if (note == null ||
+        _screenOn ||
         !note.alert ||
         note.urgency == DesktopNotificationUrgency.low ||
         note.call ||
@@ -121,11 +176,11 @@ class _RgbLightsBindingState extends ConsumerState<RgbLightsBinding> {
     }
     final quiet = ref.read(desktopNotificationsProvider).doNotDisturb;
     if (quiet && note.urgency != DesktopNotificationUrgency.critical) return;
-    final seconds = _settings.events[RgbLightEvent.notification]?.seconds;
-    _notification?.cancel();
-    _notification = Timer(Duration(seconds: seconds ?? 30), () {
-      _notification = null;
-      _show();
+    _unseen.add(event.notificationId);
+    _notificationLimitTimer?.cancel();
+    _notificationLimitTimer = Timer(_notificationLimit, () {
+      _unseen.clear();
+      _unseenChanged();
     });
     _show();
   }
@@ -136,7 +191,7 @@ class _RgbLightsBindingState extends ConsumerState<RgbLightsBinding> {
     final going = {
       RgbLightEvent.call: _ringing || notes.any((note) => note.incomingCall),
       RgbLightEvent.alarm: notes.any((note) => note.ringingAlarm),
-      RgbLightEvent.notification: _notification != null,
+      RgbLightEvent.notification: _unseen.isNotEmpty,
       RgbLightEvent.charging: _charging,
     };
     for (final event in RgbLightEvent.values) {
@@ -170,7 +225,8 @@ class _RgbLightsBindingState extends ConsumerState<RgbLightsBinding> {
 
   @override
   void dispose() {
-    _notification?.cancel();
+    _notificationLimitTimer?.cancel();
+    _lifecycle.dispose();
     _reloadSoon?.cancel();
     for (final subscription in _subscriptions) {
       unawaited(subscription.cancel());

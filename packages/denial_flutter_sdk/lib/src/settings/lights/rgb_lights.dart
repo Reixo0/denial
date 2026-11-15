@@ -26,7 +26,6 @@ class RgbLightSetting {
     this.effect = RgbLightEffect.solid,
     this.speed = 0.5,
     this.groups,
-    this.seconds = 30,
   });
 
   final bool on;
@@ -45,9 +44,6 @@ class RgbLightSetting {
   /// trigger-left, trigger-right, fan for every fan zone); null for all.
   final Set<String>? groups;
 
-  /// A notification's effect: how long it shows.
-  final int seconds;
-
   /// Whether an event's effect shows on `led`.
   bool covers(String led) {
     final groups = this.groups;
@@ -63,12 +59,10 @@ class RgbLightSetting {
       other.brightness == brightness &&
       other.effect == effect &&
       other.speed == speed &&
-      other.seconds == seconds &&
       _sameGroups(other.groups, groups);
 
   @override
-  int get hashCode =>
-      Object.hash(on, color, brightness, effect, speed, seconds);
+  int get hashCode => Object.hash(on, color, brightness, effect, speed);
 
   static bool _sameGroups(Set<String>? a, Set<String>? b) => a == null
       ? b == null
@@ -82,10 +76,8 @@ class RgbLightSetting {
     final brightness = json['brightness'];
     final speed = json['speed'];
     final groups = json['lights'];
-    final seconds = json['seconds'];
     return RgbLightSetting(
       groups: groups is List ? {...groups.whereType<String>()} : null,
-      seconds: seconds is int ? seconds.clamp(1, 3600) : 30,
       on: json['on'] == true,
       color: color is int ? color & 0xffffff : 0xff0000,
       brightness: brightness is num ? brightness.toDouble().clamp(0.0, 1.0) : 1,

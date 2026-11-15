@@ -32,7 +32,8 @@ class RgbLightSignals {
         ),
   );
 
-  /// Whether the phone charges: UPower's state 1.
+  /// Whether the phone is on its charger: UPower's state 1 (charging), 4
+  /// (fully charged, still plugged in) or 5 (plugged in, charging held).
   Stream<bool> charging() => _follow(
     DBusRemoteObject(
       _bus,
@@ -41,7 +42,10 @@ class RgbLightSignals {
     ),
     'org.freedesktop.UPower.Device',
     'State',
-    (state) => state == const DBusUint32(1),
+    (state) =>
+        state == const DBusUint32(1) ||
+        state == const DBusUint32(4) ||
+        state == const DBusUint32(5),
   );
 
   /// `property` of `object` read through `test`, now and on each change,
