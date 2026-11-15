@@ -25,12 +25,15 @@ struct Grade {
     transform: Option<crate::color_space::SurfaceTransform>,
     alpha: crate::color_space::AlphaMode,
     look: Option<Arc<crate::output_color::Lut>>,
+    /// A YUV source's chroma texture and matrix.
+    yuv: Option<(u32, YuvMatrix)>,
 }
 
 impl Grade {
     fn same(&self, other: &Self) -> bool {
         self.transform == other.transform
             && self.alpha == other.alpha
+            && self.yuv == other.yuv
             && match (&self.look, &other.look) {
                 (Some(a), Some(b)) => Arc::ptr_eq(a, b),
                 (None, None) => true,
@@ -1247,6 +1250,7 @@ impl FlutterGlHandler {
                     .gamut
                     .filter(|_| target.pq_white > 0.0 || crate::output_color::correction_enabled()),
                 pq_white: target.pq_white,
+                yuv: None,
             },
         ) {
             error!(
@@ -1292,8 +1296,16 @@ impl FlutterGlHandler {
         let transform =
             color.and_then(|color| color.transform(crate::output_color::scene_encoding()));
         let alpha = color.map_or_else(Default::default, |color| color.alpha);
+        // YUV video always takes the pass: Flutter samples RGB. Without a
+        // matrix from the client it is BT.601 limited range, as on Android.
+        let yuv = prepared.resource.binding().chroma().and_then(|(chroma, swapped)| {
+            let (coefficients, range) = color.and_then(|color| color.yuv).unwrap_or((4, 2));
+            YuvMatrix::new(coefficients, range, swapped)
+                .or_else(|| YuvMatrix::new(4, 2, swapped))
+                .map(|matrix| (chroma, matrix))
+        });
         let mut grades = lock(&self.window_grades);
-        if look.is_none() && transform.is_none() && alpha == Default::default() {
+        if look.is_none() && transform.is_none() && alpha == Default::default() && yuv.is_none() {
             if grades.graded.remove(&prepared.texture_id).is_some() {
                 grades.prune_looks(self.gl);
             }
@@ -1303,6 +1315,7 @@ impl FlutterGlHandler {
             transform,
             alpha,
             look,
+            yuv,
         };
         let source = (prepared.name, prepared.source_generation);
         let size = (prepared.width, prepared.height);
@@ -1404,6 +1417,7 @@ impl FlutterGlHandler {
                     convert: grade.conversion(),
                     gamut: None,
                     pq_white: 0.0,
+                    yuv: grade.yuv,
                 },
             )
         } else {
@@ -1483,6 +1497,7 @@ impl FlutterGlHandler {
         Ok(Arc::new(CachedTextureBinding {
             binding: Some(ExternalTextureBinding {
                 dmabuf_image: None,
+                chroma: None,
                 _owned_shm: None,
                 _owned_native: None,
                 texture,
@@ -1583,6 +1598,17 @@ impl FlutterGlHandler {
                         self.display.handle,
                         image as egl_ffi::egl::types::EGLImageKHR,
                     );
+                }
+                if let Some(chroma) = binding.chroma {
+                    if chroma.texture != 0 {
+                        (self.gl.delete_textures)(1, &chroma.texture);
+                    }
+                    if chroma.image != 0 {
+                        egl_ffi::egl::DestroyImageKHR(
+                            self.display.handle,
+                            chroma.image as egl_ffi::egl::types::EGLImageKHR,
+                        );
+                    }
                 }
             }
         }

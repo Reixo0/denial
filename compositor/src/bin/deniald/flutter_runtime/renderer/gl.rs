@@ -293,6 +293,10 @@ pub(super) struct ShaderBlit {
     pub(super) luma_uniform: i32,
     pub(super) tone_uniform: i32,
     pub(super) pq_white_uniform: i32,
+    pub(super) yuv_uniform: i32,
+    pub(super) chroma_uniform: i32,
+    pub(super) yuv_matrix_uniform: i32,
+    pub(super) yuv_offset_uniform: i32,
     /// The desktop look's 3D texture, or 0 for none.
     pub(super) look_texture: u32,
     /// The desktop look generation `look_texture` holds.
@@ -311,6 +315,12 @@ void main() {\n\
 const SCANOUT_FRAGMENT_SHADER: &[u8] = b"#version 300 es\n\
 precision highp float;\n\
 uniform sampler2D source_texture;\n\
+// YUV sources: luma in source_texture, chroma in chroma_texture, converted\n\
+// to the video's encoded RGB with yuv_matrix after removing yuv_offset.\n\
+uniform bool yuv;\n\
+uniform sampler2D chroma_texture;\n\
+uniform mat3 yuv_matrix;\n\
+uniform vec3 yuv_offset;\n\
 // 0: no alpha (a scene), 1: premultiplied after encoding, 2: premultiplied\n\
 // before encoding, 3: straight.\n\
 uniform int alpha_mode;\n\
@@ -365,6 +375,10 @@ vec3 tone_map(vec3 rgb) {\n\
 }\n\
 void main() {\n\
     vec4 color = texture(source_texture, texture_coordinate);\n\
+    if (yuv) {\n\
+        vec3 coded = vec3(color.r, texture(chroma_texture, texture_coordinate).rg);\n\
+        color = vec4(clamp(yuv_matrix * (coded - yuv_offset), 0.0, 1.0), 1.0);\n\
+    }\n\
     float alpha = color.a;\n\
     // Straight color through every stage, premultiplied again at the end.\n\
     vec3 rgb = color.rgb;\n\
@@ -417,6 +431,38 @@ pub(super) fn render_view(dmabuf: &Dmabuf) -> Result<Dmabuf, Box<dyn Error>> {
     builder
         .build()
         .ok_or_else(|| "XR30 render view has no planes".into())
+}
+
+/// Single-plane views of an NV12 or NV21 dma-buf: luma as R8 and the
+/// interleaved chroma as GR88 at half size, so each samples as plain texels;
+/// `true` when chroma holds V before U (NV21). None for any other format.
+pub(super) fn yuv_plane_views(dmabuf: &Dmabuf) -> Result<Option<(Dmabuf, Dmabuf, bool)>, Box<dyn Error>> {
+    let format = AllocatorBuffer::format(dmabuf);
+    let swapped = match format.code {
+        Fourcc::Nv12 => false,
+        Fourcc::Nv21 => true,
+        _ => return Ok(None),
+    };
+    let size = AllocatorBuffer::size(dmabuf);
+    let planes: Vec<_> = dmabuf
+        .handles()
+        .zip(dmabuf.offsets())
+        .zip(dmabuf.strides())
+        .collect();
+    if planes.len() != 2 || size.w < 2 || size.h < 2 {
+        return Err("a YUV dma-buf needs two planes".into());
+    }
+    let view = |index: usize, code: Fourcc, w: i32, h: i32| -> Result<Dmabuf, Box<dyn Error>> {
+        let ((fd, offset), stride) = planes[index];
+        let mut builder = Dmabuf::builder((w, h), code, format.modifier, dmabuf.flags());
+        builder.add_plane(fd.try_clone_to_owned()?, offset, stride);
+        builder.build().ok_or_else(|| "a YUV plane view has no plane".into())
+    };
+    Ok(Some((
+        view(0, Fourcc::R8, size.w, size.h)?,
+        view(1, Fourcc::Gr88, (size.w + 1) / 2, (size.h + 1) / 2)?,
+        swapped,
+    )))
 }
 
 pub(super) fn create_shader_blit(gl: GlApi) -> Result<ShaderBlit, Box<dyn Error>> {
@@ -474,6 +520,10 @@ pub(super) fn create_shader_blit(gl: GlApi) -> Result<ShaderBlit, Box<dyn Error>
         c"luma",
         c"tone",
         c"pq_white",
+        c"yuv",
+        c"chroma_texture",
+        c"yuv_matrix",
+        c"yuv_offset",
     ]
     .map(|name| {
         // SAFETY: the names are NUL-terminated and the linked program is live.
@@ -492,6 +542,10 @@ pub(super) fn create_shader_blit(gl: GlApi) -> Result<ShaderBlit, Box<dyn Error>
         luma_uniform,
         tone_uniform,
         pq_white_uniform,
+        yuv_uniform,
+        chroma_uniform,
+        yuv_matrix_uniform,
+        yuv_offset_uniform,
     ] = uniforms;
     if uniforms.contains(&-1) {
         // SAFETY: the linked program remains live until this deletion.
@@ -513,6 +567,10 @@ pub(super) fn create_shader_blit(gl: GlApi) -> Result<ShaderBlit, Box<dyn Error>
         luma_uniform,
         tone_uniform,
         pq_white_uniform,
+        yuv_uniform,
+        chroma_uniform,
+        yuv_matrix_uniform,
+        yuv_offset_uniform,
         look_texture: 0,
         look_generation: 0,
     })
@@ -600,6 +658,57 @@ pub(super) struct CopyColor {
     /// SDR white in cd/m² when the display reads PQ (`gamut` then goes to
     /// BT.2020); 0 for an SDR display.
     pub(super) pq_white: f32,
+    /// A YUV source's chroma texture and conversion; the source texture
+    /// then holds luma.
+    pub(super) yuv: Option<(u32, YuvMatrix)>,
+}
+
+/// Uniforms of the copy shader's YUV stage.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct YuvMatrix {
+    /// Column-major, from (Y, first chroma texel channel, second) to RGB.
+    pub(super) matrix: [f32; 9],
+    pub(super) offset: [f32; 3],
+}
+
+impl YuvMatrix {
+    /// `coefficients` and `range` are `wp_color_representation_surface_v1`
+    /// values; `swapped` puts V before U (NV21). None for an unknown matrix.
+    pub(super) fn new(coefficients: u32, range: u32, swapped: bool) -> Option<Self> {
+        let (kr, kb): (f64, f64) = match coefficients {
+            2 => (0.2126, 0.0722),
+            3 => (0.30, 0.11),
+            4 => (0.299, 0.114),
+            5 => (0.212, 0.087),
+            6 | 7 => (0.2627, 0.0593),
+            _ => return None,
+        };
+        let kg = 1.0 - kr - kb;
+        // 8-bit limited range: luma 16-235, chroma 16-240.
+        let (luma_scale, chroma_scale, luma_offset): (f64, f64, f64) = match range {
+            1 => (1.0, 1.0, 0.0),
+            2 => (255.0 / 219.0, 255.0 / 224.0, 16.0 / 255.0),
+            _ => return None,
+        };
+        let u = [
+            0.0,
+            -2.0 * kb * (1.0 - kb) / kg * chroma_scale,
+            2.0 * (1.0 - kb) * chroma_scale,
+        ];
+        let v = [
+            2.0 * (1.0 - kr) * chroma_scale,
+            -2.0 * kr * (1.0 - kr) / kg * chroma_scale,
+            0.0,
+        ];
+        let (first, second) = if swapped { (v, u) } else { (u, v) };
+        let mut matrix = [luma_scale as f32; 9];
+        matrix[3..6].copy_from_slice(&first.map(|x| x as f32));
+        matrix[6..9].copy_from_slice(&second.map(|x| x as f32));
+        Some(Self {
+            matrix,
+            offset: [luma_offset as f32, 128.0 / 255.0, 128.0 / 255.0],
+        })
+    }
 }
 
 /// Uniforms of the copy shader's conversion stage: decode, matrix to scene
@@ -637,6 +746,7 @@ pub(super) fn copy_to_scanout(
     let mut previous_active_texture = 0;
     let mut previous_texture_2d = 0;
     let mut previous_texture_3d = 0;
+    let mut previous_texture_chroma = 0;
     let mut previous_viewport = [0; 4];
     let mut previous_color_mask = [gl::FALSE; 4];
     let mut previous_capabilities = [false; 5];
@@ -663,6 +773,8 @@ pub(super) fn copy_to_scanout(
         }
         (gl.active_texture)(gl::TEXTURE1);
         (gl.get_integer_v)(gl::TEXTURE_BINDING_3D, &mut previous_texture_3d);
+        (gl.active_texture)(gl::TEXTURE2);
+        (gl.get_integer_v)(gl::TEXTURE_BINDING_2D, &mut previous_texture_chroma);
         (gl.active_texture)(gl::TEXTURE0);
         (gl.get_integer_v)(gl::TEXTURE_BINDING_2D, &mut previous_texture_2d);
 
@@ -711,6 +823,20 @@ pub(super) fn copy_to_scanout(
             (gl.uniform_matrix_3fv)(shader_blit.gamut_uniform, 1, gl::FALSE, gamut.as_ptr());
         }
         (gl.uniform_1f)(shader_blit.pq_white_uniform, color.pq_white);
+        (gl.uniform_1i)(shader_blit.yuv_uniform, i32::from(color.yuv.is_some()));
+        (gl.uniform_1i)(shader_blit.chroma_uniform, 2);
+        if let Some((chroma, yuv)) = &color.yuv {
+            (gl.active_texture)(gl::TEXTURE2);
+            (gl.bind_texture)(gl::TEXTURE_2D, *chroma);
+            (gl.active_texture)(gl::TEXTURE0);
+            (gl.uniform_matrix_3fv)(
+                shader_blit.yuv_matrix_uniform,
+                1,
+                gl::FALSE,
+                yuv.matrix.as_ptr(),
+            );
+            (gl.uniform_3fv)(shader_blit.yuv_offset_uniform, 1, yuv.offset.as_ptr());
+        }
         (gl.draw_arrays)(gl::TRIANGLES, 0, 3);
     }
     // SAFETY: the same render context remains current after the copy.
@@ -724,6 +850,8 @@ pub(super) fn copy_to_scanout(
         (gl.bind_texture)(gl::TEXTURE_2D, previous_texture_2d as u32);
         (gl.active_texture)(gl::TEXTURE1);
         (gl.bind_texture)(gl::TEXTURE_3D, previous_texture_3d as u32);
+        (gl.active_texture)(gl::TEXTURE2);
+        (gl.bind_texture)(gl::TEXTURE_2D, previous_texture_chroma as u32);
         (gl.active_texture)(previous_active_texture as u32);
         (gl.bind_framebuffer)(gl::DRAW_FRAMEBUFFER, previous_draw_framebuffer as u32);
         (gl.viewport)(

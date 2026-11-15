@@ -136,7 +136,9 @@ const WINDOW_CLOSE_COMPLETE_CHANNEL: &CStr = c"denial/window_close_complete";
 const CURSOR_PRESENTED_CHANNEL: &CStr = c"denial/cursor_presented";
 const GLFW_MOD_CONTROL: u32 = 0x0002;
 const GLFW_MOD_ALT: u32 = 0x0004;
-const MAX_CACHED_DMABUF_BINDINGS_PER_TEXTURE: usize = 8;
+/// Video decoders cycle through 16-24 buffers; a smaller cache imports most
+/// frames again.
+const MAX_CACHED_DMABUF_BINDINGS_PER_TEXTURE: usize = 24;
 const MAX_CACHED_SHM_BINDINGS: usize = 32;
 // SHM revisions own distinct GPU uploads. Unlike rotating dma-bufs, old
 // revisions are not reusable client storage. Keep a small recent ring per

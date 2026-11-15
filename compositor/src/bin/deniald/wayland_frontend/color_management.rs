@@ -85,6 +85,22 @@ impl ColorManagement {
     }
 }
 
+/// Coefficients and ranges clients may set: identity for RGB, BT.601 and
+/// BT.709 in both ranges for NV12/NV21.
+const SUPPORTED_COEFFICIENTS: [(
+    wp_color_representation_surface_v1::Coefficients,
+    wp_color_representation_surface_v1::Range,
+); 5] = {
+    use wp_color_representation_surface_v1::{Coefficients, Range};
+    [
+        (Coefficients::Identity, Range::Full),
+        (Coefficients::Bt709, Range::Full),
+        (Coefficients::Bt709, Range::Limited),
+        (Coefficients::Bt601, Range::Full),
+        (Coefficients::Bt601, Range::Limited),
+    ]
+};
+
 /// Double-buffered color state of one surface.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct SurfaceColorState {
@@ -100,11 +116,15 @@ impl SurfaceColorState {
     /// Keeps the previous Arc while nothing changed in value, so clients that
     /// set the same description every frame cause no conversion work.
     fn refresh(&mut self) {
-        let color = (self.description.is_some() || self.alpha != AlphaMode::default()).then(|| {
-            SurfaceColor {
-                description: self.description.clone(),
-                alpha: self.alpha,
-            }
+        // Identity with full range is what RGB buffers mean anyway.
+        let yuv = self.coefficients.filter(|pair| *pair != (1, 1));
+        let color = (self.description.is_some()
+            || self.alpha != AlphaMode::default()
+            || yuv.is_some())
+        .then(|| SurfaceColor {
+            description: self.description.clone(),
+            alpha: self.alpha,
+            yuv,
         });
         if self.color.as_deref() != color.as_ref() {
             self.color = color.map(Arc::new);
@@ -925,7 +945,7 @@ impl GlobalDispatch<WpColorRepresentationManagerV1, ()> for RuntimeState {
         _global_data: &(),
         data_init: &mut DataInit<'_, Self>,
     ) {
-        use wp_color_representation_surface_v1::{AlphaMode, Coefficients, Range};
+        use wp_color_representation_surface_v1::AlphaMode;
         let manager = data_init.init(resource, ());
         for mode in [
             AlphaMode::PremultipliedElectrical,
@@ -934,8 +954,11 @@ impl GlobalDispatch<WpColorRepresentationManagerV1, ()> for RuntimeState {
         ] {
             manager.supported_alpha_mode(mode);
         }
-        // Denial samples RGB buffers only, and those carry no matrix.
-        manager.supported_coefficients_and_ranges(Coefficients::Identity, Range::Full);
+        // RGB buffers carry no matrix; NV12/NV21 video is converted with
+        // BT.601 or BT.709 in either range (what Android video uses).
+        for (coefficients, range) in SUPPORTED_COEFFICIENTS {
+            manager.supported_coefficients_and_ranges(coefficients, range);
+        }
         manager.done();
     }
 }
@@ -1004,10 +1027,13 @@ impl Dispatch<WpColorRepresentationSurfaceV1, SurfaceObject> for RuntimeState {
                 range,
             } => {
                 let (coefficients, range) = (u32::from(coefficients), u32::from(range));
-                if (coefficients, range) != (1, 1) {
+                if !SUPPORTED_COEFFICIENTS
+                    .iter()
+                    .any(|(c, r)| (u32::from(*c), u32::from(*r)) == (coefficients, range))
+                {
                     resource.post_error(
                         Error::Coefficients,
-                        "only identity coefficients with full range are supported",
+                        "only identity, BT.601 and BT.709 coefficients are supported",
                     );
                     return;
                 }
@@ -1078,12 +1104,24 @@ pub(super) fn note_committed_color(surface: &WlSurface, root: &WlSurface) {
         Some(SurfaceColor {
             description: Some((record, intent)),
             alpha,
+            ..
         }) => info!(
             app_id = app_id.unwrap_or("unknown"),
             description = record.description.summary(),
             ?intent,
             ?alpha,
             "surface describes its color"
+        ),
+        Some(SurfaceColor {
+            alpha,
+            yuv: Some((coefficients, range)),
+            ..
+        }) => info!(
+            app_id = app_id.unwrap_or("unknown"),
+            ?alpha,
+            coefficients,
+            range,
+            "surface sets its YUV matrix"
         ),
         Some(SurfaceColor { alpha, .. }) => info!(
             app_id = app_id.unwrap_or("unknown"),

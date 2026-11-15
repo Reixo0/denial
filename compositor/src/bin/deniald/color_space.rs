@@ -467,11 +467,15 @@ impl AlphaMode {
 pub(crate) struct SurfaceColor {
     pub(crate) description: Option<(std::sync::Arc<DescriptionRecord>, RenderIntent)>,
     pub(crate) alpha: AlphaMode,
+    /// A YUV buffer's `wp_color_representation_surface_v1` coefficients and
+    /// range; None for the default (identity, or BT.601 limited for YUV).
+    pub(crate) yuv: Option<(u32, u32)>,
 }
 
 impl PartialEq for SurfaceColor {
     fn eq(&self, other: &Self) -> bool {
         self.alpha == other.alpha
+            && self.yuv == other.yuv
             && match (&self.description, &other.description) {
                 (Some((a, a_intent)), Some((b, b_intent))) => {
                     a_intent == b_intent && a.description == b.description
@@ -485,7 +489,7 @@ impl PartialEq for SurfaceColor {
 impl SurfaceColor {
     /// Whether the renderer must draw this surface's pixels into a copy.
     pub(crate) fn needs_pass(&self, scene: SceneEncoding) -> bool {
-        self.alpha != AlphaMode::default() || self.transform(scene).is_some()
+        self.alpha != AlphaMode::default() || self.yuv.is_some() || self.transform(scene).is_some()
     }
 
     /// The conversion into `scene`, None when the pixels already are the

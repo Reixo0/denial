@@ -51,10 +51,22 @@ pub(in crate::flutter_runtime) struct ExternalTextureBinding {
     // The dma-buf file descriptors must remain live for the EGLImage lifetime.
     pub(in crate::flutter_runtime) dmabuf_image: Option<(Dmabuf, usize)>,
     pub(in crate::flutter_runtime) texture: u32,
+    /// A YUV source's interleaved chroma plane; `texture` then holds luma.
+    pub(in crate::flutter_runtime) chroma: Option<ChromaPlane>,
     // Cached EGL imports also pin compositor-owned mapped backing storage.
     pub(in crate::flutter_runtime) _owned_shm: Option<ShmTextureFrame>,
     _owned_native: Option<Arc<NativeWindowStorage>>,
     pub(in crate::flutter_runtime) _resource_permit: ExternalTextureResourcePermit,
+}
+
+/// The second plane of an NV12/NV21 source, sampled as two-channel texels.
+pub(in crate::flutter_runtime) struct ChromaPlane {
+    pub(in crate::flutter_runtime) image: usize,
+    pub(in crate::flutter_runtime) texture: u32,
+    /// The chroma view's descriptors stay open while its EGLImage lives.
+    pub(in crate::flutter_runtime) _dmabuf: Dmabuf,
+    /// NV21 stores V before U.
+    pub(in crate::flutter_runtime) swapped: bool,
 }
 
 pub(in crate::flutter_runtime) struct RetiredExternalBindingQueue {
@@ -86,6 +98,12 @@ pub(in crate::flutter_runtime) struct CachedTextureBinding {
 impl CachedTextureBinding {
     fn texture(&self) -> u32 {
         self.binding.as_ref().map_or(0, |binding| binding.texture)
+    }
+
+    /// The chroma texture of a YUV source and whether it holds V before U.
+    fn chroma(&self) -> Option<(u32, bool)> {
+        let chroma = self.binding.as_ref()?.chroma.as_ref()?;
+        Some((chroma.texture, chroma.swapped))
     }
 }
 
@@ -1213,6 +1231,7 @@ mod cache_retirement_tests {
         let binding = Arc::new(CachedTextureBinding {
             binding: Some(ExternalTextureBinding {
                 dmabuf_image: None,
+                chroma: None,
                 texture: 43,
                 _owned_shm: Some(frame),
                 _owned_native: None,
@@ -1245,6 +1264,7 @@ mod cache_retirement_tests {
         let binding = Arc::new(CachedTextureBinding {
             binding: Some(ExternalTextureBinding {
                 dmabuf_image: None,
+                chroma: None,
                 _owned_shm: None,
                 _owned_native: None,
                 texture: 41,
@@ -1260,6 +1280,7 @@ mod cache_retirement_tests {
         let other = Arc::new(CachedTextureBinding {
             binding: Some(ExternalTextureBinding {
                 dmabuf_image: None,
+                chroma: None,
                 _owned_shm: None,
                 _owned_native: None,
                 texture: 42,

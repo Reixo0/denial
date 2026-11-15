@@ -31,6 +31,36 @@ impl Drop for RenderAuditCallbackTimer<'_> {
 }
 
 impl FlutterGlHandler {
+    /// A linear, edge-clamped 2D texture over `image`, or None after a GLES
+    /// error (the texture is then deleted).
+    fn image_texture(&self, image: egl_ffi::egl::types::EGLImageKHR) -> Option<u32> {
+        let mut name = 0;
+        // SAFETY: the Flutter render context is current on this callback thread.
+        unsafe {
+            (self.gl.gen_textures)(1, &mut name);
+            (self.gl.bind_texture)(gl::TEXTURE_2D, name);
+            for (parameter, value) in [
+                (gl::TEXTURE_MIN_FILTER, gl::LINEAR),
+                (gl::TEXTURE_MAG_FILTER, gl::LINEAR),
+                (gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE),
+                (gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE),
+            ] {
+                (self.gl.tex_parameter_i)(gl::TEXTURE_2D, parameter, value as i32);
+            }
+            (self.gl.image_target_texture)(gl::TEXTURE_2D, image.cast());
+        }
+        if name == 0 || self.take_gl_error().is_some() {
+            // SAFETY: the texture, when allocated, has not escaped this call.
+            unsafe {
+                if name != 0 {
+                    (self.gl.delete_textures)(1, &name);
+                }
+            }
+            return None;
+        }
+        Some(name)
+    }
+
     pub(super) fn prepare_source_with_gl(
         &self,
         texture_id: i64,
@@ -90,13 +120,39 @@ impl FlutterGlHandler {
                         );
                         return None;
                     };
+                    // NV12/NV21 video is sampled as its two planes and
+                    // converted with the surface's matrix by the grade pass.
+                    let yuv = match yuv_plane_views(&dmabuf) {
+                        Ok(views) => views,
+                        Err(error) => {
+                            warn!(%error, texture_id, "could not view a YUV dma-buf's planes");
+                            return None;
+                        }
+                    };
                     let context = lock(&self.render_context);
-                    let image = match context.context.display().create_image_from_dmabuf(&dmabuf) {
+                    let display = context.context.display();
+                    let luma_view = yuv.as_ref().map_or(&dmabuf, |(luma, _, _)| luma);
+                    let image = match display.create_image_from_dmabuf(luma_view) {
                         Ok(image) => image,
                         Err(error) => {
                             warn!(%error, texture_id, "could not import Wayland dma-buf for Flutter");
                             return None;
                         }
+                    };
+                    let chroma_image = match &yuv {
+                        Some((_, chroma, _)) => match display.create_image_from_dmabuf(chroma) {
+                            Ok(chroma_image) => Some(chroma_image),
+                            Err(error) => {
+                                // SAFETY: the luma image was created on this
+                                // display above and is not cached anywhere.
+                                unsafe {
+                                    egl_ffi::egl::DestroyImageKHR(self.display.handle, image);
+                                }
+                                warn!(%error, texture_id, "could not import a YUV dma-buf's chroma");
+                                return None;
+                            }
+                        },
+                        None => None,
                     };
                     drop(context);
                     let mut name = 0;
@@ -145,6 +201,9 @@ impl FlutterGlHandler {
                         // has not been installed in a cache entry.
                         unsafe {
                             egl_ffi::egl::DestroyImageKHR(self.display.handle, image);
+                            if let Some(chroma_image) = chroma_image {
+                                egl_ffi::egl::DestroyImageKHR(self.display.handle, chroma_image);
+                            }
                         }
                         if let Some(error) = gl_error {
                             warn!(
@@ -154,9 +213,37 @@ impl FlutterGlHandler {
                         }
                         return None;
                     }
+                    let chroma = match (chroma_image, yuv) {
+                        (Some(chroma_image), Some((_, chroma_view, swapped))) => {
+                            match self.image_texture(chroma_image) {
+                                Some(texture) => Some(ChromaPlane {
+                                    image: chroma_image as usize,
+                                    texture,
+                                    _dmabuf: chroma_view,
+                                    swapped,
+                                }),
+                                None => {
+                                    // SAFETY: both textures and images were
+                                    // made in this context and escaped nowhere.
+                                    unsafe {
+                                        (self.gl.delete_textures)(1, &name);
+                                        egl_ffi::egl::DestroyImageKHR(self.display.handle, image);
+                                        egl_ffi::egl::DestroyImageKHR(
+                                            self.display.handle,
+                                            chroma_image,
+                                        );
+                                    }
+                                    warn!(texture_id, "rejected a YUV dma-buf's chroma texture");
+                                    return None;
+                                }
+                            }
+                        }
+                        _ => None,
+                    };
                     let binding = Arc::new(CachedTextureBinding {
                         binding: Some(ExternalTextureBinding {
                             dmabuf_image: Some((dmabuf.clone(), image as usize)),
+                            chroma,
                             _owned_shm: owned_shm.clone(),
                             _owned_native: owned_native.clone(),
                             texture: name,
@@ -290,6 +377,7 @@ impl FlutterGlHandler {
                     let binding = Arc::new(CachedTextureBinding {
                         binding: Some(ExternalTextureBinding {
                             dmabuf_image: None,
+                            chroma: None,
                             _owned_shm: None,
                             _owned_native: None,
                             texture: name,
