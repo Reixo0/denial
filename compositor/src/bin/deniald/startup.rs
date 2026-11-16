@@ -518,6 +518,7 @@ pub(super) fn run(options: Options) -> Result<(), Box<dyn Error>> {
             plane_properties,
             source_rect,
             original_mode,
+            effective_mode: None,
             powered: true,
         });
     }

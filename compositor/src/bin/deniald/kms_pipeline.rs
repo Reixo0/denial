@@ -790,6 +790,7 @@ pub(super) fn reconcile_scanouts<'a>(
                     plane_properties,
                     source_rect: *source_rect,
                     original_mode,
+                    effective_mode: None,
                     powered: scanouts
                         .iter()
                         .find(|scanout| scanout.output.id == output.id)

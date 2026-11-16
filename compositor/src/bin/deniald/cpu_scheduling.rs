@@ -237,6 +237,8 @@ pub(super) fn focus_changed(pid: Option<libc::pid_t>) {
 /// The user produced an input event.
 pub(super) fn note_interaction() {
     hints::note_interaction();
+    #[cfg(feature = "flutter")]
+    super::refresh_policy::note_interaction();
 }
 
 /// Some output was powered on, or every output was powered off.

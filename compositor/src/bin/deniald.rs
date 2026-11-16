@@ -121,6 +121,9 @@ mod plugin_bundle;
 mod portal_ipc;
 #[path = "deniald/presentation_clock.rs"]
 mod presentation_clock;
+#[cfg(feature = "flutter")]
+#[path = "deniald/refresh_policy.rs"]
+mod refresh_policy;
 #[path = "deniald/runtime_state.rs"]
 mod runtime_state;
 #[path = "deniald/scene_sync.rs"]

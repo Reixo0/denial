@@ -64,6 +64,9 @@ pub(super) struct Scanout {
     pub(super) plane_properties: AtlasPlaneProperties,
     pub(super) source_rect: PixelRect,
     pub(super) original_mode: Mode,
+    /// The mode the automatic refresh rate runs instead of `output.mode`,
+    /// with the same link timing. A full commit clears it.
+    pub(super) effective_mode: Option<Mode>,
     /// Whether this logical output currently owns an active KMS pipeline.
     /// DPMS-off outputs deliberately remain in the topology and scanout list.
     pub(super) powered: bool,
@@ -2727,7 +2730,7 @@ where
         .ok_or_else(|| format!("missing atomic property {expected_name}").into())
 }
 
-fn optional_named_property<H>(
+pub(super) fn optional_named_property<H>(
     drm: &impl ControlDevice,
     object: H,
     expected_name: &str,

@@ -265,6 +265,7 @@ struct Session<'a, 'event_loop> {
     screenshot_manager: Option<screenshot::ScreenshotManager>,
     background: BackgroundCadences,
     ui_floor: cpu_scheduling::UiFloor,
+    refresh_policy: refresh_policy::RefreshPolicy,
     gamma_topology: Option<Vec<(OutputId, crtc::Handle)>>,
     max_outputs: usize,
     output_config: Option<PathBuf>,
@@ -457,6 +458,14 @@ impl Session<'_, '_> {
             self.synchronize_software_dimming()?;
             self.events.frontend_mut().reap_capture_source_reads();
             let iteration_now = Instant::now();
+            self.refresh_policy.service(
+                iteration_now,
+                self.drm,
+                self.scanouts,
+                self.retired_output_flips
+                    .saturating_add(self.scheduler.presented_frames()),
+                &mut self.frame_scheduler,
+            );
             if self.events.dpms_topology.service_deadline(iteration_now) {
                 self.events.topology_dirty = true;
                 info!("DPMS wake topology grace expired; applying the observed connector state");
@@ -694,6 +703,9 @@ impl Session<'_, '_> {
                 return Ok(());
             };
             let mut dispatch_timeout = self.ui_floor.limit_dispatch_timeout(now, dispatch_timeout);
+            dispatch_timeout = self
+                .refresh_policy
+                .limit_dispatch_timeout(now, dispatch_timeout);
             // An unconfirmed output configuration rolls back at its deadline even
             // if nothing else happens.
             for deadline in self
@@ -1021,6 +1033,7 @@ pub(super) fn run_flutter_event_loop(
         screenshot_manager,
         background,
         ui_floor,
+        refresh_policy: refresh_policy::RefreshPolicy::new(),
         gamma_topology: None,
         max_outputs,
         output_config,

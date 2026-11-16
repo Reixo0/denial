@@ -210,6 +210,12 @@ impl FrameScheduler {
         }
     }
 
+    /// Follows a refresh rate change of powered outputs in place, keeping
+    /// each timeline's phase.
+    pub(super) fn retime(&mut self, scanouts: &[Scanout]) {
+        self.outputs.retime(scanouts);
+    }
+
     pub(super) fn mark_app_dirty(
         &mut self,
         output: OutputId,
@@ -495,6 +501,23 @@ impl OutputTimelines {
         self.ticks.clear();
     }
 
+    fn retime(&mut self, scanouts: &[Scanout]) {
+        for timeline in &mut self.timelines {
+            if let Some(scanout) = scanouts
+                .iter()
+                .find(|scanout| scanout.output.id == timeline.source.output)
+            {
+                timeline.source.interval = refresh_interval(scanout);
+            }
+        }
+        self.flutter_output = self
+            .timelines
+            .iter()
+            .map(|timeline| timeline.source)
+            .min_by_key(|source| (source.interval, source.output))
+            .map(|source| source.output);
+    }
+
     fn advance(&mut self, now: Instant) {
         self.ticks.clear();
         for timeline in &mut self.timelines {
@@ -682,7 +705,8 @@ fn timeline_source(scanout: &Scanout) -> TimelineSource {
 }
 
 fn refresh_interval(scanout: &Scanout) -> Duration {
-    let refresh_millihz = u64::try_from(OutputMode::from(scanout.output.mode).refresh)
+    let mode = scanout.effective_mode.unwrap_or(scanout.output.mode);
+    let refresh_millihz = u64::try_from(OutputMode::from(mode).refresh)
         .ok()
         .filter(|refresh| *refresh > 0)
         .unwrap_or(60_000);
