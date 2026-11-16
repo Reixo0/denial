@@ -27,6 +27,16 @@ const BOOST_AFTER_FAST_CONTENT: Duration = Duration::from_millis(300);
 const BUSY_RETRY: Duration = Duration::from_millis(2);
 /// The low rate an idle output drops to.
 const LOW_REFRESH_MILLIHZ: i32 = 60_000;
+/// How often the CRTC's mode is read back while an output runs its low rate.
+/// A full commit (display power-on, session resume, sleep restoration) sets
+/// the configured mode again, and not every path changes what the policy
+/// observes.
+const VERIFY_INTERVAL: Duration = Duration::from_secs(1);
+/// A powered output whose CRTC does not run its mode yet (the power-on
+/// commit is still on its way) is looked at again this often, this many
+/// times.
+const PENDING_RETRY: Duration = Duration::from_millis(250);
+const PENDING_ATTEMPTS: u32 = 20;
 
 static LAST_INTERACTION: Mutex<Option<Instant>> = Mutex::new(None);
 
@@ -56,6 +66,10 @@ fn same_link(high: Mode, low: Mode) -> bool {
         && high.flags() == low.flags()
 }
 
+fn same_timing(a: Mode, b: Mode) -> bool {
+    same_link(a, b) && a.vsync() == b.vsync()
+}
+
 struct AdaptiveOutput {
     output: OutputId,
     crtc: crtc::Handle,
@@ -64,6 +78,9 @@ struct AdaptiveOutput {
     high: Mode,
     low: Mode,
     low_active: bool,
+    /// The CRTC runs `high` or `low`; false while it is off or runs
+    /// another mode, when nothing is committed.
+    live: bool,
 }
 
 pub(super) struct RefreshPolicy {
@@ -74,6 +91,11 @@ pub(super) struct RefreshPolicy {
     frames: VecDeque<(Instant, u64)>,
     boost_until: Option<Instant>,
     retry_at: Option<Instant>,
+    verify_at: Option<Instant>,
+    /// When to rebuild again for an output whose CRTC was not running yet,
+    /// and how many attempts are left.
+    pending_at: Option<Instant>,
+    pending_attempts: u32,
 }
 
 impl RefreshPolicy {
@@ -89,13 +111,18 @@ impl RefreshPolicy {
             frames: VecDeque::new(),
             boost_until: None,
             retry_at: None,
+            verify_at: None,
+            pending_at: None,
+            pending_attempts: 0,
         }
     }
 
     /// Rebuilds the adaptive outputs after a configuration or power change.
     /// Every full commit sets the configured mode again, so each output starts
     /// at its high rate.
-    fn rebuild(&mut self, drm: &DrmDevice, scanouts: &mut [Scanout]) {
+    /// Says whether a powered output's CRTC did not run its mode yet.
+    fn rebuild(&mut self, drm: &DrmDevice, scanouts: &mut [Scanout]) -> bool {
+        let mut pending = false;
         self.outputs.clear();
         self.observed = scanouts
             .iter()
@@ -117,11 +144,13 @@ impl RefreshPolicy {
                     self.outputs.push(output);
                 }
                 Ok(None) => {}
-                Err(error) => {
+                Err(Eligibility::NotRunning) => pending = true,
+                Err(Eligibility::Failed(error)) => {
                     debug!(output = scanout.output.name, %error, "no automatic refresh rate");
                 }
             }
         }
+        pending
     }
 
     /// Picks each output's rate and commits a change. `presented_frames`
@@ -141,8 +170,17 @@ impl RefreshPolicy {
             || scanouts.iter().zip(&self.observed).any(|(scanout, observed)| {
                 *observed != (scanout.output.id, scanout.output.mode, scanout.powered)
             });
-        if changed {
-            self.rebuild(drm, scanouts);
+        let retry_pending = self.pending_at.is_some_and(|at| now >= at);
+        if changed || retry_pending {
+            if changed {
+                self.pending_attempts = PENDING_ATTEMPTS;
+            }
+            let pending = self.rebuild(drm, scanouts);
+            self.pending_at = None;
+            if pending && self.pending_attempts > 0 {
+                self.pending_attempts -= 1;
+                self.pending_at = Some(now + PENDING_RETRY);
+            }
             frame_scheduler.retime(scanouts);
             self.boost_until = Some(now + BOOST_AFTER_INPUT);
         }
@@ -179,15 +217,22 @@ impl RefreshPolicy {
                 }
             }
         }
+        let mut retimed = false;
+        if self.verify_at.is_none_or(|at| now >= at) {
+            self.verify_at = Some(now + VERIFY_INTERVAL);
+            retimed |= self.verify(drm, scanouts);
+        }
         if self.retry_at.is_some_and(|retry| now < retry) {
+            if retimed {
+                frame_scheduler.retime(scanouts);
+            }
             return;
         }
         self.retry_at = None;
 
         let want_low = self.boost_until.is_none_or(|boost| now >= boost);
-        let mut retimed = false;
         for output in &mut self.outputs {
-            if output.low_active == want_low {
+            if !output.live || output.low_active == want_low {
                 continue;
             }
             let mode = if want_low { output.low } else { output.high };
@@ -228,11 +273,41 @@ impl RefreshPolicy {
         }
     }
 
+    /// Reads each CRTC's mode back and follows what the kernel runs; says
+    /// whether a frame clock changed.
+    fn verify(&mut self, drm: &DrmDevice, scanouts: &mut [Scanout]) -> bool {
+        let mut retimed = false;
+        for output in &mut self.outputs {
+            let current = drm.get_crtc(output.crtc).ok().and_then(|crtc| crtc.mode());
+            let (live, low_active) = match current {
+                Some(mode) if same_timing(mode, output.low) => (true, true),
+                Some(mode) if same_timing(mode, output.high) => (true, false),
+                _ => (false, false),
+            };
+            output.live = live;
+            if output.low_active != low_active {
+                debug!(low_active, "the CRTC's refresh rate changed outside the policy");
+                output.low_active = low_active;
+                if let Some(scanout) = scanouts
+                    .iter_mut()
+                    .find(|scanout| scanout.output.id == output.output)
+                {
+                    scanout.effective_mode = low_active.then_some(output.low);
+                }
+                retimed = true;
+            }
+        }
+        retimed
+    }
+
     pub(super) fn limit_dispatch_timeout(&self, now: Instant, timeout: Duration) -> Duration {
+        let mut timeout = timeout;
+        if let Some(pending) = self.pending_at {
+            timeout = timeout.min(pending.saturating_duration_since(now));
+        }
         if self.outputs.is_empty() {
             return timeout;
         }
-        let mut timeout = timeout;
         if let Some(retry) = self.retry_at {
             timeout = timeout.min(retry.saturating_duration_since(now));
         }
@@ -241,17 +316,48 @@ impl RefreshPolicy {
         {
             timeout = timeout.min(boost.saturating_duration_since(now));
         }
+        // A reset to the high rate is found by the next read-back.
+        if self.outputs.iter().any(|output| output.low_active)
+            && let Some(verify) = self.verify_at
+        {
+            timeout = timeout.min(verify.saturating_duration_since(now));
+        }
         timeout
+    }
+}
+
+/// Why an output has no automatic refresh rate now.
+enum Eligibility {
+    /// Its CRTC does not run the configured mode yet.
+    NotRunning,
+    Failed(Box<dyn Error>),
+}
+
+impl From<std::io::Error> for Eligibility {
+    fn from(error: std::io::Error) -> Self {
+        Self::Failed(error.into())
+    }
+}
+
+impl From<Box<dyn Error>> for Eligibility {
+    fn from(error: Box<dyn Error>) -> Self {
+        Self::Failed(error)
     }
 }
 
 fn adaptive_output(
     drm: &DrmDevice,
     scanout: &Scanout,
-) -> Result<Option<AdaptiveOutput>, Box<dyn Error>> {
+) -> Result<Option<AdaptiveOutput>, Eligibility> {
     let high = scanout.output.mode;
     if refresh_millihz(high) <= LOW_REFRESH_MILLIHZ + 500 {
         return Ok(None);
+    }
+    // A mode change on a CRTC that is off needs a modeset: test only once
+    // the power-on commit runs the configured mode.
+    let running = drm.get_crtc(scanout.output.crtc)?.mode();
+    if !running.is_some_and(|mode| same_timing(mode, high)) {
+        return Err(Eligibility::NotRunning);
     }
     let Some(low) = drm
         .get_connector(scanout.output.connector, false)?
@@ -279,6 +385,7 @@ fn adaptive_output(
         high,
         low,
         low_active: false,
+        live: true,
     }))
 }
 
