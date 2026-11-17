@@ -30,6 +30,7 @@ class LiquidRangeBar extends StatefulWidget {
     this.iconScale = 1,
     this.radius,
     this.palette,
+    this.blur = true,
   });
 
   final IconData icon;
@@ -47,6 +48,10 @@ class LiquidRangeBar extends StatefulWidget {
   /// to match something else.
   final ({Color track, Color rim, Color fill, Color ink, Color inkOnFill})?
   palette;
+
+  /// Blur what is behind the track. Off for a bar on a panel that is
+  /// blurred already: a second backdrop filter per bar costs a pass each.
+  final bool blur;
 
   @override
   State<LiquidRangeBar> createState() => _LiquidRangeBarState();
@@ -218,6 +223,7 @@ class _LiquidRangeBarState extends State<LiquidRangeBar>
                           rect: shape,
                           child: ShellBackdropBlur(
                             blur:
+                                widget.blur &&
                                 _motion.level < 1 &&
                                 theme.effectivePanelOpacity < 1,
                             borderRadius: BorderRadius.circular(

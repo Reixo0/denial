@@ -71,6 +71,14 @@ class _MobileVolumeHudState extends ConsumerState<MobileVolumeHud>
   /// is, because the button is leaving with the rest.
   bool _menuToButton = false;
 
+  /// The menu's fade, applied to its blur and its sliders apart: one
+  /// opacity group around the blurred panel made the shell stall when
+  /// the menu opened.
+  late final Animation<double> _menuFade = _MenuFade(
+    _menu,
+    () => _menuToButton,
+  );
+
   /// Where the indicator takes touches, from the last build.
   List<Rect> _hitRects = const [];
   StreamSubscription<DenialShellActionEvent>? _shellActions;
@@ -435,16 +443,14 @@ class _MobileVolumeHudState extends ConsumerState<MobileVolumeHud>
                 final t = _menu.value;
                 if (t <= 0) return const SizedBox.shrink();
                 final double scale;
-                final double opacity;
                 if (_menu.status != AnimationStatus.reverse &&
                     _menu.status != AnimationStatus.dismissed) {
                   scale = 0.12 + 0.88 * Curves.easeOutBack.transform(t);
-                  opacity = Curves.easeOut.transform(t);
                 } else if (_menuToButton) {
                   // Gathers slowly, then drops into the button; it fades
-                  // only near the end so its shape stays readable.
+                  // (_MenuFade) only near the end so its shape stays
+                  // readable.
                   scale = 0.12 + 0.88 * Curves.easeOutCubic.transform(t);
-                  opacity = Curves.easeOut.transform((t / 0.55).clamp(0, 1));
                 } else {
                   // Leaves like the capsule: draws in toward the edge, then
                   // slides off it.
@@ -470,19 +476,17 @@ class _MobileVolumeHudState extends ConsumerState<MobileVolumeHud>
                 return ShellInputRegion(
                   debugLabel: 'Mobile volume role sliders',
                   active: _rolesOpen && _motion.shown,
-                  child: Opacity(
-                    opacity: opacity,
-                    child: Transform.scale(
-                      scale: scale,
-                      alignment: menuOrigin,
-                      child: child,
-                    ),
+                  child: Transform.scale(
+                    scale: scale,
+                    alignment: menuOrigin,
+                    child: child,
                   ),
                 );
               },
               child: _RolePanel(
                 roles: roles,
                 colors: colors,
+                fade: _menuFade,
                 onInteraction: () {
                   _menuHeld = true;
                   _hideTimer?.cancel();
@@ -504,12 +508,14 @@ class _RolePanel extends ConsumerWidget {
   const _RolePanel({
     required this.roles,
     required this.colors,
+    required this.fade,
     required this.onInteraction,
     required this.onSettled,
   });
 
   final List<AudioRoleLevel> roles;
   final _VolumeColors colors;
+  final Animation<double> fade;
   final VoidCallback onInteraction;
   final VoidCallback onSettled;
 
@@ -544,6 +550,8 @@ class _RolePanel extends ConsumerWidget {
 
     return ShellBackdropBlur(
       borderRadius: BorderRadius.circular(32),
+      separateChild: true,
+      opacity: fade,
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: colors.smoke,
@@ -565,18 +573,21 @@ class _RolePanel extends ConsumerWidget {
                         child: LiquidRangeBar(
                           // Round and coloured like the capsule beside it.
                           radius: _barWidth / 2,
-                          // A little see-through, like the capsule, but
-                          // still apart from the menu behind.
+                          // The track a little see-through, still apart from
+                          // the menu behind; the liquid as bright as the
+                          // capsule's.
                           palette: (
                             track: colors.smoke.withValues(
                               alpha: colors.smoke.a * 0.6,
                             ),
                             rim: colors.rim,
-                            fill: colors.fill.withValues(alpha: 0.8),
+                            fill: colors.fill,
                             ink: colors.ink,
                             inkOnFill: colors.inkOnFill,
                           ),
                           icon: _icon(role.role),
+                          // The panel is blurred already.
+                          blur: false,
                           value: role.muted ? 0 : role.level,
                           trackColor: context.shellColors.volumeTrack,
                           onChangeStart: onInteraction,
@@ -611,6 +622,30 @@ class _RolePanel extends ConsumerWidget {
         ),
       ),
     );
+  }
+}
+
+/// The sliders' menu fades in as it opens and, closing into its button,
+/// only near the end; leaving with the capsule it slides away unfaded.
+class _MenuFade extends Animation<double>
+    with AnimationWithParentMixin<double> {
+  _MenuFade(this.parent, this.toButton);
+
+  @override
+  final AnimationController parent;
+  final bool Function() toButton;
+
+  @override
+  double get value {
+    final t = parent.value;
+    if (parent.status != AnimationStatus.reverse &&
+        parent.status != AnimationStatus.dismissed) {
+      return Curves.easeOut.transform(t);
+    }
+    if (toButton()) {
+      return Curves.easeOut.transform((t / 0.55).clamp(0.0, 1.0));
+    }
+    return 1;
   }
 }
 
