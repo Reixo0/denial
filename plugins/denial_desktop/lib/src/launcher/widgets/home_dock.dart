@@ -31,30 +31,24 @@ class HomeDock extends ConsumerWidget {
       ),
     );
     final interactions = HomeInteractionScope.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: HomeFolderPlate.fill,
-        border: Border.all(color: HomeFolderPlate.outline),
-        borderRadius: BorderRadius.circular(radius),
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final geometry = HomeDockGeometry(
-            bounds: Offset.zero & constraints.biggest,
-            capacity: 0,
-          );
-          return ListenableBuilder(
-            listenable: Listenable.merge([
-              interactions.drag.drag,
-              interactions.hiddenItems,
-            ]),
-            builder: (context, _) => Stack(
-              clipBehavior: Clip.none,
-              children: _icons(dock, geometry, interactions),
-            ),
-          );
-        },
-      ),
+    // No plate behind the dock: its apps sit on the wallpaper.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final geometry = HomeDockGeometry(
+          bounds: Offset.zero & constraints.biggest,
+          capacity: 0,
+        );
+        return ListenableBuilder(
+          listenable: Listenable.merge([
+            interactions.drag.drag,
+            interactions.hiddenItems,
+          ]),
+          builder: (context, _) => Stack(
+            clipBehavior: Clip.none,
+            children: _icons(dock, geometry, interactions),
+          ),
+        );
+      },
     );
   }
 

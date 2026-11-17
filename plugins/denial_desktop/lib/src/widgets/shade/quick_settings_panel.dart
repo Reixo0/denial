@@ -263,6 +263,8 @@ class _FullScreenShade extends StatelessWidget {
               strength: blur,
               separateChild: true,
               borderRadius: BorderRadius.zero,
+              // Screen-wide: a glass edge would frame it inside the screen.
+              edgeless: true,
               child: composedShade!,
             );
           },

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:denial_flutter_sdk/applications.dart';
+import 'package:denial_flutter_sdk/effects.dart';
 
 import 'home_app_tile.dart';
 import 'home_item_icon.dart';
@@ -40,7 +41,8 @@ class HomeAppDrawer extends ConsumerStatefulWidget {
 }
 
 class _HomeAppDrawerState extends ConsumerState<HomeAppDrawer> {
-  static const Color _scrim = Color(0xeb0e0f12);
+  /// Light enough to show home blurred behind it.
+  static const Color _scrim = Color(0x8c0e0f12);
   static const double _top = 66;
 
   final _search = TextEditingController();
@@ -148,7 +150,14 @@ class _HomeAppDrawerState extends ConsumerState<HomeAppDrawer> {
             // It rises from the bottom of the screen.
             child: FractionalTranslation(
               translation: Offset(0, 1 - progress),
-              child: child,
+              // Home blurs behind it, more as it rises, as the shade does.
+              child: ShellBackdropBlur(
+                edgeless: true,
+                separateChild: true,
+                strength: progress,
+                borderRadius: BorderRadius.zero,
+                child: child!,
+              ),
             ),
           ),
         );

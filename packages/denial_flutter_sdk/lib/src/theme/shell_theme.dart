@@ -159,6 +159,12 @@ class ShellThemeData {
     singleWindowSurface: singleWindowSurface,
   );
 
+  /// A plain blur at the material's frost, without the glass edge (bevel,
+  /// rim, refraction): for a surface that spans the whole screen, whose
+  /// edge would otherwise draw a frame inside the screen's.
+  ImageFilterConfig edgelessBlurConfigAt(double strength) =>
+      _resolution.edgelessBlurConfigAt(strength);
+
   /// The frost alone of the window material: the blur that
   /// [backdropFilterConfigAt] applies before any glass shading. A backdrop
   /// frosted once with it can be shared by translucent windows, each shading
@@ -471,6 +477,29 @@ class _ShellThemeResolution {
     ImageFilterConfig
   >
   _backdropFilters = {};
+  final Map<int, ImageFilterConfig> _edgelessBlurs = {};
+
+  ImageFilterConfig edgelessBlurConfigAt(double strength) {
+    final step = (strength.clamp(0.0, 1.0) * _materialStrengthSteps)
+        .round()
+        .clamp(1, _materialStrengthSteps)
+        .toInt();
+    return _edgelessBlurs.putIfAbsent(step, () {
+      final glass = theme.transparencyMode == ShellTransparencyMode.glass;
+      final sigma =
+          (glass ? theme.glass.blurSigma : theme.backdropBlurSigma) *
+          step /
+          _materialStrengthSteps;
+      return ImageFilterConfig.blur(
+        sigmaX: sigma,
+        sigmaY: sigma,
+        tileMode: ui.TileMode.clamp,
+        downsampleScale: glass
+            ? theme.glass.quality
+            : theme.backdropBlurDownsampleScale,
+      );
+    });
+  }
 
   ImageFilterConfig backdropFilterConfigAt(
     double strength, {

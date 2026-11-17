@@ -23,6 +23,7 @@ class ShellBackdropBlur extends StatelessWidget {
     this.blendMode = ui.BlendMode.src,
     this.opacity,
     this.clipUnfiltered = true,
+    this.edgeless = false,
     super.key,
   }) : assert(strength >= 0 && strength <= 1),
        assert(!separateChild || !useWindowAlphaThreshold),
@@ -51,6 +52,10 @@ class ShellBackdropBlur extends StatelessWidget {
   /// spare it a clip on every frame.
   final bool clipUnfiltered;
 
+  /// A plain blur without the glass edge, for a surface as large as the
+  /// screen (see [ShellThemeData.edgelessBlurConfigAt]).
+  final bool edgeless;
+
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
@@ -71,12 +76,14 @@ class ShellBackdropBlur extends StatelessWidget {
         : ui.BlendMode.srcOver;
     final Widget filtered;
     if (available) {
-      final filterConfig = theme.backdropFilterConfigAt(
-        resolvedStrength,
-        borderRadius: radius ?? BorderRadius.zero,
-        useWindowAlphaThreshold: useWindowAlphaThreshold,
-        singleWindowSurface: singleWindowSurface,
-      );
+      final filterConfig = edgeless
+          ? theme.edgelessBlurConfigAt(resolvedStrength)
+          : theme.backdropFilterConfigAt(
+              resolvedStrength,
+              borderRadius: radius ?? BorderRadius.zero,
+              useWindowAlphaThreshold: useWindowAlphaThreshold,
+              singleWindowSurface: singleWindowSurface,
+            );
       final filterChild = separateChild ? const SizedBox.expand() : child;
       final backdrop = grouped
           ? BackdropFilter.grouped(
