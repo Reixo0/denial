@@ -137,7 +137,7 @@ pub(super) struct FrameTimelineManager {
 impl FrameTimelineManager {
     pub(super) fn new(display: &DisplayHandle) -> Self {
         Self {
-            _global: display.create_global::<RuntimeState, DenialFrameTimelineManagerV1, _>(1, ()),
+            _global: display.create_global::<RuntimeState, DenialFrameTimelineManagerV1, _>(2, ()),
             last_epoch: 0,
             next_sequence: 0,
             subscriptions: HashMap::new(),
@@ -1002,6 +1002,9 @@ impl Dispatch<DenialOutputFrameTimelineV1, OutputTimelineUserData> for RuntimeSt
                 denial_output_frame_timeline_v1::Error::InvalidActive,
                 format!("invalid frame timeline active value {active}"),
             ),
+            denial_output_frame_timeline_v1::Request::ContentRate { millihz } => {
+                crate::refresh_policy::note_content_rate(millihz);
+            }
             denial_output_frame_timeline_v1::Request::Destroy => {}
         }
     }

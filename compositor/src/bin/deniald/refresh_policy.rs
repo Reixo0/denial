@@ -47,6 +47,26 @@ pub(super) fn note_interaction() {
         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Instant::now());
 }
 
+static LAST_FAST_REPORT: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// A client reported content it produces on its own clock running at
+/// `millihz`. Droidloom does: Android draws on its own vsync and only the
+/// newest frame per grant reaches the compositor, so at the low rate fast
+/// Android content never shows in the presented frame rate.
+pub(super) fn note_content_rate(millihz: u32) {
+    if u64::from(millihz) >= FAST_CONTENT_MILLIHZ {
+        *LAST_FAST_REPORT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Instant::now());
+    }
+}
+
+fn last_fast_report() -> Option<Instant> {
+    *LAST_FAST_REPORT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 fn last_interaction() -> Option<Instant> {
     *LAST_INTERACTION
         .lock()
@@ -199,6 +219,12 @@ impl RefreshPolicy {
         }
         if let Some(interaction) = last_interaction() {
             let until = interaction + BOOST_AFTER_INPUT;
+            if self.boost_until.is_none_or(|boost| boost < until) {
+                self.boost_until = Some(until);
+            }
+        }
+        if let Some(report) = last_fast_report() {
+            let until = report + BOOST_AFTER_FAST_CONTENT;
             if self.boost_until.is_none_or(|boost| boost < until) {
                 self.boost_until = Some(until);
             }
