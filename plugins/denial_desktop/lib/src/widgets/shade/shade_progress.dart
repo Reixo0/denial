@@ -1,6 +1,4 @@
 import 'package:denial_flutter_sdk/motion.dart' show SelectedListenable;
-import 'package:denial_flutter_sdk/rendering.dart' show WindowBackdropCache;
-import 'package:denial_flutter_sdk/shell_theme.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -30,6 +28,7 @@ final shadeCoversProvider = Provider<ValueListenable<bool>>((ref) {
 
 /// The shade's material is the opaque frost, which hides the scene beneath
 /// it while [shadeCoversProvider] holds. Live material samples that scene.
-bool shadeFrostOccludes(BuildContext context) =>
-    context.shellTheme.effectivePanelOpacity < 1 &&
-    WindowBackdropCache.maybeOf(context) != null;
+///
+/// The phone's shade always uses live material now (it blurs the app it
+/// covers, as Android does), so nothing beneath may be hidden for it.
+bool shadeFrostOccludes(BuildContext context) => false;

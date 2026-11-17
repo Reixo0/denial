@@ -89,54 +89,61 @@ class QuickSettingsShade extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final controller = ref.read(referenceShellProvider.notifier);
 
-    return IgnorePointer(
-      ignoring: !active,
-      child: ShadeBackdropScene(
-        progress: progress,
-        cached: _frostedShadeBackdrop(context) != null,
-        child: BackdropGroup(
-          child: ClipRect(
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                ShadeDismissGesture(
-                  progress: progress,
-                  child: const SizedBox.expand(),
-                ),
-                _FullScreenShade(
-                  progress: progress,
-                  // Notifications scroll over the status row.
-                  header: ShadeHeaderStatusLayer(progress: progress),
-                  child: Focus(
-                    autofocus: active,
-                    canRequestFocus: active,
-                    onKeyEvent: (_, event) {
-                      if (event is KeyDownEvent &&
-                          event.logicalKey == LogicalKeyboardKey.escape) {
-                        controller.closeQuickSettings();
-                        return KeyEventResult.handled;
-                      }
-                      return KeyEventResult.ignored;
-                    },
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () {},
-                      child: _ColorOsReferenceViewport(
-                        child: ColorOsShadeContentTranslation(
-                          progress: progress,
-                          child: _ShadeChrome(
+    // Blur what the shade covers, the app included, as Android does, not
+    // the wallpaper frosted once: a null backdrop keeps the shade and its
+    // cards on the live, shared blur, which grows as the shade opens.
+    return WindowBackdropCache(
+      backdrop: null,
+      motion: const AlwaysStoppedAnimation<double>(0),
+      child: IgnorePointer(
+        ignoring: !active,
+        child: ShadeBackdropScene(
+          progress: progress,
+          cached: false,
+          child: BackdropGroup(
+            child: ClipRect(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  ShadeDismissGesture(
+                    progress: progress,
+                    child: const SizedBox.expand(),
+                  ),
+                  _FullScreenShade(
+                    progress: progress,
+                    // Notifications scroll over the status row.
+                    header: ShadeHeaderStatusLayer(progress: progress),
+                    child: Focus(
+                      autofocus: active,
+                      canRequestFocus: active,
+                      onKeyEvent: (_, event) {
+                        if (event is KeyDownEvent &&
+                            event.logicalKey == LogicalKeyboardKey.escape) {
+                          controller.closeQuickSettings();
+                          return KeyEventResult.handled;
+                        }
+                        return KeyEventResult.ignored;
+                      },
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () {},
+                        child: _ColorOsReferenceViewport(
+                          child: ColorOsShadeContentTranslation(
                             progress: progress,
-                            closed: closed,
-                            active: active,
-                            page: page,
-                            onPageChanged: onPageChanged,
+                            child: _ShadeChrome(
+                              progress: progress,
+                              closed: closed,
+                              active: active,
+                              page: page,
+                              onPageChanged: onPageChanged,
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
