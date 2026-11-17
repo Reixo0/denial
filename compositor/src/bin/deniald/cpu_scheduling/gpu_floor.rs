@@ -17,7 +17,9 @@
 //! Only a GPU devfreq device whose `min_freq` Denial may write is used. The
 //! device's own packaging grants that permission with a udev rule, so a GPU
 //! without devfreq, or one whose platform does not opt in, is unchanged.
-//! DENIAL_GPU_HINTS=0 disables the floor.
+//! DENIAL_GPU_HINTS=0 disables the floor. DENIAL_GPU_FLOOR_MHZ caps it: the
+//! floor is then the highest operating point at or below that frequency.
+//! The governor still raises the GPU above the floor when its load asks.
 use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::os::unix::fs::FileExt;
@@ -70,9 +72,13 @@ impl GpuFloor {
                     continue;
                 }
             };
+            let cap = std::env::var("DENIAL_GPU_FLOOR_MHZ")
+                .ok()
+                .and_then(|value| value.trim().parse::<u64>().ok())
+                .map(|mhz| mhz.saturating_mul(1_000_000));
             let Some(boost) = fs::read_to_string(device.join("available_frequencies"))
                 .ok()
-                .and_then(|list| highest_frequency(&list))
+                .and_then(|list| floor_frequency(&list, cap))
             else {
                 continue;
             };
@@ -194,10 +200,24 @@ impl Drop for GpuFloor {
     }
 }
 
-fn highest_frequency(list: &str) -> Option<u64> {
-    list.split_whitespace()
-        .filter_map(|value| value.parse::<u64>().ok())
-        .max()
+/// The highest operating point, or the highest at or below `cap`; the
+/// lowest one when every point is above `cap`.
+fn floor_frequency(list: &str, cap: Option<u64>) -> Option<u64> {
+    let points = list
+        .split_whitespace()
+        .filter_map(|value| value.parse::<u64>().ok());
+    match cap {
+        None => points.max(),
+        Some(cap) => {
+            let points: Vec<u64> = points.collect();
+            points
+                .iter()
+                .copied()
+                .filter(|&hz| hz <= cap)
+                .max()
+                .or_else(|| points.iter().copied().min())
+        }
+    }
 }
 
 fn format_record(device: &Path, previous: u64, boost: u64) -> String {
@@ -219,8 +239,16 @@ mod tests {
     #[test]
     fn picks_the_highest_operating_point() {
         let list = "259000000 355000000 600000000 900000000 1150000000 975000000\n";
-        assert_eq!(highest_frequency(list), Some(1_150_000_000));
-        assert_eq!(highest_frequency(" \n"), None);
+        assert_eq!(floor_frequency(list, None), Some(1_150_000_000));
+        assert_eq!(floor_frequency(" \n", None), None);
+    }
+
+    #[test]
+    fn caps_the_floor_at_an_operating_point() {
+        let list = "259000000 355000000 600000000 900000000 1150000000 975000000\n";
+        assert_eq!(floor_frequency(list, Some(700_000_000)), Some(600_000_000));
+        assert_eq!(floor_frequency(list, Some(600_000_000)), Some(600_000_000));
+        assert_eq!(floor_frequency(list, Some(100_000_000)), Some(259_000_000));
     }
 
     #[test]
