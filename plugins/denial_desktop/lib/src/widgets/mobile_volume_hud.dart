@@ -79,6 +79,14 @@ class _MobileVolumeHudState extends ConsumerState<MobileVolumeHud>
     () => _menuToButton,
   );
 
+  /// The blur behind the menu grows as it opens and thins as it closes, as
+  /// Android's blurs do, instead of switching on or off.
+  late final CurvedAnimation _menuBlur = CurvedAnimation(
+    parent: _menu,
+    curve: Curves.easeIn,
+    reverseCurve: Curves.easeOut,
+  );
+
   /// Where the indicator takes touches, from the last build.
   List<Rect> _hitRects = const [];
   StreamSubscription<DenialShellActionEvent>? _shellActions;
@@ -127,6 +135,7 @@ class _MobileVolumeHudState extends ConsumerState<MobileVolumeHud>
     unawaited(_shellActions?.cancel());
     GestureBinding.instance.pointerRouter.removeGlobalRoute(_globalPointer);
     _motion.dispose();
+    _menuBlur.dispose();
     _menu.dispose();
     super.dispose();
   }
@@ -487,6 +496,7 @@ class _MobileVolumeHudState extends ConsumerState<MobileVolumeHud>
                 roles: roles,
                 colors: colors,
                 fade: _menuFade,
+                blur: _menuBlur,
                 onInteraction: () {
                   _menuHeld = true;
                   _hideTimer?.cancel();
@@ -509,6 +519,7 @@ class _RolePanel extends ConsumerWidget {
     required this.roles,
     required this.colors,
     required this.fade,
+    required this.blur,
     required this.onInteraction,
     required this.onSettled,
   });
@@ -516,6 +527,9 @@ class _RolePanel extends ConsumerWidget {
   final List<AudioRoleLevel> roles;
   final _VolumeColors colors;
   final Animation<double> fade;
+
+  /// How strongly to blur what is behind the panel, 0 to 1.
+  final Animation<double> blur;
   final VoidCallback onInteraction;
   final VoidCallback onSettled;
 
@@ -548,10 +562,17 @@ class _RolePanel extends ConsumerWidget {
     void apply(AudioRole role, double level) =>
         audio.applyRole(role, (level * 100).round());
 
-    return ShellBackdropBlur(
-      borderRadius: BorderRadius.circular(32),
-      separateChild: true,
-      opacity: fade,
+    return AnimatedBuilder(
+      animation: blur,
+      builder: (context, panel) => ShellBackdropBlur(
+        borderRadius: BorderRadius.circular(32),
+        separateChild: true,
+        opacity: fade,
+        // Strength, not `blur`: a filter at 0 keeps the widget tree, so the
+        // sliders keep their state.
+        strength: blur.value,
+        child: panel!,
+      ),
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: colors.smoke,
