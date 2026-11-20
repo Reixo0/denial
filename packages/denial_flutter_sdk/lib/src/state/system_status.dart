@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dbus/dbus.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -20,6 +21,27 @@ export '../models/system_telemetry.dart';
 
 final batteryServiceProvider = Provider<BatteryService>((ref) {
   return const BatteryService();
+});
+
+/// Fires when a charger is plugged in or out: UPower's `OnBattery` changes
+/// within a few tens of milliseconds of the kernel's power supply event.
+/// Without UPower it never fires and the battery falls back to its poll.
+final powerSourceChangesProvider = Provider<Stream<void>>((ref) {
+  final bus = DBusClient.system();
+  ref.onDispose(() => unawaited(bus.close()));
+  final upower = DBusRemoteObject(
+    bus,
+    name: 'org.freedesktop.UPower',
+    path: DBusObjectPath('/org/freedesktop/UPower'),
+  );
+  return upower.propertiesChanged
+      .where(
+        (signal) =>
+            signal.propertiesInterface == 'org.freedesktop.UPower' &&
+            signal.changedProperties.containsKey('OnBattery'),
+      )
+      .map<void>((_) {})
+      .handleError((Object _) {});
 });
 
 final clockLocaleProvider = Provider<String>((ref) {
@@ -116,6 +138,11 @@ class _OutputsVisible extends Notifier<bool> {
 mixin _PeriodicRefresh<StateT> on Notifier<StateT> {
   int _refreshGeneration = 0;
   bool _refreshing = false;
+  void Function()? _runNow;
+
+  /// Refreshes now instead of waiting for the next tick, under the same
+  /// rules as the timer: nothing while hidden or already refreshing.
+  void refreshNow() => _runNow?.call();
 
   void startPeriodicRefresh(
     Duration interval,
@@ -143,6 +170,8 @@ mixin _PeriodicRefresh<StateT> on Notifier<StateT> {
         }
       }
     }
+
+    _runNow = () => unawaited(run());
 
     Timer? timer;
     // Sample only while someone can see the result: a provider whose every
@@ -184,17 +213,44 @@ mixin _PeriodicRefresh<StateT> on Notifier<StateT> {
       ref.mounted && generation == _refreshGeneration;
 }
 
-/// Polls the battery on a fixed interval.
+/// Polls the battery on a fixed interval, and re-reads it at once when a
+/// charger is plugged in or out.
 class BatteryController extends Notifier<BatteryStatus>
     with _PeriodicRefresh<BatteryStatus> {
   @override
   BatteryStatus build() {
     _service = ref.watch(batteryServiceProvider);
     startPeriodicRefresh(_interval, _refresh);
+    final followUps = <Timer>[];
+    final changes = ref.watch(powerSourceChangesProvider).listen((_) {
+      for (final timer in followUps) {
+        timer.cancel();
+      }
+      followUps
+        ..clear()
+        ..addAll(
+          _powerSourceFollowUps.map((delay) => Timer(delay, refreshNow)),
+        );
+      refreshNow();
+    });
+    ref.onDispose(() {
+      unawaited(changes.cancel());
+      for (final timer in followUps) {
+        timer.cancel();
+      }
+    });
     return BatteryStatus.unknown;
   }
 
   static const Duration _interval = Duration(seconds: 15);
+
+  /// The charger's online state changes first; the battery's own status
+  /// follows up to about a second later on some chargers (measured 1.1 s on
+  /// the NX809J), so read again after it has settled.
+  static const List<Duration> _powerSourceFollowUps = [
+    Duration(milliseconds: 1500),
+    Duration(seconds: 4),
+  ];
 
   late BatteryService _service;
 
