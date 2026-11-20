@@ -110,6 +110,8 @@ pub const INPUT_LAYOUT_PRESENTATION_SPECIFIED: u32 = 1 << 3;
 pub const INPUT_LAYOUT_MOBILE_PRESENTATION: u32 = 1 << 4;
 /// The phone shows its home screen, with no app in front.
 pub const INPUT_LAYOUT_HOME_SHOWN: u32 = 1 << 5;
+/// The phone shows its recent apps.
+pub const INPUT_LAYOUT_OVERVIEW_SHOWN: u32 = 1 << 6;
 pub const INPUT_WINDOW_VISIBLE: u32 = 1 << 0;
 pub const INPUT_WINDOW_HIT_TEST_DISABLED: u32 = 1 << 1;
 pub const INPUT_WINDOW_GEOMETRY_LOCKED: u32 = 1 << 2;
@@ -551,6 +553,10 @@ impl InputLayoutSnapshot {
 
     pub fn home_shown(&self) -> bool {
         self.flags & INPUT_LAYOUT_HOME_SHOWN != 0
+    }
+
+    pub fn overview_shown(&self) -> bool {
+        self.flags & INPUT_LAYOUT_OVERVIEW_SHOWN != 0
     }
 
     pub fn mobile_presentation(&self) -> Option<bool> {

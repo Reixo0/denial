@@ -634,15 +634,25 @@ impl Session<'_, '_> {
         } = self;
         let pending_sensor_rotation = *pending_sensor_rotation;
         let frontend = events.frontend();
-        // With home rotation off, home and the lock screen stay upright, even
-        // when the lock was taken in landscape inside an app (as on Android,
-        // where a portrait launcher wins over the locked user rotation); apps
-        // follow the lock, else the sensor.
-        let held = (!frontend.settings.home_rotates() && frontend.home_showing())
-            .then_some(OutputTransform::Normal)
+        // As on Android: with home rotation off, home and the lock screen stay
+        // upright, even when the lock was taken in landscape inside an app (a
+        // portrait launcher wins over the locked user rotation). The front
+        // app's requested orientation wins over the lock (a landscape game
+        // stays landscape); other apps follow the lock, else the sensor.
+        // Recent apps keep the orientation they were opened in.
+        let fixed_home = !frontend.settings.home_rotates();
+        let held = (fixed_home && frontend.overview_showing())
+            .then_some(output_configuration.sensor_rotation)
+            .or_else(|| (fixed_home && frontend.home_showing()).then_some(OutputTransform::Normal))
+            .or_else(|| {
+                orientation_sensor::requested_rotation(
+                    frontend.foreground_orientation(),
+                    pending_sensor_rotation,
+                    output_configuration.sensor_rotation,
+                )
+            })
             .or_else(|| frontend.settings.locked_sensor_rotation());
-        let requested_rotation =
-            orientation_sensor::select_rotation(pending_sensor_rotation, held);
+        let requested_rotation = orientation_sensor::select_rotation(pending_sensor_rotation, held);
         if requested_rotation == output_configuration.sensor_rotation
             || scheduler.has_pending_scanout_work()
             || flutter.output_rotation_animation_active()

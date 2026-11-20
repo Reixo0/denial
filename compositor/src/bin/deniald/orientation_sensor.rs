@@ -22,6 +22,8 @@ const SENSOR_SERVICE: &str = "org.steinerd";
 const SENSOR_PATH: &str = "/org/steinerd";
 const SENSOR_INTERFACE: &str = "org.steinerd.Sensors1";
 const SENSOR: &str = "orientation";
+use super::wayland_frontend::orientation::RequestedOrientation;
+
 const RECONNECT_DELAY: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -70,6 +72,42 @@ impl Orientation {
             "right-up" => Self::RightUp,
             _ => Self::Undefined,
         }
+    }
+}
+
+/// The rotation the front application window asks for, as Android turns its
+/// display for an activity's requested orientation: `None` leaves it to the
+/// rotation lock and the sensor. `latest` is the latest valid sensor reading,
+/// `current` the rotation the panel has now.
+pub(super) fn requested_rotation(
+    requested: RequestedOrientation,
+    latest: OutputTransform,
+    current: OutputTransform,
+) -> Option<OutputTransform> {
+    // Android's fixed landscape (ROTATION_90): the phone turned
+    // counter-clockwise, its right edge up.
+    const LANDSCAPE: OutputTransform = Orientation::RightUp.output_rotation();
+    let landscape = |rotation: OutputTransform| {
+        matches!(
+            rotation,
+            OutputTransform::Rotate90 | OutputTransform::Rotate270
+        )
+    };
+    match requested {
+        RequestedOrientation::Unspecified => None,
+        RequestedOrientation::Portrait => Some(OutputTransform::Normal),
+        RequestedOrientation::Landscape => Some(LANDSCAPE),
+        // The side the phone is held on, else the side it is on, else the
+        // fixed one.
+        RequestedOrientation::SensorLandscape => Some(if landscape(latest) {
+            latest
+        } else if landscape(current) {
+            current
+        } else {
+            LANDSCAPE
+        }),
+        RequestedOrientation::Sensor => Some(latest),
+        RequestedOrientation::Locked => Some(current),
     }
 }
 
@@ -315,6 +353,55 @@ fn publish(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn requested_orientation_follows_android_rules() {
+        use OutputTransform::{Normal, Rotate90, Rotate180, Rotate270};
+        let landscape = Orientation::RightUp.output_rotation();
+        let rule = |requested, latest, current| requested_rotation(requested, latest, current);
+        assert_eq!(
+            rule(RequestedOrientation::Unspecified, Rotate90, Normal),
+            None
+        );
+        assert_eq!(
+            rule(RequestedOrientation::Portrait, Rotate90, Rotate90),
+            Some(Normal)
+        );
+        // Fixed landscape ignores the sensor's side.
+        assert_eq!(
+            rule(RequestedOrientation::Landscape, Normal, Normal),
+            Some(landscape)
+        );
+        assert_eq!(
+            rule(RequestedOrientation::Landscape, Rotate90, Rotate90),
+            Some(landscape)
+        );
+        // Sensor landscape: the held side, else the current one, else fixed.
+        assert_eq!(
+            rule(RequestedOrientation::SensorLandscape, Rotate90, Normal),
+            Some(Rotate90)
+        );
+        assert_eq!(
+            rule(RequestedOrientation::SensorLandscape, Rotate270, Rotate90),
+            Some(Rotate270)
+        );
+        assert_eq!(
+            rule(RequestedOrientation::SensorLandscape, Normal, Rotate90),
+            Some(Rotate90)
+        );
+        assert_eq!(
+            rule(RequestedOrientation::SensorLandscape, Rotate180, Normal),
+            Some(landscape)
+        );
+        assert_eq!(
+            rule(RequestedOrientation::Sensor, Rotate180, Normal),
+            Some(Rotate180)
+        );
+        assert_eq!(
+            rule(RequestedOrientation::Locked, Rotate90, Rotate270),
+            Some(Rotate270)
+        );
+    }
 
     #[test]
     fn rotation_lock_coalescing_keeps_valid_reading_before_service_loss() {

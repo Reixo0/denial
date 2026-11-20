@@ -108,6 +108,39 @@ impl WaylandFrontend {
             .is_some_and(|layout| layout.home_shown())
     }
 
+    /// The phone shows its recent apps over unlocked windows.
+    pub(crate) fn overview_showing(&self) -> bool {
+        self.mobile_shell
+            && !self.minimized_windows.covered
+            && self
+                .input_layout
+                .as_ref()
+                .is_some_and(|layout| layout.overview_shown())
+    }
+
+    /// The orientation the front application window asks for: the visible
+    /// window highest in the shell's stacking order. Unspecified on the
+    /// desktop, on the home and lock screens, and for windows that ask for
+    /// nothing.
+    pub(crate) fn foreground_orientation(&self) -> super::orientation::RequestedOrientation {
+        if !self.mobile_shell || self.home_showing() {
+            return Default::default();
+        }
+        self.input_layout
+            .as_ref()
+            .and_then(|layout| {
+                layout
+                    .windows
+                    .iter()
+                    .filter(|window| window.visible())
+                    .max_by_key(|window| window.z)
+            })
+            .and_then(|front| self.window_for_id(front.window_id))
+            .and_then(|window| self.window_root_surface(&window))
+            .map(|root| super::orientation::requested(&root))
+            .unwrap_or_default()
+    }
+
     /// Whether the lock screen keeps `window` suspended: every window but the
     /// one shown over it.
     pub(super) fn window_covered(&self, window: &Window) -> bool {

@@ -88,6 +88,7 @@ class PhoneDeskInputComposer {
           phone.observeClientPointerPresses || desk.observeClientPointerPresses,
       mobilePresentation: true,
       homeShown: phone.homeShown,
+      overviewShown: phone.overviewShown,
     );
     if (_last?.hasSameRoutingAs(snapshot) ?? false) return true;
     if (!_bridge.publishInputLayout(snapshot)) return false;

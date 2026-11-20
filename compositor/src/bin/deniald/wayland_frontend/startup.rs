@@ -53,6 +53,8 @@ impl WaylandFrontend {
         #[cfg(feature = "flutter")]
         insets::init(&display_handle);
         #[cfg(feature = "flutter")]
+        orientation::init(&display_handle);
+        #[cfg(feature = "flutter")]
         pet::init(&display_handle);
         #[cfg(feature = "flutter")]
         crate::fingerprint_presentation::init(&display_handle);

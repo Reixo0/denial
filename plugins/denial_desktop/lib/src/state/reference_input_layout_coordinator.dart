@@ -28,6 +28,7 @@ class ReferenceInputLayoutCoordinator {
 
   /// Whether the phone shows home, with no app in front.
   bool _homeShown = false;
+  bool _overviewShown = false;
 
   void invalidate() {
     _lastInputLayoutSnapshot = null;
@@ -50,6 +51,7 @@ class ReferenceInputLayoutCoordinator {
     _composer = composer;
     _observeClientPointerPresses = interactions.observesClientPointerPresses;
     _homeShown = state.foregroundObjectId == null && !state.lockLayerVisible;
+    _overviewShown = state.overviewVisible && !state.lockLayerVisible;
 
     final quickSettingsActive = state.quickSettingsEngaged;
     final edgePanelActive =
@@ -359,6 +361,7 @@ class ReferenceInputLayoutCoordinator {
       observeClientPointerPresses: _observeClientPointerPresses,
       mobilePresentation: true,
       homeShown: _homeShown,
+      overviewShown: _overviewShown,
     );
     if (_lastInputLayoutSnapshot?.hasSameRoutingAs(snapshot) ?? false) {
       return;

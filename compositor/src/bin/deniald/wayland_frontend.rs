@@ -193,6 +193,9 @@ mod layer_shell;
 #[cfg(feature = "flutter")]
 #[path = "wayland_frontend/minimized.rs"]
 mod minimized;
+#[cfg(feature = "flutter")]
+#[path = "wayland_frontend/orientation.rs"]
+pub(super) mod orientation;
 #[path = "wayland_frontend/output_power.rs"]
 mod output_power;
 #[cfg(feature = "flutter")]

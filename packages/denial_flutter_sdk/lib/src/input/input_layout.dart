@@ -15,6 +15,7 @@ class InputLayoutSnapshot {
     this.observeClientPointerPresses = false,
     this.mobilePresentation,
     this.homeShown = false,
+    this.overviewShown = false,
   });
 
   final int epoch;
@@ -38,12 +39,17 @@ class InputLayoutSnapshot {
   /// it upright when home rotation is off.
   final bool homeShown;
 
+  /// The phone shows its recent apps: Denial keeps the display's current
+  /// orientation, as Android's recents does.
+  final bool overviewShown;
+
   bool hasSameRoutingAs(InputLayoutSnapshot other) {
     if (keyboardCapture != other.keyboardCapture ||
         exclusiveShellMode != other.exclusiveShellMode ||
         observeClientPointerPresses != other.observeClientPointerPresses ||
         mobilePresentation != other.mobilePresentation ||
         homeShown != other.homeShown ||
+        overviewShown != other.overviewShown ||
         shellRegions.length != other.shellRegions.length ||
         softwareKeyboardRegions.length !=
             other.softwareKeyboardRegions.length ||
