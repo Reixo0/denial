@@ -9,6 +9,7 @@ import '../platform/denial_bridge_provider.dart';
 import '../services/logind_service.dart';
 import 'authentication.dart';
 import 'notifier_lifecycle.dart';
+import 'restart_targets.dart';
 
 enum SessionPowerAction {
   lock,
@@ -302,6 +303,44 @@ class SessionPowerController extends Notifier<SessionPowerState>
     }
     state = state.copyWith(clearConfirmationAction: true, clearError: true);
     await _perform(action);
+  }
+
+  /// Runs [action] at once: the caller already had the user confirm it
+  /// (the phone power menu's slide).
+  Future<void> performConfirmed(SessionPowerAction action) async {
+    if (state.busy) {
+      return;
+    }
+    state = state.copyWith(clearConfirmationAction: true, clearError: true);
+    await _perform(action);
+  }
+
+  /// Restarts into [target]: logind's Reboot, or the target's systemd unit.
+  Future<void> restartTo(RestartTarget target) async {
+    final unit = target.unit;
+    if (unit == null) {
+      await performConfirmed(SessionPowerAction.reboot);
+      return;
+    }
+    if (state.busy) {
+      return;
+    }
+    final generation = _buildGeneration;
+    state = state.copyWith(
+      busyAction: SessionPowerAction.reboot,
+      clearConfirmationAction: true,
+      clearError: true,
+    );
+    try {
+      await startSystemdUnit(unit);
+    } on Object catch (error) {
+      if (isBuildGenerationActive(generation)) {
+        state = state.copyWith(
+          clearBusyAction: true,
+          error: sessionPowerErrorMessage(error),
+        );
+      }
+    }
   }
 
   void cancelConfirmation() {

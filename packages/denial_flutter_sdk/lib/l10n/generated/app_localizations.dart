@@ -2208,6 +2208,30 @@ abstract class AppLocalizations {
   /// **'Keep the session in memory'**
   String get powerActionSuspendDescription;
 
+  /// English UI text for powerMenuSlidePowerOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Slide to power off'**
+  String get powerMenuSlidePowerOff;
+
+  /// English UI text for powerMenuSlideRestart.
+  ///
+  /// In en, this message translates to:
+  /// **'Slide to restart'**
+  String get powerMenuSlideRestart;
+
+  /// English UI text for powerMenuTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Power Menu'**
+  String get powerMenuTitle;
+
+  /// English UI text for powerMenuWorking.
+  ///
+  /// In en, this message translates to:
+  /// **'One moment…'**
+  String get powerMenuWorking;
+
   /// English UI text for powerAuthenticationRequired.
   ///
   /// In en, this message translates to:

@@ -617,7 +617,9 @@ class _ShellThemeResolution {
   late final ThemeData materialTheme = ThemeData(
     brightness: theme.brightness,
     useMaterial3: true,
-    fontFamily: theme.fontFamily.isEmpty ? null : theme.fontFamily,
+    fontFamily: theme.fontFamily.isEmpty
+        ? ShellText.variableFontFamily
+        : theme.fontFamily,
     scaffoldBackgroundColor: ShellMediaColors.transparentDark,
     colorScheme: generatedColorScheme.copyWith(
       surface: theme.colors.background,

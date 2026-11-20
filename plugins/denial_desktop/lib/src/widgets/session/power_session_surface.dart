@@ -18,6 +18,7 @@ import 'package:denial_flutter_sdk/shell_theme.dart';
 import 'package:denial_flutter_sdk/tokens.dart';
 
 import '../main_output_centered_surface.dart';
+import 'phone_power_menu.dart';
 
 void showPowerSessionSurface(WidgetRef ref) {
   unawaited(ref.read(sessionPowerProvider.notifier).refresh());
@@ -29,7 +30,7 @@ void showPowerSessionSurface(WidgetRef ref) {
         pointerPolicy: ShellPointerPolicy.fullScene,
         keyboardPolicy: ShellKeyboardPolicy.capture,
         dismissPolicy: ShellDismissPolicy.outsideTapAndEscape,
-        builder: (_, handle) => PowerSessionSurface(onClose: handle.close),
+        builder: (_, handle) => PhonePowerMenu(onClose: handle.close),
       );
 }
 

@@ -1192,6 +1192,18 @@ class AppLocalizationsZh extends AppLocalizations {
   String get powerActionSuspendDescription => '在内存中保留会话';
 
   @override
+  String get powerMenuSlidePowerOff => '滑动以关机';
+
+  @override
+  String get powerMenuSlideRestart => '滑动以重启';
+
+  @override
+  String get powerMenuTitle => '电源菜单';
+
+  @override
+  String get powerMenuWorking => '请稍候…';
+
+  @override
   String powerAuthenticationRequired(String description) {
     return '需要验证 · $description';
   }

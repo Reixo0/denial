@@ -1231,6 +1231,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get powerActionSuspendDescription => 'Keep the session in memory';
 
   @override
+  String get powerMenuSlidePowerOff => 'Slide to power off';
+
+  @override
+  String get powerMenuSlideRestart => 'Slide to restart';
+
+  @override
+  String get powerMenuTitle => 'Power Menu';
+
+  @override
+  String get powerMenuWorking => 'One moment…';
+
+  @override
   String powerAuthenticationRequired(String description) {
     return 'Authentication required · $description';
   }

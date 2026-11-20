@@ -1752,6 +1752,22 @@
   "@powerActionSuspendDescription": {
     "description": "English UI text for powerActionSuspendDescription."
   },
+  "powerMenuSlidePowerOff": "Slide to power off",
+  "@powerMenuSlidePowerOff": {
+    "description": "English UI text for powerMenuSlidePowerOff."
+  },
+  "powerMenuSlideRestart": "Slide to restart",
+  "@powerMenuSlideRestart": {
+    "description": "English UI text for powerMenuSlideRestart."
+  },
+  "powerMenuTitle": "Power Menu",
+  "@powerMenuTitle": {
+    "description": "English UI text for powerMenuTitle."
+  },
+  "powerMenuWorking": "One moment…",
+  "@powerMenuWorking": {
+    "description": "English UI text for powerMenuWorking."
+  },
   "powerAuthenticationRequired": "Authentication required · {description}",
   "@powerAuthenticationRequired": {
     "description": "English UI text for powerAuthenticationRequired.",

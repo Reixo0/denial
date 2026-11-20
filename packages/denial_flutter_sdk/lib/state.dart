@@ -91,6 +91,8 @@ export 'src/state/screenshot_selection.dart'
         ScreenshotSelectionPhase,
         ScreenshotSelectionSession,
         screenshotSelectionProvider;
+export 'src/state/restart_targets.dart'
+    show RestartTarget, restartTargetsPath, restartTargetsProvider;
 export 'src/state/session_power.dart'
     show
         SessionActionAvailability,

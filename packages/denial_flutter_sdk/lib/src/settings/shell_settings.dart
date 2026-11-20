@@ -113,7 +113,7 @@ class ShellLocalizationSettings {
 class ShellAppearanceSettings {
   const ShellAppearanceSettings({
     this.colorSchemePreference = DesktopColorSchemePreference.preferDark,
-    this.accentSource = ShellAccentSource.custom,
+    this.accentSource = ShellAccentSource.wallpaper,
     this.customAccentColor = const Color(0xff6b3f73),
     this.fontFamily = '',
     this.cornerRadiusScale = 0.5,

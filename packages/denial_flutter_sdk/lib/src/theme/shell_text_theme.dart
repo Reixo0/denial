@@ -26,7 +26,11 @@ class ShellTextTheme {
     TextStyle resolve(TextStyle style, Color color) {
       return style.copyWith(
         color: color,
-        fontFamily: fontFamily.isEmpty ? style.fontFamily : fontFamily,
+        // No chosen family: the shell is set in Roboto Flex, as Android's
+        // system UI is in its own sans.
+        fontFamily: fontFamily.isEmpty
+            ? style.fontFamily ?? ShellText.variableFontFamily
+            : fontFamily,
       );
     }
 
