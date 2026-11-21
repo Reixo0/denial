@@ -3,7 +3,18 @@ import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'shade_expansion.dart';
 import 'shade_expansion_motion.dart';
+
+/// The shade's [ShadeExpansion] while the shade layer is up, for drags that
+/// start outside it (a pull down on the home screen).
+final shadeExpansionProvider = Provider<ShadeExpansionHandle>(
+  (ref) => ShadeExpansionHandle(),
+);
+
+class ShadeExpansionHandle {
+  ShadeExpansion? current;
+}
 
 /// Shares the shade's painted progress, including its release spring, with
 /// sibling shell layers. Listening to the animation does not rebuild providers.

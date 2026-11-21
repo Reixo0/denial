@@ -21,6 +21,7 @@ import '../notification_rows.dart';
 import '../phone_scheme.dart';
 import 'notification_shade_list.dart';
 import 'shade_dismiss_gesture.dart';
+import 'shade_expansion.dart';
 
 /// A separate scrollable notification stack for the notification page.
 /// Only a completed close rearms the staggered entrance, never a drag reversal.
@@ -29,14 +30,14 @@ class MobileNotificationHistory extends ConsumerStatefulWidget {
     required this.progress,
     required this.closed,
     this.active = true,
+    required this.expansion,
     super.key,
-    this.drag,
   });
 
   final Animation<double> progress;
 
-  /// The shade's drag, used when the history does not scroll.
-  final ShadeDragHandlers? drag;
+  /// The shade a drag on the list moves while it cannot scroll.
+  final ShadeExpansion expansion;
 
   /// The shell is in its closed state (neither open nor actively dragging).
   /// The animation must also reach zero before the next entrance is armed.
@@ -180,8 +181,7 @@ class _MobileNotificationHistoryState
     // Clamping physics only installs a scroll drag recognizer when content
     // actually overflows. Otherwise the parent moves the shade with the finger.
     return ShadeDismissGesture(
-      progress: widget.progress,
-      handlers: widget.drag,
+      expansion: widget.expansion,
       canDrag: () =>
           _scroll.hasClients &&
           _scroll.position.hasContentDimensions &&

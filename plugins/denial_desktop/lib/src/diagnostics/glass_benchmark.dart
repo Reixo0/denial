@@ -11,6 +11,7 @@ import 'package:denial_flutter_sdk/shell_theme.dart';
 import 'package:denial_flutter_sdk/rendering.dart';
 
 import '../widgets/shade/quick_settings_panel.dart';
+import '../widgets/shade/shade_expansion.dart';
 
 /// Opt-in, finite lab workload driven by Denial's own frame clock.
 ///
@@ -46,7 +47,8 @@ class _GlassBenchmarkState extends State<_GlassBenchmark>
   static const _phaseUs = _warmupUs + _measureUs;
 
   late final Ticker _ticker = createTicker(_tick);
-  late final AnimationController _progress = AnimationController(vsync: this);
+  late final ShadeExpansion _shade = ShadeExpansion(vsync: this);
+  AnimationController get _progress => _shade.panel;
   final _marker = ValueNotifier(Offset.zero);
   final _backdrop = ValueNotifier(Offset.zero);
   final _timings = <FrameTiming>[];
@@ -336,7 +338,7 @@ class _GlassBenchmarkState extends State<_GlassBenchmark>
     _drain?.cancel();
     SchedulerBinding.instance.removeTimingsCallback(_recordTimings);
     _ticker.dispose();
-    _progress.dispose();
+    _shade.dispose();
     _marker.dispose();
     _backdrop.dispose();
     for (final client in _clients.toList()) {
@@ -380,7 +382,7 @@ class _GlassBenchmarkState extends State<_GlassBenchmark>
                 ),
               ),
             if (_phase != 0)
-              QuickSettingsShade(progress: _progress, active: false),
+              QuickSettingsShade(expansion: _shade, active: false),
             if (_phase <= 1)
               Align(
                 alignment: Alignment.bottomCenter,

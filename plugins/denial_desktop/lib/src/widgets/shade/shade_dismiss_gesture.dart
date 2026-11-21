@@ -1,28 +1,27 @@
 import 'package:denial_desktop/src/state/reference_shell_controller.dart';
-import 'package:denial_desktop/src/state/reference_shell_metrics.dart';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-/// Shares the handle's interactive panel motion with the space below it.
-/// A scrollable child wins the vertical gesture arena; [canDrag] also guards
-/// against dismissing a long history when its scroll position is at an edge.
+import 'quick_settings_panel.dart' show PixelShadeViewport;
+import 'shade_expansion.dart';
+
+/// The shade's empty space and its notification list: a tap closes the
+/// shade, a vertical drag moves it through its [ShadeExpansion] (down opens
+/// the full quick settings, up collapses them and then closes the shade).
+/// A scrollable child wins the vertical gesture arena; [canDrag] also keeps
+/// a scrollable list from moving the shade.
 class ShadeDismissGesture extends ConsumerStatefulWidget {
   const ShadeDismissGesture({
-    required this.progress,
+    required this.expansion,
     required this.child,
     this.canDrag,
-    this.handlers,
     super.key,
   });
 
-  final Animation<double> progress;
+  final ShadeExpansion expansion;
   final Widget child;
   final bool Function()? canDrag;
-
-  /// Takes the vertical drag instead of moving the shade (the phone shade
-  /// uses it to open its full quick settings).
-  final ShadeDragHandlers? handlers;
 
   @override
   ConsumerState<ShadeDismissGesture> createState() =>
@@ -30,89 +29,34 @@ class ShadeDismissGesture extends ConsumerStatefulWidget {
 }
 
 class _ShadeDismissGestureState extends ConsumerState<ShadeDismissGesture> {
+  /// Kept in the state: the shade rebuilds this during the drag.
   bool _dragging = false;
-  double _distance = 0;
 
   @override
   Widget build(BuildContext context) {
-    final controller = ref.read(referenceShellProvider.notifier);
-    final handlers = widget.handlers;
-    if (handlers != null) {
-      // The flag lives in the state: the shade rebuilds this during the
-      // drag, and a local would forget the drag halfway.
-      return GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: controller.closeQuickSettings,
-        onVerticalDragStart: (details) {
-          _dragging = widget.canDrag?.call() ?? true;
-          if (_dragging) handlers.onStart(details);
-        },
-        onVerticalDragUpdate: (details) {
-          if (_dragging) handlers.onUpdate(details);
-        },
-        onVerticalDragEnd: (details) {
-          if (_dragging) handlers.onEnd(details);
-          _dragging = false;
-        },
-        onVerticalDragCancel: () {
-          if (_dragging) handlers.onEnd(DragEndDetails(primaryVelocity: 0));
-          _dragging = false;
-        },
-        child: widget.child,
-      );
-    }
+    final expansion = widget.expansion;
+    // Inside the shade's dp viewport a drag's delta is in dp.
+    final scale = PixelShadeViewport.scaleOf(context);
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: controller.closeQuickSettings,
+      onTap: ref.read(referenceShellProvider.notifier).closeQuickSettings,
       onVerticalDragStart: (_) {
-        _dragging = widget.canDrag?.call() ?? true;
-        _distance = 0;
-        if (_dragging) {
-          controller.startQuickSettingsDrag(progress: widget.progress.value);
-        }
+        _dragging = (widget.canDrag?.call() ?? true) && expansion.beginDrag();
       },
       onVerticalDragUpdate: (details) {
-        if (!_dragging) return;
-        _distance += details.delta.dy;
-        controller.updateQuickSettingsDrag(
-          Offset(
-            0,
-            details.delta.dy *
-                ReferenceShellMetrics.quickSettingsDragScale(
-                  MediaQuery.sizeOf(context),
-                ),
-          ),
-        );
+        if (_dragging) expansion.dragBy(details.delta.dy * scale);
       },
       onVerticalDragEnd: (details) {
-        if (!_dragging) return;
-        _dragging = false;
-        final velocity = details.primaryVelocity ?? 0;
-        if (_distance <= -48 || velocity <= -500) {
-          controller.closeQuickSettings(releaseVelocity: velocity);
-        } else {
-          controller.endQuickSettingsDrag(velocity);
+        if (_dragging) {
+          expansion.endDrag((details.primaryVelocity ?? 0) * scale);
         }
+        _dragging = false;
       },
       onVerticalDragCancel: () {
-        if (!_dragging) return;
+        if (_dragging) expansion.endDrag(0);
         _dragging = false;
-        controller.endQuickSettingsDrag(0);
       },
       child: widget.child,
     );
   }
-}
-
-/// A vertical drag's callbacks, handed down to the shade's gesture areas.
-class ShadeDragHandlers {
-  const ShadeDragHandlers({
-    required this.onStart,
-    required this.onUpdate,
-    required this.onEnd,
-  });
-
-  final GestureDragStartCallback onStart;
-  final GestureDragUpdateCallback onUpdate;
-  final GestureDragEndCallback onEnd;
 }

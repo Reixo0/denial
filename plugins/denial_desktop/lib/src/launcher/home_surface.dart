@@ -13,9 +13,9 @@ import 'package:denial_flutter_sdk/rendering.dart';
 
 import '../state/home_back.dart';
 import '../state/reference_shell_controller.dart';
-import '../state/reference_shell_metrics.dart';
 import '../state/reference_shell_presentation.dart';
 import '../state/reference_shell_profile.dart';
+import '../widgets/shade/shade_progress.dart';
 import 'home_drag_controller.dart';
 import 'home_grid_geometry.dart';
 import 'home_icon_locator.dart';
@@ -555,26 +555,24 @@ class _HomeSurfaceState extends ConsumerState<HomeSurface>
           ref.read(referenceShellPresentationProvider) ==
           ReferenceShellProfile.mobile;
       if (dy > 0 && phone && !_drawerShown && _canPullDrawer) {
+        // Android's launcher: a pull down on home opens the shade, unless
+        // another finger already moves it.
+        final took =
+            ref
+                .read(shadeExpansionProvider)
+                .current
+                ?.beginDrag(fromStatusBar: true) ??
+            false;
+        if (!took) return;
         _verticalDrag = _HomeVerticalDrag.shade;
         _menu.value = null;
-        ref.read(referenceShellProvider.notifier).startQuickSettingsDrag();
       } else {
         _verticalDrag = _HomeVerticalDrag.drawer;
       }
     }
     switch (_verticalDrag!) {
       case _HomeVerticalDrag.shade:
-        ref
-            .read(referenceShellProvider.notifier)
-            .updateQuickSettingsDrag(
-              Offset(
-                0,
-                dy *
-                    ReferenceShellMetrics.quickSettingsDragScale(
-                      MediaQuery.sizeOf(context),
-                    ),
-              ),
-            );
+        ref.read(shadeExpansionProvider).current?.dragBy(dy);
       case _HomeVerticalDrag.drawer:
         if (!_canPullDrawer) return;
         _pullDrawer(dy);
@@ -586,8 +584,9 @@ class _HomeSurfaceState extends ConsumerState<HomeSurface>
     _verticalDrag = null;
     if (mode == _HomeVerticalDrag.shade) {
       ref
-          .read(referenceShellProvider.notifier)
-          .endQuickSettingsDrag(details.primaryVelocity ?? 0);
+          .read(shadeExpansionProvider)
+          .current
+          ?.endDrag(details.primaryVelocity ?? 0);
       return;
     }
     if (!_drawerShown) return;

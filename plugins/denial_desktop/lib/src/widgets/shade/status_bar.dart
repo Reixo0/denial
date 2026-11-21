@@ -17,6 +17,7 @@ import 'package:denial_flutter_sdk/tokens.dart';
 
 import '../notification_media.dart'
     show NotificationAppIcon, NotificationSmallIcon;
+import 'shade_expansion.dart';
 import 'shade_expansion_motion.dart';
 import 'shade_reference_geometry.dart';
 import 'quick_settings_panel.dart' show PixelShadeViewport;
@@ -157,17 +158,28 @@ Color _statusColorAt(BuildContext context, Color foreground, double progress) {
 /// While the shade is open, the shade draws the whole row beneath its
 /// notifications through [ShadeHeaderStatusLayer]; the bar keeps only its
 /// drag surface. A landscape view shows no bar, only that surface.
-class ShadeStatusBar extends ConsumerWidget {
-  const ShadeStatusBar({super.key, this.shadeProgress, this.onDragStart});
+class ShadeStatusBar extends ConsumerStatefulWidget {
+  const ShadeStatusBar({super.key, required this.expansion});
 
-  final Animation<double>? shadeProgress;
-  final ValueChanged<Offset>? onDragStart;
+  /// The shade a pull on the bar opens.
+  final ShadeExpansion expansion;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final controller = ref.read(referenceShellProvider.notifier);
+  ConsumerState<ShadeStatusBar> createState() => _ShadeStatusBarState();
+}
+
+class _ShadeStatusBarState extends ConsumerState<ShadeStatusBar> {
+  /// Fingers on the bar: two pull the full quick settings at once.
+  final Set<int> _pointers = <int>{};
+
+  /// This strip's drag holds the shade.
+  bool _owns = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final expansion = widget.expansion;
     final foreground = _statusForeground(context, ref);
-    final progress = shadeProgress ?? const AlwaysStoppedAnimation(0);
+    final progress = expansion.panel;
     final geometry = _StatusGeometry.of(context);
     final shown = ReferenceShellMetrics.statusBarShown(
       MediaQuery.sizeOf(context),
@@ -185,45 +197,48 @@ class ShadeStatusBar extends ConsumerWidget {
         animation: progress,
         builder: (context, strip) =>
             IgnorePointer(ignoring: progress.value >= 0.99, child: strip),
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onVerticalDragStart: (details) {
-            onDragStart?.call(details.localPosition);
-            controller.startQuickSettingsDrag(progress: shadeProgress?.value);
-          },
-          onVerticalDragUpdate: (details) {
-            controller.updateQuickSettingsDrag(
-              Offset(
-                0.0,
-                details.delta.dy *
-                    ReferenceShellMetrics.quickSettingsDragScale(
-                      MediaQuery.sizeOf(context),
-                    ),
-              ),
-            );
-          },
-          onVerticalDragEnd: (details) {
-            controller.endQuickSettingsDrag(details.primaryVelocity ?? 0.0);
-          },
-          onVerticalDragCancel: () => controller.endQuickSettingsDrag(0.0),
-          // A clock or battery change repaints only the status bar; sharing a
-          // picture with the rest of the chrome would damage everything down
-          // to the home pill.
-          // Android's status bar stays where it is and fades under the
-          // shade's scrim as it comes down; the shade's own header takes
-          // over the clock and icons.
-          child: RepaintBoundary(
-            child: AnimatedBuilder(
-              animation: progress,
-              builder: (context, row) {
-                final covered = ColorOsShadeMotion.blurFraction(progress.value);
-                if (covered >= 1 || !shown) return const SizedBox.expand();
-                return Opacity(opacity: 1 - covered, child: row);
-              },
-              child: Stack(
-                fit: StackFit.expand,
-                clipBehavior: Clip.none,
-                children: geometry.foreground(context, 0, foreground),
+        child: Listener(
+          onPointerDown: (event) => _pointers.add(event.pointer),
+          onPointerUp: (event) => _pointers.remove(event.pointer),
+          onPointerCancel: (event) => _pointers.remove(event.pointer),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onVerticalDragStart: (_) => _owns = expansion.beginDrag(
+              fromStatusBar: true,
+              twoFinger: _pointers.length >= 2,
+            ),
+            onVerticalDragUpdate: (details) {
+              if (_owns) expansion.dragBy(details.delta.dy);
+            },
+            onVerticalDragEnd: (details) {
+              if (_owns) expansion.endDrag(details.primaryVelocity ?? 0.0);
+              _owns = false;
+            },
+            onVerticalDragCancel: () {
+              if (_owns) expansion.endDrag(0.0);
+              _owns = false;
+            },
+            // A clock or battery change repaints only the status bar; sharing a
+            // picture with the rest of the chrome would damage everything down
+            // to the home pill.
+            // Android's status bar stays where it is and fades under the
+            // shade's scrim as it comes down; the shade's own header takes
+            // over the clock and icons.
+            child: RepaintBoundary(
+              child: AnimatedBuilder(
+                animation: progress,
+                builder: (context, row) {
+                  final covered = ColorOsShadeMotion.blurFraction(
+                    progress.value,
+                  );
+                  if (covered >= 1 || !shown) return const SizedBox.expand();
+                  return Opacity(opacity: 1 - covered, child: row);
+                },
+                child: Stack(
+                  fit: StackFit.expand,
+                  clipBehavior: Clip.none,
+                  children: geometry.foreground(context, 0, foreground),
+                ),
               ),
             ),
           ),

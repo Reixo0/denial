@@ -1,5 +1,4 @@
 import 'package:denial_desktop/src/state/reference_shell_controller.dart';
-import 'package:denial_desktop/src/state/reference_shell_metrics.dart';
 
 import 'dart:math' as math;
 
@@ -39,14 +38,10 @@ import '../../state/qs_tile_layout.dart';
 import 'mobile_notification_history.dart';
 import 'shade_backdrop_scene.dart';
 import 'shade_dismiss_gesture.dart';
+import 'shade_expansion.dart';
 import 'shade_expansion_motion.dart';
 import 'status_glyphs.dart';
 import '../../state/phone_desk.dart';
-
-/// Which state an opened shade starts in: Android's first pull
-/// ([notifications]: a row of tiles over the notifications) or the full
-/// quick settings.
-enum ShadePage { notifications, quickSettings }
 
 /// The scene's backdrop frosted once, when the translucent shade can show it
 /// in place of live material.
@@ -66,28 +61,26 @@ EdgeInsets _divideInsets(EdgeInsets insets, double divisor) => EdgeInsets.only(
   bottom: insets.bottom / divisor,
 );
 
-/// Android 17's notification shade and quick settings. [progress] is `0`
-/// when hidden and `1` when open. [page] picks the state it opens in; a
-/// vertical drag on the tiles moves between the two.
+/// Android 17's notification shade and quick settings, moved by their
+/// [ShadeExpansion]: its panel fraction (0 hidden, 1 open) and its quick
+/// settings fraction (the quick tiles over the notifications, or the full
+/// quick settings).
 class QuickSettingsShade extends ConsumerWidget {
   const QuickSettingsShade({
     super.key,
-    required this.progress,
+    required this.expansion,
     this.active = true,
     this.closed = false,
-    this.page = ShadePage.quickSettings,
-    this.onPageChanged,
   });
 
-  final Animation<double> progress;
+  final ShadeExpansion expansion;
   final bool active;
   final bool closed;
-  final ShadePage page;
-  final ValueChanged<ShadePage>? onPageChanged;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final controller = ref.read(referenceShellProvider.notifier);
+    final progress = expansion.panel;
 
     // Blur what the shade covers, the app included, as Android does, not
     // the wallpaper frosted once: a null backdrop keeps the shade and its
@@ -106,7 +99,7 @@ class QuickSettingsShade extends ConsumerWidget {
                 fit: StackFit.expand,
                 children: [
                   ShadeDismissGesture(
-                    progress: progress,
+                    expansion: expansion,
                     child: const SizedBox.expand(),
                   ),
                   _FullScreenShade(
@@ -124,11 +117,9 @@ class QuickSettingsShade extends ConsumerWidget {
                       },
                       child: PixelShadeViewport(
                         child: _PixelShade(
-                          progress: progress,
+                          expansion: expansion,
                           closed: closed,
                           active: active,
-                          page: page,
-                          onPageChanged: onPageChanged,
                         ),
                       ),
                     ),
@@ -323,23 +314,19 @@ class _PixelScale extends InheritedWidget {
   bool updateShouldNotify(_PixelScale oldWidget) => scale != oldWidget.scale;
 }
 
-/// How a drag on the shade is being used.
-enum _DragMode { expansion, closing, none }
-
 class _PixelShade extends ConsumerStatefulWidget {
   const _PixelShade({
-    required this.progress,
+    required this.expansion,
     required this.closed,
     required this.active,
-    required this.page,
-    required this.onPageChanged,
   });
 
-  final Animation<double> progress;
+  final ShadeExpansion expansion;
   final bool closed;
   final bool active;
-  final ShadePage page;
-  final ValueChanged<ShadePage>? onPageChanged;
+
+  /// The panel's fraction, 0 hidden to 1 open.
+  Animation<double> get progress => expansion.panel;
 
   @override
   ConsumerState<_PixelShade> createState() => _PixelShadeState();
@@ -353,22 +340,16 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
   static const double _collapsedHeader = 40;
   static const double _expandedHeader = 142;
 
-  /// Drag distance, in dp, that opens the full quick settings: how far the
-  /// tiles' bottom edge moves, so it stays under the finger as Android's
-  /// QS panel does. Measured at layout; this is only the first guess.
-  double _expansionTravel = 356;
-
-  late final AnimationController _expansion = AnimationController(
-    vsync: this,
-    value: widget.page == ShadePage.quickSettings ? 1 : 0,
-  );
-  _DragMode? _drag;
-  double _closeDistance = 0;
+  /// The quick settings' fraction: 0 the quick tiles, 1 the full QS.
+  AnimationController get _expansion => widget.expansion.qs;
 
   /// The shade reached fully open since it was last closed: moving back
   /// down its progress is closing, which runs the stages backwards.
   bool _wasOpen = false;
   bool _closedBefore = true;
+
+  /// The notification list's overscroll is moving the shade.
+  bool _listDragging = false;
 
   /// The full quick settings' tile pages; each pull starts on the first.
   final PageController _pages = PageController();
@@ -404,155 +385,41 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
       widget.progress.addListener(_trackOpen);
       _trackOpen();
     }
-    final target = widget.page == ShadePage.quickSettings ? 1.0 : 0.0;
     if (widget.closed || !widget.active) {
-      // Closed: every pull starts on the notifications, as Android's does.
-      _expansion.stop();
-      _expansion.value = 0;
-      _drag = null;
+      // Closed: every pull starts on the first tile page, out of editing.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_pages.hasClients && (_pages.page ?? 0) != 0) _pages.jumpToPage(0);
         if (mounted && ref.read(qsEditingProvider)) {
           ref.read(qsEditingProvider.notifier).stop();
         }
       });
-      if (widget.page != ShadePage.notifications) {
-        final onPageChanged = widget.onPageChanged;
-        WidgetsBinding.instance.addPostFrameCallback(
-          (_) => onPageChanged?.call(ShadePage.notifications),
-        );
-      }
-    } else if (oldWidget.page != widget.page && _drag == null) {
-      _settle(target);
     }
   }
 
   @override
   void dispose() {
     widget.progress.removeListener(_trackOpen);
-    _expansion.dispose();
     _pages.dispose();
     super.dispose();
-  }
-
-  /// [velocity] in dp per second.
-  void _settle(double target, {double velocity = 0}) {
-    // QuickSettingsController flings the expansion as the shade's.
-    final fling = aospShadeFling(
-      distance: target - _expansion.value,
-      velocity: velocity / _expansionTravel,
-      dp: 1 / _expansionTravel,
-    );
-    final duration = MediaQuery.disableAnimationsOf(context)
-        ? Duration.zero
-        : fling.duration;
-    _expansion
-        .animateTo(target, duration: duration, curve: fling.curve)
-        .whenComplete(() {
-          if (!mounted) return;
-          final page = target >= 1
-              ? ShadePage.quickSettings
-              : ShadePage.notifications;
-          if (page != widget.page) widget.onPageChanged?.call(page);
-        });
-  }
-
-  void _dragStart(DragStartDetails _) {
-    _drag = null;
-    _closeDistance = 0;
-    _expansion.stop();
-  }
-
-  void _dragUpdate(DragUpdateDetails details) => _dragBy(details.delta.dy);
-
-  /// Starts moving the shade itself (closing it) with the drag.
-  void _startClosing() {
-    _drag = _DragMode.closing;
-    ref
-        .read(referenceShellProvider.notifier)
-        .startQuickSettingsDrag(progress: widget.progress.value);
-  }
-
-  void _dragBy(double dy) {
-    final controller = ref.read(referenceShellProvider.notifier);
-    if (_drag == null) {
-      if (dy > 0) {
-        _drag = _expansion.value < 1 ? _DragMode.expansion : _DragMode.none;
-      } else if (dy < 0) {
-        if (_expansion.value > 0) {
-          _drag = _DragMode.expansion;
-        } else {
-          _startClosing();
-        }
-      } else {
-        return;
-      }
-    }
-    switch (_drag!) {
-      case _DragMode.expansion:
-        final next = _expansion.value + dy / _expansionTravel;
-        if (next >= 0) {
-          _expansion.value = next;
-          break;
-        }
-        // Pushed past the first pull: the same drag closes the shade.
-        _expansion.value = 0;
-        _startClosing();
-        _dragBy(next * _expansionTravel);
-      case _DragMode.closing:
-        _closeDistance += dy;
-        final scale = PixelShadeViewport.scaleOf(context);
-        controller.updateQuickSettingsDrag(
-          Offset(
-            0,
-            dy *
-                scale *
-                ReferenceShellMetrics.quickSettingsDragScale(
-                  MediaQuery.sizeOf(context) * scale,
-                ),
-          ),
-        );
-      case _DragMode.none:
-        break;
-    }
-  }
-
-  void _dragEnd(DragEndDetails details) {
-    final velocity = details.primaryVelocity ?? 0;
-    final controller = ref.read(referenceShellProvider.notifier);
-    switch (_drag) {
-      case _DragMode.expansion:
-        final target = velocity > 300
-            ? 1.0
-            : velocity < -300
-            ? 0.0
-            : (_expansion.value >= 0.5 ? 1.0 : 0.0);
-        _settle(target, velocity: velocity);
-      case _DragMode.closing:
-        if (_closeDistance <= -32 || velocity <= -500) {
-          controller.closeQuickSettings(releaseVelocity: velocity);
-        } else {
-          controller.endQuickSettingsDrag(velocity);
-        }
-      case _DragMode.none || null:
-        break;
-    }
-    _drag = null;
   }
 
   /// A scrolling notification list pulled down past its top opens the
   /// full quick settings, as a drag on the rest of the shade does.
   bool _onListScroll(ScrollNotification notification) {
+    final expansion = widget.expansion;
+    final scale = PixelShadeViewport.scaleOf(context);
     if (notification is OverscrollNotification &&
         notification.dragDetails != null &&
-        (notification.overscroll < 0 || _drag != null)) {
-      if (_drag == null) _dragStart(DragStartDetails());
-      _dragBy(-notification.overscroll);
-    } else if (notification is ScrollEndNotification && _drag != null) {
-      _dragEnd(
-        DragEndDetails(
-          primaryVelocity: notification.dragDetails?.primaryVelocity ?? 0,
-        ),
+        (notification.overscroll < 0 || _listDragging)) {
+      if (!_listDragging) {
+        _listDragging = expansion.beginDrag();
+        if (!_listDragging) return false;
+      }
+      expansion.dragBy(-notification.overscroll * scale);
+    } else if (notification is ScrollEndNotification && _listDragging) {
+      _listDragging = false;
+      expansion.endDrag(
+        (notification.dragDetails?.primaryVelocity ?? 0) * scale,
       );
     }
     return false;
@@ -820,11 +687,6 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
     final oneRow = PixelPagedTileGrid.gridHeight(math.min(1, rows));
     final twoRows = PixelPagedTileGrid.gridHeight(math.min(2, rows));
     final motion = Listenable.merge(<Listenable>[_expansion, widget.progress]);
-    final handlers = ShadeDragHandlers(
-      onStart: _dragStart,
-      onUpdate: _dragUpdate,
-      onEnd: _dragEnd,
-    );
     final tilesArea = RepaintBoundary(
       child: AnimatedBuilder(
         animation: motion,
@@ -913,13 +775,8 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
         },
       ),
     );
-    final shade = GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: ref.read(referenceShellProvider.notifier).closeQuickSettings,
-      onVerticalDragStart: _dragStart,
-      onVerticalDragUpdate: _dragUpdate,
-      onVerticalDragEnd: _dragEnd,
-      onVerticalDragCancel: () => _dragEnd(DragEndDetails(primaryVelocity: 0)),
+    final shade = ShadeDismissGesture(
+      expansion: widget.expansion,
       child: Padding(
         padding: EdgeInsets.fromLTRB(
           PixelQs.margin + padding.left,
@@ -948,8 +805,10 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
                 58 +
                 fullHeight -
                 firstHeight;
+            // The quick settings follow the finger over the tiles' growth.
             if (stages.secondRow >= 1 && travel > 120) {
-              _expansionTravel = travel;
+              widget.expansion.qsTravel =
+                  travel * PixelShadeViewport.scaleOf(context);
             }
             final growth = e * travel;
             final pushed = e * (height - restingTop) - growth;
@@ -991,7 +850,7 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
                                 progress: widget.progress,
                                 closed: widget.closed,
                                 active: widget.active && e < 0.01,
-                                drag: handlers,
+                                expansion: widget.expansion,
                               ),
                             ),
                           ),
@@ -1215,13 +1074,13 @@ class _Notifications extends ConsumerWidget {
     required this.progress,
     required this.closed,
     required this.active,
-    required this.drag,
+    required this.expansion,
   });
 
   final Animation<double> progress;
   final bool closed;
   final bool active;
-  final ShadeDragHandlers drag;
+  final ShadeExpansion expansion;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1233,7 +1092,7 @@ class _Notifications extends ConsumerWidget {
       progress: progress,
       closed: closed,
       active: active,
-      drag: drag,
+      expansion: expansion,
     );
   }
 }

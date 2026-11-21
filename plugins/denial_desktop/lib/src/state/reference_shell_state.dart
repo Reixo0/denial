@@ -125,7 +125,7 @@ class ReferenceShellState {
   final bool quickSettingsVisible;
 
   /// A shade drag holds the shade past closed. The finger's position, which
-  /// changes on every frame, is `ReferenceShellController.quickSettingsDrag`.
+  /// changes on every frame, is the shade's own `ShadeExpansion.panel`.
   final bool quickSettingsDragged;
   final bool quickSettingsDragActive;
   final bool edgePanelVisible;

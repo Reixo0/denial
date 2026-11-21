@@ -41,12 +41,6 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
   @override
   ReferenceShellState get state => super.state;
 
-  /// The shade's position under the finger, from 0 closed to 1 open, while
-  /// [ReferenceShellState.quickSettingsDragActive]. The shell state carries
-  /// only [ReferenceShellState.quickSettingsDragged].
-  ValueListenable<double> get quickSettingsDrag => _quickSettingsDrag;
-  final _quickSettingsDrag = ValueNotifier(0.0);
-
   /// The open apps as the bottom gesture, switching and recents move them.
   AppDeck get deck => _deck;
   late AppDeck _deck;
@@ -74,9 +68,6 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
     // drag follows the state, as its moving layers expect.
     if (value.gesture == GestureDragPhase.idle) {
       _gestureDrag.value = Offset.zero;
-    }
-    if (!value.quickSettingsDragged) {
-      _quickSettingsDrag.value = 0.0;
     }
   }
 
@@ -262,8 +253,6 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
   static const double _gestureAxisLockRatio = 1.18;
   static const double _switchDistance = 82.0;
   static const double _switchFlickVelocity = 720.0;
-  static const double _quickSettingsOpenDistance = 126.0;
-  static const double _quickSettingsFlickVelocity = 520.0;
   static const double _edgePanelFlickVelocity = 520.0;
   static const Duration _launchRequestTimeout = Duration(seconds: 15);
 
@@ -297,8 +286,6 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
 
   /// Apps dismissed from recents whose windows have not closed yet.
   final Set<int> _dismissedIds = <int>{};
-  bool _quickSettingsDragStartedOpen = false;
-  bool _quickSettingsDragMoved = false;
   double _quickSettingsReleaseVelocity = 0;
 
   /// Vertical velocity, in logical pixels per second, with which the last
@@ -356,8 +343,6 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
     _liftCaught = false;
     _dismissedIds.clear();
     _recent.clear();
-    _quickSettingsDragStartedOpen = false;
-    _quickSettingsDragMoved = false;
     _edgePanelDragStartedOpen = false;
     _edgePanelDragMoved = false;
     _nextLaunchRequestId = 1;
@@ -466,8 +451,6 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
   void _resetSecurePresentation() {
     _endFingerGesture();
     _deck.halt();
-    _quickSettingsDragStartedOpen = false;
-    _quickSettingsDragMoved = false;
     _edgePanelDragStartedOpen = false;
     _edgePanelDragMoved = false;
     _launchRequestTimer?.cancel();
@@ -1328,79 +1311,37 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
     );
   }
 
-  void startQuickSettingsDrag({double? progress}) {
-    // A drag can interrupt the settling spring. Continue from the painted
-    // position supplied by the shade rather than jumping to its target state.
-    final initialProgress =
-        (progress ??
-                (state.quickSettingsVisible ? 1.0 : _quickSettingsDrag.value))
-            .clamp(0.0, 1.0)
-            .toDouble();
-    _quickSettingsDragStartedOpen = initialProgress >= 1.0;
-    _quickSettingsDragMoved = false;
-    // The shade follows the drag from its first frame.
-    _quickSettingsDrag.value = initialProgress;
+  /// A finger took the shade (the shade's `ShadeExpansion` moves it and
+  /// decides where it settles); the shell only keeps the flags.
+  void beginShadeDrag() {
     state = state.copyWith(
-      quickSettingsDragged: initialProgress > 0.0,
       quickSettingsVisible: false,
+      quickSettingsDragged: true,
+      quickSettingsDragActive: true,
+      gesture: GestureDragPhase.idle,
+      edgePanelVisible: false,
+      edgePanelDrag: Offset.zero,
+      edgePanelDragActive: false,
+    );
+  }
+
+  /// The dragged shade is [pulled] open at all, or pushed closed.
+  void shadeDragMoved(bool pulled) {
+    if (state.quickSettingsDragged == pulled &&
+        state.quickSettingsDragActive &&
+        !state.quickSettingsVisible) {
+      return;
+    }
+    state = state.copyWith(
+      quickSettingsVisible: false,
+      quickSettingsDragged: pulled,
       quickSettingsDragActive: true,
     );
   }
 
-  void updateQuickSettingsDrag(Offset delta) {
-    if (delta == Offset.zero) {
-      return;
-    }
-
-    _quickSettingsDragMoved = true;
-    const distance = ReferenceShellMetrics.quickSettingsDragDistance;
-    final current = state.quickSettingsVisible
-        ? distance
-        : _quickSettingsDrag.value * distance;
-    final dy = (current + delta.dy).clamp(0.0, distance).toDouble();
-    if (dy == current && !state.quickSettingsVisible) {
-      return;
-    }
-
-    _quickSettingsDrag.value = dy / distance;
-    // The shell state changes only when the drag takes over or crosses
-    // closed, never on every frame of it.
-    final dragged = dy > 0.0;
-    final shell = state;
-    if (shell.quickSettingsVisible ||
-        shell.quickSettingsDragged != dragged ||
-        !shell.quickSettingsDragActive ||
-        shell.gesture != GestureDragPhase.idle ||
-        shell.edgePanelVisible ||
-        shell.edgePanelDrag != Offset.zero ||
-        shell.edgePanelDragActive) {
-      state = shell.copyWith(
-        quickSettingsVisible: false,
-        quickSettingsDragged: dragged,
-        quickSettingsDragActive: true,
-        gesture: GestureDragPhase.idle,
-        edgePanelVisible: false,
-        edgePanelDrag: Offset.zero,
-        edgePanelDragActive: false,
-      );
-    }
-  }
-
-  void endQuickSettingsDrag(double velocity) {
-    final drag = state.quickSettingsVisible && !_quickSettingsDragMoved
-        ? ReferenceShellMetrics.quickSettingsDragDistance
-        : _quickSettingsDrag.value *
-              ReferenceShellMetrics.quickSettingsDragDistance;
-    final flickOpen = velocity >= _quickSettingsFlickVelocity;
-    final flickClose = velocity <= -_quickSettingsFlickVelocity;
-    final shouldOpen =
-        !flickClose &&
-        ((_quickSettingsDragStartedOpen && !_quickSettingsDragMoved) ||
-            drag >= _quickSettingsOpenDistance ||
-            flickOpen);
-    _quickSettingsDragStartedOpen = false;
-    _quickSettingsDragMoved = false;
-    if (shouldOpen) {
+  /// The finger let the shade go towards [open] at [velocity] (logical px/s).
+  void endShadeDrag({required bool open, required double velocity}) {
+    if (open) {
       openQuickSettings(releaseVelocity: velocity);
     } else {
       closeQuickSettings(releaseVelocity: velocity);
