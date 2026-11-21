@@ -29,6 +29,7 @@ import 'package:denial_flutter_sdk/effects.dart';
 import 'package:denial_flutter_sdk/rendering.dart'
     show FadeSnapshot, WindowBackdropCache, WindowBackdropSlice;
 
+import 'shade/quick_settings_panel.dart' show PixelShadeViewport;
 import 'shade/shade_backdrop_scene.dart';
 import '../state/phone_desk.dart';
 

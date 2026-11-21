@@ -49,6 +49,7 @@ class PixelNotificationCard extends StatefulWidget {
     this.interactive = true,
     this.roundTop = true,
     this.roundBottom = true,
+    this.headsUp = false,
     this.group,
     this.onExpandGroup,
     this.onOpen,
@@ -62,6 +63,13 @@ class PixelNotificationCard extends StatefulWidget {
   /// Full corners at the top or bottom: the card ends the stack there.
   final bool roundTop;
   final bool roundBottom;
+
+  /// Shown over the apps as it arrives (AOSP's
+  /// notification_2025_template_heads_up_base.xml): the collapsed template
+  /// with its actions always under it, the alerted bell in the top line,
+  /// on the opaque surfaceContainer (ActivatableNotificationView's
+  /// mOpaqueColor; #151b20 on EvolutionX).
+  final bool headsUp;
 
   /// A folded group this card stands for; a tap runs [onExpandGroup].
   final DesktopNotificationGroup? group;
@@ -133,12 +141,15 @@ class _PixelNotificationCardState extends State<PixelNotificationCard> {
     // app and age above the title and the full text.
     // Expanded, a plain notification takes the conversation's arrangement:
     // app and age on top, then the title.
-    final headed = conversation || (_expanded && full && group == null);
+    // Collapsed, a heads-up conversation keeps the sender in the top line.
+    final headed =
+        (conversation && (!widget.headsUp || _expanded)) ||
+        (_expanded && full && group == null);
     final showActions =
         widget.interactive &&
         widget.onAction != null &&
         actions.isNotEmpty &&
-        (_expanded || notification.incomingCall);
+        (_expanded || widget.headsUp || notification.incomingCall);
     final image =
         full &&
         group == null &&
@@ -172,6 +183,15 @@ class _PixelNotificationCardState extends State<PixelNotificationCard> {
             children: <Widget>[
               Flexible(child: titleText),
               Text(' · $age', style: info),
+              // alerted_icon: notification_2025_badge_size 14, margin 4.
+              if (widget.headsUp) ...[
+                const SizedBox(width: 4),
+                Icon(
+                  Icons.notifications_active,
+                  size: 14,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ],
             ],
           );
     final body = <Widget>[
@@ -232,7 +252,9 @@ class _PixelNotificationCardState extends State<PixelNotificationCard> {
     // shade's blur: on EvolutionX #8a111417, the surfaceContainerLow tone at
     // 54 % (`cmd overlay lookup android android:color/
     // system_surface_effect_1_dark`).
-    var background = scheme.surfaceEffect1;
+    var background = widget.headsUp
+        ? scheme.surfaceContainer
+        : scheme.surfaceEffect1;
     if (_pressed) {
       background = Color.alphaBlend(
         scheme.onSurface.withValues(alpha: 0.08),
