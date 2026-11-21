@@ -208,8 +208,10 @@ class _PhonePowerMenuState extends ConsumerState<PhonePowerMenu> {
                   child: Transform.scale(
                     scale: scale * (0.92 + 0.08 * t),
                     child: MediaQuery(
-                      data: MediaQuery.of(context)
-                          .copyWith(size: MediaQuery.sizeOf(context) / scale),
+                      data: MediaQuery.of(context).copyWith(
+                        size: MediaQuery.sizeOf(context) / scale,
+                        textScaler: phoneTextScaler(MediaQuery.of(context)),
+                      ),
                       child: child!,
                     ),
                   ),
@@ -384,7 +386,7 @@ class _MenuRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 20),
         child: Row(
           children: <Widget>[
-            Icon(icon, size: 24, color: scheme.onSurfaceVariant),
+            Icon(icon, size: phoneIconSize, color: scheme.onSurfaceVariant),
             Expanded(
               child: Text(
                 label,
@@ -514,7 +516,7 @@ class _TargetTile extends StatelessWidget {
           children: <Widget>[
             Icon(
               restartTargetIcon(target.icon),
-              size: 28,
+              size: 24,
               color: scheme.primary,
             ),
             const SizedBox(height: 10),
@@ -753,7 +755,7 @@ class _SlideToConfirmState extends State<_SlideToConfirm>
                           child: Icon(
                             widget.icon,
                             color: const Color(0xffffffff),
-                            size: 26,
+                            size: 22,
                           ),
                         ),
                       ),

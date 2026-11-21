@@ -2376,6 +2376,60 @@ abstract class AppLocalizations {
   /// **'Auto-rotate'**
   String get quickSettingsAutoRotate;
 
+  /// Subtitle of the phone's Wi-Fi dialog opened from Quick Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap a network to connect'**
+  String get quickSettingsWifiHint;
+
+  /// Switch in the phone's Wi-Fi dialog that turns Wi-Fi on or off.
+  ///
+  /// In en, this message translates to:
+  /// **'Use Wi-Fi'**
+  String get quickSettingsUseWifi;
+
+  /// Row at the end of the phone's Wi-Fi dialog that opens the Wi-Fi page in Phone Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'See all'**
+  String get quickSettingsSeeAll;
+
+  /// State of a saved Wi-Fi network or a paired Bluetooth device that is not connected.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved'**
+  String get quickSettingsSaved;
+
+  /// Button that closes a Quick Settings dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get quickSettingsDone;
+
+  /// Gear button on a network or device row; opens its settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Settings for {name}'**
+  String quickSettingsItemSettings(String name);
+
+  /// Subtitle of the phone's Bluetooth dialog opened from Quick Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap to connect or disconnect a device'**
+  String get quickSettingsBluetoothHint;
+
+  /// Switch in the phone's Bluetooth dialog that turns Bluetooth on or off.
+  ///
+  /// In en, this message translates to:
+  /// **'Use Bluetooth'**
+  String get quickSettingsUseBluetooth;
+
+  /// Row in the phone's Bluetooth dialog that opens Bluetooth pairing in Phone Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Pair new device'**
+  String get quickSettingsPairNewDevice;
+
   /// Quick Settings tile that starts a screen recording, and stops it when tapped again.
   ///
   /// In en, this message translates to:

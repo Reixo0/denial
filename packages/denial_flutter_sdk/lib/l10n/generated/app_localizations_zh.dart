@@ -1286,6 +1286,35 @@ class AppLocalizationsZh extends AppLocalizations {
   String get quickSettingsAutoRotate => '自动旋转';
 
   @override
+  String get quickSettingsWifiHint => '点按网络即可连接';
+
+  @override
+  String get quickSettingsUseWifi => '使用 WLAN';
+
+  @override
+  String get quickSettingsSeeAll => '查看全部';
+
+  @override
+  String get quickSettingsSaved => '已保存';
+
+  @override
+  String get quickSettingsDone => '完成';
+
+  @override
+  String quickSettingsItemSettings(String name) {
+    return '$name的设置';
+  }
+
+  @override
+  String get quickSettingsBluetoothHint => '点按设备即可连接或断开';
+
+  @override
+  String get quickSettingsUseBluetooth => '使用蓝牙';
+
+  @override
+  String get quickSettingsPairNewDevice => '与新设备配对';
+
+  @override
   String get quickSettingsScreenRecording => '屏幕录制';
 
   @override

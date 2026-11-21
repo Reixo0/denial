@@ -20,3 +20,15 @@ ColorScheme phoneSchemeOf(BuildContext context) {
 }
 
 ((Color, Brightness), ColorScheme)? _schemeCache;
+
+/// Text in the phone's system UI (shade, its dialogs, the power menu) is
+/// set in Android's sizes, but Roboto Flex runs larger than Android's
+/// Google Sans: this brings it to the same apparent size.
+const double phoneTextScale = 0.85;
+
+/// [media]'s text scale (the user's choice) with [phoneTextScale] on top.
+TextScaler phoneTextScaler(MediaQueryData media) =>
+    TextScaler.linear(media.textScaler.scale(1) * phoneTextScale);
+
+/// Icons in the phone's system UI, in dp.
+const double phoneIconSize = 20;

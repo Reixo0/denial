@@ -3,7 +3,6 @@ import 'package:denial_desktop/src/state/reference_shell_metrics.dart';
 
 import 'dart:math' as math;
 
-import 'package:denial_flutter_sdk/popups.dart';
 import 'package:flutter/material.dart' show Icons;
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -31,6 +30,7 @@ import '../session/power_session_surface.dart';
 
 import 'package:denial_flutter_sdk/effects.dart';
 
+import 'quick_settings_dialogs.dart';
 import 'quick_settings_tiles.dart';
 
 import 'mobile_notification_history.dart';
@@ -287,6 +287,7 @@ class PixelShadeViewport extends StatelessWidget {
                 child: MediaQuery(
                   data: media.copyWith(
                     size: size,
+                    textScaler: phoneTextScaler(media),
                     devicePixelRatio: media.devicePixelRatio * scale,
                     padding: _divideInsets(media.padding, scale),
                     viewPadding: _divideInsets(media.viewPadding, scale),
@@ -561,7 +562,6 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
             0) <=
         1;
     final snapshot = network.snapshot;
-    final popups = ref.read(shellPopupControllerProvider.notifier);
     return <Widget>[
       QuickTile(
         icon: Icons.wifi_rounded,
@@ -579,10 +579,18 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
         busy: network.radioChanging,
         wide: true,
         onTap: networkController.toggleWireless,
-        onDetails: () => popups.show(
+        onDetails: (origin) => showQuickSettingsDialog(
+          ref,
           keyName: 'wifi-details',
           debugLabel: 'Wi-Fi details',
-          builder: (_, handle) => WifiDetailSurface(onClose: handle.close),
+          origin: origin,
+          builder: (close) => QuickSettingsWifiDialog(
+            onClose: close,
+            onOpenSettings: () {
+              close();
+              _openSettingsPage('wifi');
+            },
+          ),
         ),
       ),
       QuickTile(
@@ -599,10 +607,18 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
         busy: bluetooth.powerChanging,
         wide: true,
         onTap: bluetoothController.togglePower,
-        onDetails: () => popups.show(
+        onDetails: (origin) => showQuickSettingsDialog(
+          ref,
           keyName: 'bluetooth-details',
           debugLabel: 'Bluetooth details',
-          builder: (_, handle) => BluetoothDetailSurface(onClose: handle.close),
+          origin: origin,
+          builder: (close) => QuickSettingsBluetoothDialog(
+            onClose: close,
+            onOpenSettings: () {
+              close();
+              _openSettingsPage('bluetooth');
+            },
+          ),
         ),
       ),
       QuickTile(
@@ -874,7 +890,13 @@ class _PixelHeader extends ConsumerWidget {
       fontWeight: FontWeight.w500,
       height: 1.2,
     );
-    final icons = StatusCluster(battery: battery, color: scheme.onSurface);
+    // The cluster is drawn in Denial's units; in dp it would come out
+    // larger than Android's.
+    final icons = StatusCluster(
+      battery: battery,
+      color: scheme.onSurface,
+      scale: 0.82,
+    );
     final collapsed = Row(
       children: <Widget>[
         Text(time, style: text),
@@ -931,6 +953,20 @@ class _PixelHeader extends ConsumerWidget {
         const SizedBox(height: 8),
       ],
     );
+    // The owner keeps the header's time, date and status text at their
+    // full size: undo the shade's text scale here.
+    final media = MediaQuery.of(context);
+    return MediaQuery(
+      data: media.copyWith(
+        textScaler: TextScaler.linear(
+          media.textScaler.scale(1) / phoneTextScale,
+        ),
+      ),
+      child: _headerStack(e, collapsed, expanded),
+    );
+  }
+
+  Widget _headerStack(double e, Widget collapsed, Widget expanded) {
     return IgnorePointer(
       child: Stack(
         fit: StackFit.expand,

@@ -369,7 +369,9 @@ class MobileConnectivityMarks extends ConsumerWidget {
         : lastMobile;
     final foreground = color ?? context.shellColors.textPrimary;
     // The bars show the network's signal whenever the SIM is registered, with
-    // or without mobile data; the technology shows while data runs over it.
+    // or without mobile data; the technology shows while data runs over it
+    // and no Wi-Fi is connected, and the Wi-Fi icon only while one is, as on
+    // Android.
     final signal =
         mobile.simPresence == MobileSimPresence.present &&
         mobile.registered &&
@@ -396,7 +398,9 @@ class MobileConnectivityMarks extends ConsumerWidget {
                   scale: 1.25 * scale,
                   color: color,
                 ),
-                if (mobile.cellularWorking && mobile.technology.isNotEmpty) ...[
+                if (wifi == null &&
+                    mobile.cellularWorking &&
+                    mobile.technology.isNotEmpty) ...[
                   SizedBox(width: 3 * scale),
                   Text(
                     mobile.technology,
@@ -420,14 +424,15 @@ class MobileConnectivityMarks extends ConsumerWidget {
               ],
             ),
           ),
-          SizedBox(width: 7 * scale),
+          if (wifi != null) SizedBox(width: 7 * scale),
         ],
-        WifiStatusIcon(
-          active: wifi != null,
-          strength: wifi?.strength ?? 0,
-          size: 20 * scale,
-          color: color,
-        ),
+        if (wifi != null)
+          WifiStatusIcon(
+            active: true,
+            strength: wifi.strength,
+            size: 20 * scale,
+            color: color,
+          ),
       ],
     );
   }

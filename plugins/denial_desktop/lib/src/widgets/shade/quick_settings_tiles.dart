@@ -48,9 +48,9 @@ class QuickTile extends StatefulWidget {
   final bool enabled;
   final bool busy;
 
-  /// Opens the tile's details: a tap on a wide tile's text (a long press
-  /// when the tile has no [onSettings]).
-  final VoidCallback? onDetails;
+  /// Opens the tile's details from the tile's rectangle on screen: a tap on
+  /// a wide tile's text (a long press when the tile has no [onSettings]).
+  final ValueChanged<Rect>? onDetails;
 
   /// Opens the tile's page in Settings: a long press.
   final VoidCallback? onSettings;
@@ -73,6 +73,16 @@ class _QuickTileState extends State<QuickTile> {
     widget.onTap();
   }
 
+  /// The tile on screen, for a dialog that grows out of it.
+  Rect _onScreen() {
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return Rect.zero;
+    return Rect.fromPoints(
+      box.localToGlobal(Offset.zero),
+      box.localToGlobal(box.size.bottomRight(Offset.zero)),
+    );
+  }
+
   Color _pressedOver(Color color, ColorScheme scheme) => _pressed
       ? Color.alphaBlend(scheme.onSurface.withValues(alpha: 0.10), color)
       : color;
@@ -81,7 +91,10 @@ class _QuickTileState extends State<QuickTile> {
   Widget build(BuildContext context) {
     final scheme = phoneSchemeOf(context);
     final dim = widget.enabled ? 1.0 : 0.38;
-    final details = widget.onDetails;
+    final onDetails = widget.onDetails;
+    final VoidCallback? details = onDetails == null
+        ? null
+        : () => onDetails(_onScreen());
     final tile = widget.wide
         ? _wide(scheme, dim, details)
         : _small(scheme, dim);
@@ -143,7 +156,7 @@ class _QuickTileState extends State<QuickTile> {
         opacity: widget.busy ? 0.6 : dim,
         child: Icon(
           widget.icon,
-          size: 24,
+          size: phoneIconSize,
           color: active ? scheme.onPrimary : scheme.onSurface,
         ),
       ),
@@ -169,7 +182,7 @@ class _QuickTileState extends State<QuickTile> {
         opacity: widget.busy ? 0.6 : 1,
         child: Icon(
           widget.icon,
-          size: 24,
+          size: phoneIconSize,
           color: active ? scheme.onPrimary : scheme.onSurface,
         ),
       ),
@@ -388,7 +401,7 @@ class _PixelBrightnessSliderState extends State<PixelBrightnessSlider> {
                     bottom: 0,
                     child: Icon(
                       Icons.brightness_medium_rounded,
-                      size: 22,
+                      size: phoneIconSize,
                       color: iconOnFill
                           ? scheme.onPrimary
                           : scheme.onSurfaceVariant,
@@ -495,7 +508,11 @@ class _RoundButtonState extends State<_RoundButton> {
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           child: Opacity(
             opacity: enabled ? 1 : 0.38,
-            child: Icon(widget.icon, size: 22, color: widget.iconColor),
+            child: Icon(
+              widget.icon,
+              size: phoneIconSize,
+              color: widget.iconColor,
+            ),
           ),
         ),
       ),

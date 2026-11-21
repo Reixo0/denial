@@ -1331,6 +1331,36 @@ class AppLocalizationsEn extends AppLocalizations {
   String get quickSettingsAutoRotate => 'Auto-rotate';
 
   @override
+  String get quickSettingsWifiHint => 'Tap a network to connect';
+
+  @override
+  String get quickSettingsUseWifi => 'Use Wi-Fi';
+
+  @override
+  String get quickSettingsSeeAll => 'See all';
+
+  @override
+  String get quickSettingsSaved => 'Saved';
+
+  @override
+  String get quickSettingsDone => 'Done';
+
+  @override
+  String quickSettingsItemSettings(String name) {
+    return 'Settings for $name';
+  }
+
+  @override
+  String get quickSettingsBluetoothHint =>
+      'Tap to connect or disconnect a device';
+
+  @override
+  String get quickSettingsUseBluetooth => 'Use Bluetooth';
+
+  @override
+  String get quickSettingsPairNewDevice => 'Pair new device';
+
+  @override
   String get quickSettingsScreenRecording => 'Screen recording';
 
   @override
