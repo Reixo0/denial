@@ -56,9 +56,13 @@ class PixelNotificationCard extends StatefulWidget {
     this.onAction,
     this.onDismiss,
     this.onControl,
+    this.embedded = false,
   });
 
   final DesktopNotification notification;
+
+  /// A row inside an open group's card: no background or corners of its own.
+  final bool embedded;
   final NotificationPreviewMode previewMode;
   final bool interactive;
 
@@ -95,6 +99,9 @@ class PixelNotificationCard extends StatefulWidget {
 class _PixelNotificationCardState extends State<PixelNotificationCard> {
   bool _expanded = false;
   bool _pressed = false;
+
+  /// A pull is growing the card (NotificationPullExpand) or settling it.
+  bool _pulling = false;
 
   /// Showing the settings in place of the notification.
   bool _guts = false;
@@ -265,7 +272,9 @@ class _PixelNotificationCardState extends State<PixelNotificationCard> {
     // shade's blur: on EvolutionX #8a111417, the surfaceContainerLow tone at
     // 54 % (`cmd overlay lookup android android:color/
     // system_surface_effect_1_dark`).
-    var background = widget.headsUp
+    var background = widget.embedded
+        ? const Color(0x00000000)
+        : widget.headsUp
         ? scheme.surfaceContainer
         : scheme.surfaceEffect1;
     if (_pressed) {
@@ -276,10 +285,12 @@ class _PixelNotificationCardState extends State<PixelNotificationCard> {
     }
     const big = Radius.circular(PixelNotificationMetrics.radius);
     const small = Radius.circular(PixelNotificationMetrics.innerRadius);
-    final radius = BorderRadius.vertical(
-      top: widget.roundTop ? big : small,
-      bottom: widget.roundBottom ? big : small,
-    );
+    final radius = widget.embedded
+        ? BorderRadius.zero
+        : BorderRadius.vertical(
+            top: widget.roundTop ? big : small,
+            bottom: widget.roundBottom ? big : small,
+          );
     final canGuts =
         widget.interactive &&
         full &&
@@ -292,53 +303,56 @@ class _PixelNotificationCardState extends State<PixelNotificationCard> {
         ? widget.onOpen
         : _toggle;
 
-    // Android's ExpandHelper: pulling a collapsed notification down opens
-    // it, showing its actions (Mark as read, Reply, …). Only a downward
-    // pull is taken; the list still scrolls up from the card.
+    // Android's ExpandHelper: pulling a collapsed notification down grows
+    // it with the finger into its expanded layout (actions and all). Only a
+    // downward pull is taken; the list still scrolls up from the card.
     final pullable =
         widget.interactive && group == null && full && !_expanded && !_guts;
-    return RawGestureDetector(
-      gestures: <Type, GestureRecognizerFactory>{
-        _PullDownRecognizer:
-            GestureRecognizerFactoryWithHandlers<_PullDownRecognizer>(
-              _PullDownRecognizer.new,
-              (recognizer) => recognizer.onStart = pullable
-                  ? (_) {
-                      _press(false);
-                      setState(() => _expanded = true);
-                    }
-                  : null,
-            ),
-      },
-      child: Semantics(
-        container: true,
-        expanded: _expanded,
-        label: text.isEmpty
-            ? l10n.notificationSemantics(appName, title)
-            : l10n.notificationSemanticsWithBody(appName, title, text),
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapDown: onTap == null ? null : (_) => _press(true),
-          onTapUp: (_) => _press(false),
-          onTapCancel: () => _press(false),
-          onTap: onTap,
-          onLongPress: canGuts && !_guts
-              ? () {
-                  HapticFeedback.heavyImpact();
-                  _press(false);
-                  setState(() => _guts = true);
-                }
-              : null,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 120),
-            constraints: const BoxConstraints(
-              minHeight: PixelNotificationMetrics.minHeight,
-            ),
-            decoration: BoxDecoration(color: background, borderRadius: radius),
-            child: AnimatedSize(
-              duration: const Duration(milliseconds: 260),
-              curve: Motion.md3EmphasizedDecelerate,
-              alignment: Alignment.topCenter,
+    return Semantics(
+      container: true,
+      expanded: _expanded,
+      label: text.isEmpty
+          ? l10n.notificationSemantics(appName, title)
+          : l10n.notificationSemanticsWithBody(appName, title, text),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: onTap == null ? null : (_) => _press(true),
+        onTapUp: (_) => _press(false),
+        onTapCancel: () => _press(false),
+        onTap: onTap,
+        onLongPress: canGuts && !_guts
+            ? () {
+                HapticFeedback.heavyImpact();
+                _press(false);
+                setState(() => _guts = true);
+              }
+            : null,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          constraints: const BoxConstraints(
+            minHeight: PixelNotificationMetrics.minHeight,
+          ),
+          decoration: BoxDecoration(color: background, borderRadius: radius),
+          child: AnimatedSize(
+            // A pull moves the height itself.
+            duration: _pulling
+                ? Duration.zero
+                : const Duration(milliseconds: 260),
+            curve: Motion.md3EmphasizedDecelerate,
+            alignment: Alignment.topCenter,
+            child: NotificationPullExpand(
+              enabled: pullable,
+              onStart: () {
+                _press(false);
+                setState(() {
+                  _pulling = true;
+                  _expanded = true;
+                });
+              },
+              onSettled: (open) => setState(() {
+                _pulling = false;
+                _expanded = open;
+              }),
               child: _guts
                   ? _PixelGuts(
                       notification: notification,
@@ -393,15 +407,6 @@ class _PixelNotificationCardState extends State<PixelNotificationCard> {
       ),
     );
   }
-}
-
-/// A vertical drag that only starts downward.
-class _PullDownRecognizer extends VerticalDragGestureRecognizer {
-  @override
-  bool hasSufficientGlobalDistanceToAccept(
-    PointerDeviceKind pointerDeviceKind,
-    double? deviceTouchSlop,
-  ) => globalDistanceMoved > computeHitSlop(pointerDeviceKind, gestureSettings);
 }
 
 /// A notification's age as Android writes it: now, 5m, 2h, 3d.
@@ -1016,6 +1021,114 @@ class _GutsButton extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// An open group as Android 17 draws it (NotificationChildrenContainer):
+/// one card, the app's header row (its icon, the app line and the count
+/// pill turned up) over the group's notifications, each a row of its own
+/// (built by the list, [PixelNotificationCard] with `embedded`). Every row
+/// is 72 dp collapsed, measured on EvolutionX.
+class PixelNotificationGroupCard extends StatelessWidget {
+  const PixelNotificationGroupCard({
+    required this.group,
+    required this.children,
+    this.interactive = true,
+    this.roundTop = true,
+    this.roundBottom = true,
+    this.onCollapse,
+    super.key,
+  });
+
+  final DesktopNotificationGroup group;
+  final List<Widget> children;
+  final bool interactive;
+  final bool roundTop;
+  final bool roundBottom;
+
+  /// A tap on the header or its pill folds the group again.
+  final VoidCallback? onCollapse;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = phoneSchemeOf(context);
+    final l10n = context.l10n;
+    final notification = group.newest.notification;
+    final appName = notificationAppName(notification, l10n);
+    final age = pixelNotificationAge(context, notification);
+    final collapse = interactive ? onCollapse : null;
+    const big = Radius.circular(PixelNotificationMetrics.radius);
+    const small = Radius.circular(PixelNotificationMetrics.innerRadius);
+    // The header's line and pill sit on the icon's centre line.
+    const centre =
+        PixelNotificationMetrics.margin +
+        PixelNotificationMetrics.iconCircle / 2;
+    final header = Semantics(
+      button: collapse != null,
+      expanded: true,
+      label: l10n.notificationGroupHeader(appName, group.members.length),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: collapse,
+        child: SizedBox(
+          height: PixelNotificationMetrics.minHeight,
+          child: Stack(
+            children: <Widget>[
+              PositionedDirectional(
+                start: PixelNotificationMetrics.margin,
+                top: PixelNotificationMetrics.margin,
+                child: _PixelAppIcon(notification: notification),
+              ),
+              PositionedDirectional(
+                start: PixelNotificationMetrics.contentStart,
+                end: PixelNotificationMetrics.contentEnd,
+                top: 0,
+                bottom: 0,
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text(
+                    '$appName · $age',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: scheme.onSurfaceVariant,
+                      fontSize: PixelNotificationMetrics.infoSize,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+              ),
+              PositionedDirectional(
+                end: 0,
+                top:
+                    centre -
+                    PixelNotificationMetrics.margin -
+                    PixelNotificationMetrics.pillHeight / 2,
+                child: _PixelExpandPill(
+                  expanded: true,
+                  count: group.members.length,
+                  onTap: collapse,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surfaceEffect1,
+        borderRadius: BorderRadius.vertical(
+          top: roundTop ? big : small,
+          bottom: roundBottom ? big : small,
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[header, ...children],
       ),
     );
   }

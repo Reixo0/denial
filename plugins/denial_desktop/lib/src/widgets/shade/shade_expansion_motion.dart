@@ -45,8 +45,8 @@ abstract final class AospShadeInterpolation {
   required double distance,
   required double velocity,
   required double dp,
+  double maxSeconds = 0.6,
 }) {
-  const maxSeconds = 0.6;
   const speedUp = 0.6;
   const x2Min = 0.35;
   const x2Max = 0.68;

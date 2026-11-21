@@ -4,7 +4,6 @@ import 'package:denial_desktop/src/state/reference_shell_metrics.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart' show Icons;
-import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -22,6 +21,7 @@ import 'package:denial_flutter_sdk/tokens.dart';
 import 'mobile_ui_metrics.dart';
 import 'notification_media.dart';
 import 'notification_open.dart';
+import 'notification_pull_expand.dart';
 import 'phone_scheme.dart';
 
 export 'notification_open.dart' show openLockNotification, openNotification;

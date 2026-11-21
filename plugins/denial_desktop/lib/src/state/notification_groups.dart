@@ -32,6 +32,11 @@ class ExpandedNotificationGroups extends Notifier<Set<String>> {
 
   void collapse(String groupKey) =>
       state = Set.unmodifiable({...state}..remove(groupKey));
+
+  /// Folds every group: Android does so each time the shade closes.
+  void collapseAll() {
+    if (state.isNotEmpty) state = const {};
+  }
 }
 
 /// The group a lock-screen tap asked to open once the session unlocks.

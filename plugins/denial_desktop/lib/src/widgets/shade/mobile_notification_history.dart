@@ -7,8 +7,8 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:denial_flutter_sdk/localization.dart';
-import 'package:denial_flutter_sdk/models.dart' show DesktopNotificationUrgency;
-import 'package:denial_flutter_sdk/system_services.dart';
+import 'package:denial_flutter_sdk/models.dart'
+    show DesktopNotificationUrgency, NotificationPreviewMode;
 import 'package:denial_flutter_sdk/state.dart';
 import 'package:denial_flutter_sdk/motion.dart';
 import 'package:denial_flutter_sdk/rendering.dart'
@@ -17,6 +17,7 @@ import 'package:denial_flutter_sdk/shell_theme.dart';
 import 'package:denial_flutter_sdk/tokens.dart' show ShellText;
 
 import '../notification_banner.dart';
+import '../notification_pull_expand.dart';
 import '../notification_rows.dart';
 import '../phone_scheme.dart';
 import 'notification_shade_list.dart';
@@ -58,6 +59,10 @@ class _MobileNotificationHistoryState
   Animation<double>? _motionProgress;
   Listenable? _motion;
   bool _armed = true;
+
+  /// Bumped each time the shade closes. The rows start collapsed again:
+  /// Android resets what the user expanded and folds the groups then.
+  int _generation = 0;
   bool _reducedMotion = false;
   bool _acknowledgeScheduled = false;
 
@@ -93,7 +98,10 @@ class _MobileNotificationHistoryState
   }
 
   void _observeProgress() {
-    if (widget.closed && widget.progress.value <= 0) _armed = true;
+    if (widget.closed && widget.progress.value <= 0) {
+      if (!_armed) _collapseOnClose();
+      _armed = true;
+    }
     if (_armed && widget.progress.value > 0) {
       _armed = false;
       if (_reducedMotion) {
@@ -103,6 +111,15 @@ class _MobileNotificationHistoryState
       }
     }
     _scheduleAcknowledgement();
+  }
+
+  void _collapseOnClose() {
+    // Not during a build: the groups are shared state.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.read(expandedNotificationGroupsProvider.notifier).collapseAll();
+      setState(() => _generation++);
+    });
   }
 
   void _scheduleAcknowledgement() {
@@ -164,14 +181,57 @@ class _MobileNotificationHistoryState
     bool silent(DesktopNotificationGroup group) => group.members.every(
       (record) => record.notification.urgency == DesktopNotificationUrgency.low,
     );
+    // An open group stays one row, drawn as Android's one card.
     final alertingRows = notificationHistoryRows(
       groups.where((group) => !silent(group)).toList(),
-      expandedGroups,
+      const <String>{},
     );
     final silentRows = notificationHistoryRows(
       groups.where(silent).toList(),
-      expandedGroups,
+      const <String>{},
     );
+    void open(DesktopNotificationRecord record) {
+      if (openNotification(ref, record.notification.id)) {
+        ref.read(referenceShellProvider.notifier).closeQuickSettings();
+      }
+    }
+
+    void control(DesktopNotificationRecord record, String control) {
+      controller.invokeControl(record.notification.id, control);
+      // The app's settings open over the apps.
+      if (control == 'x-denial-settings') {
+        ref.read(referenceShellProvider.notifier).closeQuickSettings();
+      }
+    }
+
+    // One notification inside an open group's card.
+    Widget member(DesktopNotificationRecord record) {
+      final clearable = !locked && record.notification.clearable;
+      return Dismissible(
+        key: ValueKey<Object>(('member', record.notification.id)),
+        direction: clearable
+            ? DismissDirection.horizontal
+            : DismissDirection.none,
+        confirmDismiss: (_) async {
+          controller.dismissFromHistory(record.notification.id);
+          return false;
+        },
+        child: PixelNotificationCard(
+          notification: record.notification,
+          embedded: true,
+          interactive: !locked,
+          previewMode: preview,
+          onOpen: () => open(record),
+          onAction: (key) =>
+              controller.invokeAction(record.notification.id, key),
+          onDismiss: clearable
+              ? () => controller.dismissFromHistory(record.notification.id)
+              : null,
+          onControl: (value) => control(record, value),
+        ),
+      );
+    }
+
     final rows = <NotificationHistoryRow>[...alertingRows, ...silentRows];
     final silentStart = silentRows.isEmpty ? -1 : alertingRows.length;
     final indices = <Object, int>{
@@ -222,7 +282,7 @@ class _MobileNotificationHistoryState
                     );
                   }
                   final row = rows[index];
-                  final key = ValueKey<Object>(row.key);
+                  final key = ValueKey<Object>((row.key, _generation));
                   // Neighbouring cards form one stack, as Android's do.
                   bool card(int i) =>
                       i >= 0 &&
@@ -251,9 +311,14 @@ class _MobileNotificationHistoryState
                       interactive: !locked,
                       onDismiss: () =>
                           controller.dismissGroupFromHistory(group.key),
+                      expanded: expandedGroups.contains(group.key),
+                      member: member,
                       onExpand: () => ref
                           .read(expandedNotificationGroupsProvider.notifier)
                           .expand(group.key),
+                      onCollapse: () => ref
+                          .read(expandedNotificationGroupsProvider.notifier)
+                          .collapse(group.key),
                     ),
                     NotificationRow(:final record) => _HistoryNotification(
                       key: key,
@@ -265,27 +330,10 @@ class _MobileNotificationHistoryState
                       interactive: !locked,
                       onDismiss: () =>
                           controller.dismissFromHistory(record.notification.id),
-                      onOpen: () {
-                        if (openNotification(ref, record.notification.id)) {
-                          ref
-                              .read(referenceShellProvider.notifier)
-                              .closeQuickSettings();
-                        }
-                      },
+                      onOpen: () => open(record),
                       onAction: (key) =>
                           controller.invokeAction(record.notification.id, key),
-                      onControl: (control) {
-                        controller.invokeControl(
-                          record.notification.id,
-                          control,
-                        );
-                        // The app's settings open over the apps.
-                        if (control == 'x-denial-settings') {
-                          ref
-                              .read(referenceShellProvider.notifier)
-                              .closeQuickSettings();
-                        }
-                      },
+                      onControl: (value) => control(record, value),
                     ),
                   };
                   return _ColorOsNotificationReveal(
@@ -425,7 +473,10 @@ class _HistoryNotification extends StatelessWidget {
     this.onAction,
     this.onControl,
     this.group,
+    this.expanded = false,
+    this.member,
     this.onExpand,
+    this.onCollapse,
     super.key,
   });
 
@@ -444,11 +495,56 @@ class _HistoryNotification extends StatelessWidget {
 
   /// A stacked group this row stands for, collapsed; a tap runs [onExpand].
   final DesktopNotificationGroup? group;
+
+  /// The [group] is open: one card with a row per notification ([member]).
+  final bool expanded;
+  final Widget Function(DesktopNotificationRecord record)? member;
   final VoidCallback? onExpand;
+  final VoidCallback? onCollapse;
 
   @override
   Widget build(BuildContext context) {
     final notification = record.notification;
+    final group = this.group;
+    Widget openGroup(BuildContext context) => PixelNotificationGroupCard(
+      group: group!,
+      interactive: interactive,
+      roundTop: roundTop,
+      roundBottom: roundBottom,
+      onCollapse: onCollapse,
+      children: <Widget>[for (final record in group.members) member!(record)],
+    );
+    final Widget card = PixelNotificationCard(
+      notification: notification,
+      interactive: interactive,
+      previewMode: preview,
+      roundTop: roundTop,
+      roundBottom: roundBottom,
+      group: group,
+      onExpandGroup: onExpand,
+      onOpen: onOpen,
+      onAction: onAction,
+      onDismiss: group == null && interactive && notification.clearable
+          ? onDismiss
+          : null,
+      onControl: group == null ? onControl : null,
+    );
+    final stackedGroup = group != null && group.stacked && member != null;
+    // A pull on a folded group opens it with the finger (ExpandHelper on a
+    // group: its summary lines give way to its rows).
+    // A tap on the pill or header plays the same change (NotificationPullExpand
+    // follows [expanded]).
+    final Widget content = !stackedGroup
+        ? card
+        : NotificationPullExpand(
+            enabled: interactive && preview == NotificationPreviewMode.full,
+            open: expanded,
+            expanded: openGroup,
+            onSettled: (open) {
+              if (open) onExpand?.call();
+            },
+            child: card,
+          );
     final clearable =
         interactive && (group?.clearable ?? notification.clearable);
     return Padding(
@@ -489,19 +585,7 @@ class _HistoryNotification extends StatelessWidget {
                 ),
               ),
             ),
-            child: PixelNotificationCard(
-              notification: notification,
-              interactive: interactive,
-              previewMode: preview,
-              roundTop: roundTop,
-              roundBottom: roundBottom,
-              group: group,
-              onExpandGroup: onExpand,
-              onOpen: onOpen,
-              onAction: onAction,
-              onDismiss: group == null && clearable ? onDismiss : null,
-              onControl: group == null ? onControl : null,
-            ),
+            child: content,
           ),
         ),
       ),
