@@ -274,6 +274,18 @@ class _MobileNotificationHistoryState
                       },
                       onAction: (key) =>
                           controller.invokeAction(record.notification.id, key),
+                      onControl: (control) {
+                        controller.invokeControl(
+                          record.notification.id,
+                          control,
+                        );
+                        // The app's settings open over the apps.
+                        if (control == 'x-denial-settings') {
+                          ref
+                              .read(referenceShellProvider.notifier)
+                              .closeQuickSettings();
+                        }
+                      },
                     ),
                   };
                   return _ColorOsNotificationReveal(
@@ -411,6 +423,7 @@ class _HistoryNotification extends StatelessWidget {
     this.roundBottom = true,
     this.onOpen,
     this.onAction,
+    this.onControl,
     this.group,
     this.onExpand,
     super.key,
@@ -427,6 +440,7 @@ class _HistoryNotification extends StatelessWidget {
   final bool Function() onDismiss;
   final VoidCallback? onOpen;
   final ValueChanged<String>? onAction;
+  final ValueChanged<String>? onControl;
 
   /// A stacked group this row stands for, collapsed; a tap runs [onExpand].
   final DesktopNotificationGroup? group;
@@ -485,6 +499,8 @@ class _HistoryNotification extends StatelessWidget {
               onExpandGroup: onExpand,
               onOpen: onOpen,
               onAction: onAction,
+              onDismiss: group == null && clearable ? onDismiss : null,
+              onControl: group == null ? onControl : null,
             ),
           ),
         ),

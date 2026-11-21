@@ -8,14 +8,18 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:denial_flutter_sdk/localization.dart';
+import 'package:denial_flutter_sdk/models.dart';
 import 'package:denial_flutter_sdk/motion.dart';
 import 'package:denial_flutter_sdk/state.dart';
 import 'package:denial_flutter_sdk/shell_color_scheme.dart';
 import 'package:denial_flutter_sdk/shell_theme.dart';
 import 'package:denial_flutter_sdk/tokens.dart';
 
+import '../notification_media.dart'
+    show NotificationAppIcon, NotificationSmallIcon;
 import 'shade_expansion_motion.dart';
 import 'shade_reference_geometry.dart';
+import 'quick_settings_panel.dart' show PixelShadeViewport;
 import 'status_glyphs.dart';
 
 /// The status row's geometry and its path into the shade header, shared by
@@ -86,7 +90,20 @@ class _StatusGeometry {
         child: Transform.scale(
           scale: clockScale,
           alignment: AlignmentDirectional.topStart,
-          child: _StatusClock(color: color),
+          child: fraction > 0
+              ? _StatusClock(color: color)
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    _StatusClock(color: color),
+                    // Taking no height, the icons never move the clock;
+                    // they still centre on it.
+                    Align(
+                      heightFactor: 0,
+                      child: _StatusNotificationIcons(color: color),
+                    ),
+                  ],
+                ),
         ),
       ),
       if (dateAlpha > 0)
@@ -192,17 +209,22 @@ class ShadeStatusBar extends ConsumerWidget {
           // A clock or battery change repaints only the status bar; sharing a
           // picture with the rest of the chrome would damage everything down
           // to the home pill.
+          // Android's status bar stays where it is and fades under the
+          // shade's scrim as it comes down; the shade's own header takes
+          // over the clock and icons.
           child: RepaintBoundary(
             child: AnimatedBuilder(
               animation: progress,
-              // Only the change to and from closed rebuilds the row.
-              builder: (context, _) => progress.value > 0 || !shown
-                  ? const SizedBox.expand()
-                  : Stack(
-                      fit: StackFit.expand,
-                      clipBehavior: Clip.none,
-                      children: geometry.foreground(context, 0, foreground),
-                    ),
+              builder: (context, row) {
+                final covered = ColorOsShadeMotion.blurFraction(progress.value);
+                if (covered >= 1 || !shown) return const SizedBox.expand();
+                return Opacity(opacity: 1 - covered, child: row);
+              },
+              child: Stack(
+                fit: StackFit.expand,
+                clipBehavior: Clip.none,
+                children: geometry.foreground(context, 0, foreground),
+              ),
             ),
           ),
         ),
@@ -305,10 +327,13 @@ class _StatusCluster extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // The same size as in the shade's header.
     return StatusCluster(
       battery: ref.watch(batteryProvider),
       color: color,
-      scale: 1.1,
+      scale:
+          phoneStatusIconScale *
+          PixelShadeViewport.scaleFor(MediaQuery.sizeOf(context)),
     );
   }
 }
@@ -325,4 +350,92 @@ Color _statusForegroundFor(ShellColorScheme colors, int? statusColorArgb) {
   return background.computeLuminance() > 0.52
       ? ShellMediaColors.darkness
       : ShellMediaColors.contrastLight;
+}
+
+/// The notification icons after the clock, as Android's status bar shows
+/// them (NotificationIconContainer): an icon per notification in the
+/// shade's order, alerting ones only (Android leaves silent notifications
+/// out by default), at most four (max_notif_static_icons) and then a dot.
+/// Sizes from AOSP in sp, scaled as the clock is (14 sp to
+/// [ShadeHeaderClock.fontSize]): 22 sp slots holding 15 dp icons, a 2 sp
+/// dot 3 sp after them.
+class _StatusNotificationIcons extends ConsumerWidget {
+  const _StatusNotificationIcons({required this.color});
+
+  final Color color;
+
+  static const double _sp = ShadeHeaderClock.fontSize / 14;
+  static const int _max = 4;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final locked = ref.watch(
+      referenceShellProvider.select((state) => state.lockLayerVisible),
+    );
+    final state = ref.watch(desktopNotificationsProvider);
+    if (locked || state.lockPreview == NotificationPreviewMode.hidden) {
+      return const SizedBox.shrink();
+    }
+    final shown = <DesktopNotification>[
+      for (final group in state.groups)
+        if (!group.members.every(
+          (record) =>
+              record.notification.urgency == DesktopNotificationUrgency.low,
+        ))
+          (group.summary ?? group.members.first).notification,
+    ];
+    if (shown.isEmpty) return const SizedBox.shrink();
+    final overflow = shown.length > _max;
+    return Padding(
+      padding: const EdgeInsetsDirectional.only(start: 4 * _sp),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          for (final notification in shown.take(_max))
+            SizedBox.square(
+              dimension: 22 * _sp,
+              child: Center(
+                child: SizedBox.square(
+                  dimension: 15 * _sp,
+                  child: _StatusNotificationIcon(
+                    notification: notification,
+                    color: color,
+                  ),
+                ),
+              ),
+            ),
+          if (overflow)
+            Padding(
+              padding: const EdgeInsetsDirectional.only(start: 3 * _sp),
+              child: Container(
+                width: 4 * _sp,
+                height: 4 * _sp,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One notification's status bar icon. Android draws the notification's
+/// small icon, white on clear, tinted like the other status icons; until
+/// the sender passes one, the app's own icon stands in.
+class _StatusNotificationIcon extends StatelessWidget {
+  const _StatusNotificationIcon({
+    required this.notification,
+    required this.color,
+  });
+
+  final DesktopNotification notification;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final small = notification.smallIcon;
+    return small == null
+        ? ClipOval(child: NotificationAppIcon(notification: notification))
+        : NotificationSmallIcon(image: small, color: color);
+  }
 }

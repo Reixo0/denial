@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
 
@@ -309,4 +310,41 @@ class _ColorOsShadeElementRevealState extends State<ColorOsShadeElementReveal>
     _reveal.dispose();
     super.dispose();
   }
+}
+
+/// Android's shade fling (FlingAnimationUtils with ShadeViewController's
+/// FLING_MAX_LENGTH_SECONDS 0.6 and FLING_SPEED_UP_FACTOR 0.6): the motion
+/// starts at the finger's speed and slows down on a linear-out-slow-in
+/// curve, taking at most 0.6 s, less over a shorter way (by its square
+/// root). Without a fling it takes the longest time, fast-out-slow-in.
+/// Distances and speeds are in the animation's own units (its whole travel
+/// is 1); [dp] is how many of those units make one dp.
+({Duration duration, Curve curve}) aospShadeFling({
+  required double distance,
+  required double velocity,
+  required double dp,
+}) {
+  const maxSeconds = 0.6;
+  const speedUp = 0.6;
+  const x2Min = 0.35;
+  const x2Max = 0.68;
+  final diff = distance.abs();
+  if (diff <= 0) return (duration: Duration.zero, curve: Curves.linear);
+  final speed = velocity.abs();
+  final minSpeed = 250 * dp;
+  final highSpeed = 3000 * dp;
+  final maxLength = maxSeconds * math.sqrt(diff.clamp(0.0, 1.0));
+  final fastest = x2Min + (x2Max - x2Min) * speedUp;
+  final factor = math.min(speed / highSpeed, 1.0);
+  final x2 = x2Min + (fastest - x2Min) * factor;
+  var seconds = speed <= 0 ? double.infinity : diff / (speed * x2);
+  Curve curve = Cubic(0, 0, x2, 1);
+  if (seconds > maxLength) {
+    seconds = maxLength;
+    if (speed < minSpeed) curve = Curves.fastOutSlowIn;
+  }
+  return (
+    duration: Duration(microseconds: (seconds * 1e6).round()),
+    curve: curve,
+  );
 }

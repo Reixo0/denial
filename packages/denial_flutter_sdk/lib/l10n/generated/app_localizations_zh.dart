@@ -5152,4 +5152,31 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get privacyLocationInUse => '位置信息正在使用';
+
+  @override
+  String get notificationGutsDefault => '默认';
+
+  @override
+  String get notificationGutsDefaultSummary => '可能会响铃或振动（取决于设备设置）';
+
+  @override
+  String get notificationGutsSilent => '静音';
+
+  @override
+  String get notificationGutsSilentSummary => '不发出提示音也不振动';
+
+  @override
+  String get notificationGutsDismiss => '关闭';
+
+  @override
+  String get notificationGutsTurnOff => '关闭通知';
+
+  @override
+  String get notificationGutsDone => '完成';
+
+  @override
+  String get notificationGutsNotConfigurable => '无法修改这些通知。';
+
+  @override
+  String get notificationGutsSettings => '通知设置';
 }

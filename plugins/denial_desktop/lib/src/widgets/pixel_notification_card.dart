@@ -54,6 +54,8 @@ class PixelNotificationCard extends StatefulWidget {
     this.onExpandGroup,
     this.onOpen,
     this.onAction,
+    this.onDismiss,
+    this.onControl,
   });
 
   final DesktopNotification notification;
@@ -78,6 +80,14 @@ class PixelNotificationCard extends StatefulWidget {
   final VoidCallback? onOpen;
   final ValueChanged<String>? onAction;
 
+  /// With [onControl], a long press opens the notification's settings (its
+  /// "guts"): Dismiss runs this.
+  final VoidCallback? onDismiss;
+
+  /// Changes one of the sender's settings (see
+  /// [DesktopNotification.controls]).
+  final ValueChanged<String>? onControl;
+
   @override
   State<PixelNotificationCard> createState() => _PixelNotificationCardState();
 }
@@ -85,6 +95,9 @@ class PixelNotificationCard extends StatefulWidget {
 class _PixelNotificationCardState extends State<PixelNotificationCard> {
   bool _expanded = false;
   bool _pressed = false;
+
+  /// Showing the settings in place of the notification.
+  bool _guts = false;
 
   void _toggle() => setState(() => _expanded = !_expanded);
 
@@ -267,7 +280,11 @@ class _PixelNotificationCardState extends State<PixelNotificationCard> {
       top: widget.roundTop ? big : small,
       bottom: widget.roundBottom ? big : small,
     );
-    final VoidCallback? onTap = !widget.interactive
+    final canGuts =
+        widget.interactive &&
+        full &&
+        (widget.onControl != null || widget.onDismiss != null);
+    final VoidCallback? onTap = !widget.interactive || _guts
         ? null
         : group != null
         ? widget.onExpandGroup
@@ -275,73 +292,116 @@ class _PixelNotificationCardState extends State<PixelNotificationCard> {
         ? widget.onOpen
         : _toggle;
 
-    return Semantics(
-      container: true,
-      expanded: _expanded,
-      label: text.isEmpty
-          ? l10n.notificationSemantics(appName, title)
-          : l10n.notificationSemanticsWithBody(appName, title, text),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTapDown: onTap == null ? null : (_) => _press(true),
-        onTapUp: (_) => _press(false),
-        onTapCancel: () => _press(false),
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
-          constraints: const BoxConstraints(
-            minHeight: PixelNotificationMetrics.minHeight,
-          ),
-          decoration: BoxDecoration(color: background, borderRadius: radius),
-          child: AnimatedSize(
-            duration: const Duration(milliseconds: 260),
-            curve: Motion.md3EmphasizedDecelerate,
-            alignment: Alignment.topCenter,
-            child: Stack(
-              children: <Widget>[
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    content,
-                    if (showActions)
-                      _PixelActions(
-                        actions: actions,
-                        onAction: widget.onAction!,
-                      ),
-                  ],
-                ),
-                PositionedDirectional(
-                  start: PixelNotificationMetrics.margin,
-                  top: PixelNotificationMetrics.margin,
-                  // A picture (a sender's avatar, say) takes the app
-                  // icon's place: Android shows one icon, never two.
-                  child: _PixelAppIcon(
-                    notification: notification,
-                    picture: image,
-                    badge: image && conversation,
-                  ),
-                ),
-                PositionedDirectional(
-                  end: 0,
-                  top: 0,
-                  child: _PixelExpandPill(
-                    expanded: group == null && _expanded,
-                    count: group?.members.length,
-                    onTap: !widget.interactive
-                        ? null
-                        : group != null
-                        ? widget.onExpandGroup
-                        : _toggle,
-                  ),
-                ),
-              ],
+    // Android's ExpandHelper: pulling a collapsed notification down opens
+    // it, showing its actions (Mark as read, Reply, …). Only a downward
+    // pull is taken; the list still scrolls up from the card.
+    final pullable =
+        widget.interactive && group == null && full && !_expanded && !_guts;
+    return RawGestureDetector(
+      gestures: <Type, GestureRecognizerFactory>{
+        _PullDownRecognizer:
+            GestureRecognizerFactoryWithHandlers<_PullDownRecognizer>(
+              _PullDownRecognizer.new,
+              (recognizer) => recognizer.onStart = pullable
+                  ? (_) {
+                      _press(false);
+                      setState(() => _expanded = true);
+                    }
+                  : null,
+            ),
+      },
+      child: Semantics(
+        container: true,
+        expanded: _expanded,
+        label: text.isEmpty
+            ? l10n.notificationSemantics(appName, title)
+            : l10n.notificationSemanticsWithBody(appName, title, text),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: onTap == null ? null : (_) => _press(true),
+          onTapUp: (_) => _press(false),
+          onTapCancel: () => _press(false),
+          onTap: onTap,
+          onLongPress: canGuts && !_guts
+              ? () {
+                  HapticFeedback.heavyImpact();
+                  _press(false);
+                  setState(() => _guts = true);
+                }
+              : null,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            constraints: const BoxConstraints(
+              minHeight: PixelNotificationMetrics.minHeight,
+            ),
+            decoration: BoxDecoration(color: background, borderRadius: radius),
+            child: AnimatedSize(
+              duration: const Duration(milliseconds: 260),
+              curve: Motion.md3EmphasizedDecelerate,
+              alignment: Alignment.topCenter,
+              child: _guts
+                  ? _PixelGuts(
+                      notification: notification,
+                      appName: appName,
+                      onDismiss: widget.onDismiss,
+                      onControl: widget.onControl,
+                      onClose: () => setState(() => _guts = false),
+                    )
+                  : Stack(
+                      children: <Widget>[
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: <Widget>[
+                            content,
+                            if (showActions)
+                              _PixelActions(
+                                actions: actions,
+                                onAction: widget.onAction!,
+                              ),
+                          ],
+                        ),
+                        PositionedDirectional(
+                          start: PixelNotificationMetrics.margin,
+                          top: PixelNotificationMetrics.margin,
+                          // A picture (a sender's avatar, say) takes the app
+                          // icon's place: Android shows one icon, never two.
+                          child: _PixelAppIcon(
+                            notification: notification,
+                            picture: image,
+                            badge: image && conversation,
+                          ),
+                        ),
+                        PositionedDirectional(
+                          end: 0,
+                          top: 0,
+                          child: _PixelExpandPill(
+                            expanded: group == null && _expanded,
+                            count: group?.members.length,
+                            onTap: !widget.interactive
+                                ? null
+                                : group != null
+                                ? widget.onExpandGroup
+                                : _toggle,
+                          ),
+                        ),
+                      ],
+                    ),
             ),
           ),
         ),
       ),
     );
   }
+}
+
+/// A vertical drag that only starts downward.
+class _PullDownRecognizer extends VerticalDragGestureRecognizer {
+  @override
+  bool hasSufficientGlobalDistanceToAccept(
+    PointerDeviceKind pointerDeviceKind,
+    double? deviceTouchSlop,
+  ) => globalDistanceMoved > computeHitSlop(pointerDeviceKind, gestureSettings);
 }
 
 /// A notification's age as Android writes it: now, 5m, 2h, 3d.
@@ -620,6 +680,341 @@ class _PixelProgress extends StatelessWidget {
               child: ColoredBox(color: scheme.primary),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A notification's settings on a long press, in its card (AOSP's
+/// notification_2025_info.xml): the app and channel with the settings gear,
+/// Default or Silent, then Dismiss, Turn off and Done. The choice applies
+/// on Done, as Android's does.
+class _PixelGuts extends StatefulWidget {
+  const _PixelGuts({
+    required this.notification,
+    required this.appName,
+    required this.onClose,
+    this.onDismiss,
+    this.onControl,
+  });
+
+  final DesktopNotification notification;
+  final String appName;
+  final VoidCallback onClose;
+  final VoidCallback? onDismiss;
+  final ValueChanged<String>? onControl;
+
+  @override
+  State<_PixelGuts> createState() => _PixelGutsState();
+}
+
+class _PixelGutsState extends State<_PixelGuts> {
+  static const _alerting = 'x-denial-alerting';
+  static const _silent = 'x-denial-silent';
+  static const _turnOff = 'x-denial-turn-off';
+  static const _settings = 'x-denial-settings';
+
+  late bool _quiet = _wasQuiet;
+
+  bool get _wasQuiet =>
+      widget.notification.urgency == DesktopNotificationUrgency.low;
+
+  bool _takes(String control) =>
+      widget.onControl != null &&
+      widget.notification.controls.contains(control);
+
+  void _control(String control) => widget.onControl?.call(control);
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = phoneSchemeOf(context);
+    final l10n = context.l10n;
+    final notification = widget.notification;
+    final configurable = _takes(_alerting) && _takes(_silent);
+    final channel = notification.channel;
+    const margin = PixelNotificationMetrics.margin;
+    final strong = TextStyle(
+      color: scheme.onSurface,
+      fontSize: 14,
+      fontWeight: FontWeight.w600,
+      height: 20 / 14,
+    );
+    final plain = TextStyle(
+      color: scheme.onSurface,
+      fontSize: 14,
+      height: 20 / 14,
+    );
+    return Padding(
+      padding: const EdgeInsetsDirectional.only(start: margin),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          // header: pkg_icon, names, app_settings.
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Padding(
+                padding: const EdgeInsetsDirectional.only(
+                  top: margin,
+                  end: margin,
+                ),
+                child: _PixelAppIcon(notification: notification),
+              ),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: margin),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      minHeight: PixelNotificationMetrics.iconCircle,
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          channel.isEmpty ? widget.appName : channel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: strong,
+                        ),
+                        if (channel.isNotEmpty)
+                          Text(
+                            widget.appName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: plain,
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              if (_takes(_settings))
+                Semantics(
+                  button: true,
+                  label: l10n.notificationGutsSettings,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {
+                      _control(_settings);
+                      widget.onClose();
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.all(margin),
+                      child: Icon(
+                        Icons.settings_outlined,
+                        size: 24,
+                        color: scheme.primary,
+                      ),
+                    ),
+                  ),
+                )
+              else
+                const SizedBox(width: margin),
+            ],
+          ),
+          const SizedBox(height: margin),
+          Padding(
+            padding: const EdgeInsetsDirectional.only(end: margin),
+            child: configurable
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      _GutsChoice(
+                        icon: Icons.notifications_active_outlined,
+                        label: l10n.notificationGutsDefault,
+                        summary: l10n.notificationGutsDefaultSummary,
+                        selected: !_quiet,
+                        onTap: () => setState(() => _quiet = false),
+                      ),
+                      // notification_importance_button_separation.
+                      const SizedBox(height: 8),
+                      _GutsChoice(
+                        icon: Icons.notifications_off_outlined,
+                        label: l10n.notificationGutsSilent,
+                        summary: l10n.notificationGutsSilentSummary,
+                        selected: _quiet,
+                        onTap: () => setState(() => _quiet = true),
+                      ),
+                    ],
+                  )
+                : Text(l10n.notificationGutsNotConfigurable, style: plain),
+          ),
+          // bottom_buttons: notification_2025_guts_button_size high.
+          Padding(
+            padding: const EdgeInsetsDirectional.only(
+              top: 12,
+              end: margin,
+              bottom: 6,
+            ),
+            child: SizedBox(
+              height: 56,
+              child: Row(
+                children: <Widget>[
+                  if (widget.onDismiss != null && notification.clearable) ...[
+                    _GutsButton(
+                      label: l10n.notificationGutsDismiss,
+                      onTap: () {
+                        widget.onClose();
+                        widget.onDismiss!();
+                      },
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  if (_takes(_turnOff))
+                    _GutsButton(
+                      label: l10n.notificationGutsTurnOff,
+                      onTap: () {
+                        _control(_turnOff);
+                        widget.onClose();
+                      },
+                    ),
+                  const Spacer(),
+                  _GutsButton(
+                    label: l10n.notificationGutsDone,
+                    filled: true,
+                    onTap: () {
+                      if (configurable && _quiet != _wasQuiet) {
+                        _control(_quiet ? _silent : _alerting);
+                      }
+                      widget.onClose();
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Default or Silent (notification_2025_guts_priority_button_bg): chosen,
+/// secondaryContainer with a 1 dp outline at 28 dp corners and its summary
+/// under the label; otherwise clear with a 1 dp outlineVariant at 16 dp.
+class _GutsChoice extends StatelessWidget {
+  const _GutsChoice({
+    required this.icon,
+    required this.label,
+    required this.summary,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final String summary;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = phoneSchemeOf(context);
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.fastOutSlowIn,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: selected
+                ? scheme.secondaryContainer
+                : scheme.secondaryContainer.withValues(alpha: 0),
+            border: Border.all(
+              color: selected ? scheme.outline : scheme.outlineVariant,
+            ),
+            borderRadius: BorderRadius.circular(selected ? 28 : 16),
+          ),
+          child: Row(
+            children: <Widget>[
+              Icon(icon, size: 24, color: scheme.onSurface),
+              const SizedBox(width: PixelNotificationMetrics.margin),
+              Expanded(
+                child: AnimatedSize(
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.fastOutSlowIn,
+                  alignment: Alignment.topCenter,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        label,
+                        style: TextStyle(
+                          color: scheme.onSurface,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          height: 20 / 14,
+                        ),
+                      ),
+                      if (selected)
+                        Text(
+                          summary,
+                          style: TextStyle(
+                            color: scheme.onSurface,
+                            fontSize: 14,
+                            height: 20 / 14,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Widget.Dialog.Button: a pill, filled with primary, or outlined
+/// (BorderButton).
+class _GutsButton extends StatelessWidget {
+  const _GutsButton({
+    required this.label,
+    required this.onTap,
+    this.filled = false,
+  });
+
+  final String label;
+  final VoidCallback onTap;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = phoneSchemeOf(context);
+    return Semantics(
+      button: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Container(
+          height: 36,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: filled ? scheme.primary : null,
+            border: filled ? null : Border.all(color: scheme.outline),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Text(
+            label,
+            maxLines: 1,
+            style: TextStyle(
+              color: filled ? scheme.onPrimary : scheme.onSurface,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              height: 20 / 14,
+            ),
+          ),
         ),
       ),
     );

@@ -191,6 +191,25 @@ String? _localImagePath(String value) {
   return trimmed.startsWith('/') ? trimmed : null;
 }
 
+/// A notification's small icon (white on clear), tinted [color] as
+/// Android tints its status bar icons.
+class NotificationSmallIcon extends StatelessWidget {
+  const NotificationSmallIcon({
+    required this.image,
+    required this.color,
+    super.key,
+  });
+
+  final DesktopNotificationImageData image;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => ColorFiltered(
+    colorFilter: ColorFilter.mode(color, BlendMode.srcIn),
+    child: _RawNotificationImage(image: image),
+  );
+}
+
 class _RawNotificationImage extends StatefulWidget {
   const _RawNotificationImage({required this.image});
 

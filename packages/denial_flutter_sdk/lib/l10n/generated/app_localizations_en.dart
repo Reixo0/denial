@@ -5408,4 +5408,33 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get privacyLocationInUse => 'Location in use';
+
+  @override
+  String get notificationGutsDefault => 'Default';
+
+  @override
+  String get notificationGutsDefaultSummary =>
+      'May ring or vibrate based on device settings';
+
+  @override
+  String get notificationGutsSilent => 'Silent';
+
+  @override
+  String get notificationGutsSilentSummary => 'No sound or vibration';
+
+  @override
+  String get notificationGutsDismiss => 'Dismiss';
+
+  @override
+  String get notificationGutsTurnOff => 'Turn off';
+
+  @override
+  String get notificationGutsDone => 'Done';
+
+  @override
+  String get notificationGutsNotConfigurable =>
+      'These notifications can’t be modified.';
+
+  @override
+  String get notificationGutsSettings => 'Notification settings';
 }

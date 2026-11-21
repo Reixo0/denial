@@ -5,9 +5,9 @@ import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'package:denial_flutter_sdk/motion.dart';
 
 import 'quick_settings_panel.dart';
+import 'shade_expansion_motion.dart' show aospShadeFling;
 import 'shade_progress.dart';
 import 'status_bar.dart';
 
@@ -92,20 +92,26 @@ class _SystemShadeLayerState extends ConsumerState<SystemShadeLayer>
     } else {
       // Released: settle open or closed, continuing the finger's velocity.
       // A drag moves the shade by one panel extent per extent of travel.
-      final extent = ReferenceShellMetrics.quickSettingsPanelExtent(
-        MediaQuery.sizeOf(context),
-      );
-      springTo(
-        _controller,
-        visible ? 1.0 : 0.0,
+      final size = MediaQuery.sizeOf(context);
+      final extent = ReferenceShellMetrics.quickSettingsPanelExtent(size);
+      final target = visible ? 1.0 : 0.0;
+      // Android's fling: no quicker than its 0.6 s shade, as the owner
+      // found the springs too fast.
+      final fling = aospShadeFling(
+        distance: target - _controller.value,
         velocity:
             ref
                 .read(referenceShellProvider.notifier)
                 .quickSettingsReleaseVelocity /
             extent,
-        // Opening settles a little quicker than closing.
-        spring: visible ? Motion.snappy : Motion.gentle,
-        telemetryLabel: 'shade_settle',
+        dp: PixelShadeViewport.scaleFor(size) / extent,
+      );
+      _controller.animateTo(
+        target,
+        duration: MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : fling.duration,
+        curve: fling.curve,
       );
     }
   }

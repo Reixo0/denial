@@ -298,6 +298,10 @@ class PrivacyUsageMarks extends ConsumerWidget {
   }
 }
 
+/// The status icons' size in the shade's dp: the status bar's earlier size
+/// (1.1 in Denial's units), which the owner prefers, in both places.
+const double phoneStatusIconScale = 0.75;
+
 /// The compact status cluster (privacy · signal · wifi · battery) shared by the status
 /// bar and the shade header.
 class StatusCluster extends StatelessWidget {

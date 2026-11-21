@@ -18,7 +18,6 @@ import '../../state/quick_settings.dart';
 import '../../state/reference_shell_presentation.dart';
 import '../../state/reference_shell_profile.dart';
 
-import 'package:denial_flutter_sdk/motion.dart';
 import 'package:denial_flutter_sdk/rendering.dart'
     show WindowBackdropCache, WindowBackdropSlice;
 import 'package:denial_flutter_sdk/shell_theme.dart';
@@ -354,8 +353,10 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
   static const double _collapsedHeader = 40;
   static const double _expandedHeader = 142;
 
-  /// Drag distance, in dp, that opens the full quick settings.
-  static const double _expansionTravel = 356;
+  /// Drag distance, in dp, that opens the full quick settings: how far the
+  /// tiles' bottom edge moves, so it stays under the finger as Android's
+  /// QS panel does. Measured at layout; this is only the first guess.
+  double _expansionTravel = 356;
 
   late final AnimationController _expansion = AnimationController(
     vsync: this,
@@ -434,16 +435,19 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
     super.dispose();
   }
 
+  /// [velocity] in dp per second.
   void _settle(double target, {double velocity = 0}) {
+    // QuickSettingsController flings the expansion as the shade's.
+    final fling = aospShadeFling(
+      distance: target - _expansion.value,
+      velocity: velocity / _expansionTravel,
+      dp: 1 / _expansionTravel,
+    );
     final duration = MediaQuery.disableAnimationsOf(context)
         ? Duration.zero
-        : const Duration(milliseconds: 380);
+        : fling.duration;
     _expansion
-        .animateTo(
-          target,
-          duration: duration,
-          curve: Motion.md3EmphasizedDecelerate,
-        )
+        .animateTo(target, duration: duration, curve: fling.curve)
         .whenComplete(() {
           if (!mounted) return;
           final page = target >= 1
@@ -938,13 +942,16 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
             // (no fade). The column already moves them by the tiles' growth.
             final firstHeight = oneRow + (twoRows - oneRow) * stages.secondRow;
             final restingTop = top + _collapsedHeader + 8 + firstHeight + 16;
-            final growth =
-                e *
-                (_expandedHeader -
-                    _collapsedHeader +
-                    58 +
-                    fullHeight -
-                    firstHeight);
+            final travel =
+                _expandedHeader -
+                _collapsedHeader +
+                58 +
+                fullHeight -
+                firstHeight;
+            if (stages.secondRow >= 1 && travel > 120) {
+              _expansionTravel = travel;
+            }
+            final growth = e * travel;
             final pushed = e * (height - restingTop) - growth;
             return Stack(
               fit: StackFit.expand,
@@ -1075,7 +1082,7 @@ class _PixelHeader extends ConsumerWidget {
     final icons = StatusCluster(
       battery: battery,
       color: scheme.onSurface,
-      scale: 0.91,
+      scale: phoneStatusIconScale,
     );
     // EvolutionX centres the first pull's status row 26 dp down.
     final collapsed = Row(

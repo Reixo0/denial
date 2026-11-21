@@ -6,8 +6,6 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../launcher/home_surface.dart';
-import '../../widgets/shade/shade_expansion_motion.dart';
-import '../../widgets/shade/shade_progress.dart';
 
 /// Visibility and interaction policy for the stock launcher feature.
 class MobileLauncherLayer extends ConsumerWidget {
@@ -38,17 +36,11 @@ class MobileLauncherLayer extends ConsumerWidget {
         );
       }),
     );
-    final shade = ref.watch(shadeProgressProvider);
     final showsHome = ref.read(referenceShellProvider.notifier).deck.showsHome;
-    final opacity = _HomeContentOpacity(
-      first: contentOpacity,
-      // The frost fades the home content itself and then hides it; fading
-      // the content too would composite it through a layer on every frame.
-      next: shadeFrostOccludes(context)
-          ? shade.drive(_hiddenOnceCovered)
-          : ReverseAnimation(shade),
-    );
-    // Keep the grid mounted while recents and the shade fade its content.
+    // Android keeps the home screen under the shade: its blur and scrim
+    // cover it, the icons do not fade away.
+    final opacity = contentOpacity;
+    // Keep the grid mounted while recents fade its content.
     // Phase changes alone update interaction/tickers; animation ticks stay
     // at the renderer and share the existing composited opacity layer.
     return ValueListenableBuilder<bool>(
@@ -71,15 +63,4 @@ class MobileLauncherLayer extends ConsumerWidget {
       ),
     );
   }
-}
-
-final _hiddenOnceCovered = Animatable<double>.fromCallback(
-  (progress) => ColorOsShadeMotion.blurFraction(progress) >= 1 ? 0.0 : 1.0,
-);
-
-class _HomeContentOpacity extends CompoundAnimation<double> {
-  _HomeContentOpacity({required super.first, required super.next});
-
-  @override
-  double get value => first.value * next.value;
 }

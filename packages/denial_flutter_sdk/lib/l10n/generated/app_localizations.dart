@@ -9651,6 +9651,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Location in use'**
   String get privacyLocationInUse;
+
+  /// Notification settings on a long press: the choice that lets this kind of notification alert, as on Android.
+  ///
+  /// In en, this message translates to:
+  /// **'Default'**
+  String get notificationGutsDefault;
+
+  /// Under Default when it is chosen.
+  ///
+  /// In en, this message translates to:
+  /// **'May ring or vibrate based on device settings'**
+  String get notificationGutsDefaultSummary;
+
+  /// Notification settings: the choice that keeps this kind of notification quiet.
+  ///
+  /// In en, this message translates to:
+  /// **'Silent'**
+  String get notificationGutsSilent;
+
+  /// Under Silent when it is chosen.
+  ///
+  /// In en, this message translates to:
+  /// **'No sound or vibration'**
+  String get notificationGutsSilentSummary;
+
+  /// Notification settings: button that clears this notification.
+  ///
+  /// In en, this message translates to:
+  /// **'Dismiss'**
+  String get notificationGutsDismiss;
+
+  /// Notification settings: button that turns off this kind of notification.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn off'**
+  String get notificationGutsTurnOff;
+
+  /// Notification settings: button that applies the choice and closes the settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get notificationGutsDone;
+
+  /// Notification settings for a notification whose sender takes no settings.
+  ///
+  /// In en, this message translates to:
+  /// **'These notifications can’t be modified.'**
+  String get notificationGutsNotConfigurable;
+
+  /// Screen readers: the gear that opens the app's notification settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Notification settings'**
+  String get notificationGutsSettings;
 }
 
 class _AppLocalizationsDelegate
