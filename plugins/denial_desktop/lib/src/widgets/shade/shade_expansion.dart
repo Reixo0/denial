@@ -1,7 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/widgets.dart';
 
-import 'shade_expansion_motion.dart' show aospShadeFling;
+import 'shade_expansion_motion.dart' show ShadeBlurAnimation, aospShadeFling;
 
 /// What a drag on the shade is moving.
 enum _Moving { panel, quickSettings }
@@ -23,8 +23,40 @@ class ShadeExpansion {
     this.onDragMove,
     this.onDragEnd,
   }) : panel = AnimationController(vsync: vsync),
-       qs = AnimationController(vsync: vsync) {
-    panel.addListener(_collapseWhenClosed);
+       qs = AnimationController(vsync: vsync),
+       engaged = AnimationController(vsync: vsync, duration: _engageDuration) {
+    panel
+      ..addListener(_collapseWhenClosed)
+      ..addListener(_engage);
+  }
+
+  /// Android's timed reaction to the shade leaving closed, apart from the
+  /// finger: the status bar's icons fade out (CollapsedStatusBarFragment)
+  /// and a fifth of the blur springs in (NotificationShadeDepthController).
+  /// It runs to 1 when the panel leaves 0 and back once it is closed.
+  final AnimationController engaged;
+
+  /// What the shade blurs behind it, 0 to 1 ([ShadeBlurAnimation]).
+  late final Animation<double> blur = ShadeBlurAnimation(panel, engaged);
+
+  static const _engageDuration = Duration(milliseconds: 160);
+
+  void _engage() {
+    if (panel.value > 0) {
+      if (engaged.value < 1 && engaged.status != AnimationStatus.forward) {
+        if (reduceMotion) {
+          engaged.value = 1;
+        } else {
+          engaged.forward();
+        }
+      }
+    } else if (engaged.value > 0 && engaged.status != AnimationStatus.reverse) {
+      if (reduceMotion) {
+        engaged.value = 0;
+      } else {
+        engaged.reverse();
+      }
+    }
   }
 
   /// 0 closed, 1 open.
@@ -233,5 +265,6 @@ class ShadeExpansion {
     _unwatchFingers();
     panel.dispose();
     qs.dispose();
+    engaged.dispose();
   }
 }

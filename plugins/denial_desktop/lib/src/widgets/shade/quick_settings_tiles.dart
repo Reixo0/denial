@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart' show ColorScheme, Icons;
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
@@ -207,6 +208,18 @@ class _QuickTileState extends State<QuickTile> {
         ),
       ),
     );
+    // AOSP squishes the icon well on its own, after its background is drawn
+    // (LargeTileContent's verticalSquish): a shorter rounded shape, centred.
+    final squish = QsTileSquish.of(context);
+    final Widget squishedWell = squish == null
+        ? well
+        : _SquishedTile(
+            row: 0,
+            stacked: false,
+            radius: active ? 16 : PixelQs.well / 2,
+            squish: squish,
+            child: well,
+          );
     return AnimatedContainer(
       duration: _morph,
       curve: Curves.easeOutCubic,
@@ -233,10 +246,10 @@ class _QuickTileState extends State<QuickTile> {
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: _toggle,
-                child: well,
+                child: squishedWell,
               )
             else
-              well,
+              squishedWell,
             // AOSP TileArrangementPadding.
             const SizedBox(width: 6),
             Expanded(
@@ -281,15 +294,42 @@ class _QuickTileState extends State<QuickTile> {
 
 /// Tiles in Android's four-column grid: a wide tile takes two columns, the
 /// rest one, in order, row by row.
+/// How the first page's tiles move between the quick tiles and the full
+/// quick settings (AOSP Compose QS): the rows shared with the quick tiles
+/// squish with the shade's first pull ([squish], 0.5 to 1:
+/// `verticalSquish`), the other rows fade with the quick settings' content
+/// ([contentAlpha]). Paint only: neither lays the grid out again.
+@immutable
+class QsTileMotion {
+  const QsTileMotion({
+    required this.sharedRows,
+    required this.squish,
+    required this.contentAlpha,
+  });
+
+  final int sharedRows;
+  final Animation<double> squish;
+  final Animation<double> contentAlpha;
+}
+
 class PixelTileGrid extends StatelessWidget {
-  const PixelTileGrid({super.key, required this.tiles});
+  const PixelTileGrid({super.key, required this.tiles, this.motion});
 
   final List<Widget> tiles;
+  final QsTileMotion? motion;
 
   static bool _wide(Widget tile) => switch (tile) {
     QsTileSize(:final wide) => wide,
     QuickTile(:final wide) => wide,
     _ => true,
+  };
+
+  /// The tile's corner radius, which its squished clip keeps
+  /// (common_tile_default_*: 24 dp active, round inactive).
+  static double _radius(Widget tile) => switch (tile) {
+    QuickTile(:final active) when active => 24,
+    QsTileSize(:final child) => _radius(child),
+    _ => PixelQs.tileHeight / 2,
   };
 
   @override
@@ -298,16 +338,52 @@ class PixelTileGrid extends StatelessWidget {
       final column =
           (constraints.maxWidth - PixelQs.gap * (PixelQs.columns - 1)) /
           PixelQs.columns;
-      return Wrap(
+      final motion = this.motion;
+      var row = -1;
+      var used = PixelQs.columns;
+      final shared = <Widget>[];
+      final rest = <Widget>[];
+      for (final tile in tiles) {
+        final span = _wide(tile) ? 2 : 1;
+        if (used + span > PixelQs.columns) {
+          row++;
+          used = 0;
+        }
+        used += span;
+        final sized = SizedBox(
+          width: span == 2 ? column * 2 + PixelQs.gap : column,
+          height: PixelQs.tileHeight,
+          child: tile,
+        );
+        if (motion == null) {
+          shared.add(sized);
+        } else if (row < motion.sharedRows) {
+          shared.add(
+            _SquishedTile(
+              row: row,
+              radius: _radius(tile),
+              squish: motion.squish,
+              child: QsTileSquish(squish: motion.squish, child: sized),
+            ),
+          );
+        } else {
+          rest.add(sized);
+        }
+      }
+      Widget wrap(List<Widget> children) => Wrap(
         spacing: PixelQs.gap,
         runSpacing: PixelQs.gap,
+        children: children,
+      );
+      if (motion == null || rest.isEmpty) return wrap(shared);
+      // The rows only the full quick settings show fade in as one layer.
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          for (final tile in tiles)
-            SizedBox(
-              width: _wide(tile) ? column * 2 + PixelQs.gap : column,
-              height: PixelQs.tileHeight,
-              child: tile,
-            ),
+          wrap(shared),
+          const SizedBox(height: PixelQs.gap),
+          FadeTransition(opacity: motion.contentAlpha, child: wrap(rest)),
         ],
       );
     },
@@ -582,9 +658,13 @@ class PixelPagedTileGrid extends StatelessWidget {
     required this.tiles,
     required this.controller,
     required this.scrollable,
+    this.motion,
   });
 
   static const int rowsPerPage = 4;
+
+  /// How the first page moves with the quick settings ([QsTileMotion]).
+  final QsTileMotion? motion;
 
   /// The bar under the grid with the page dots (AOSP FooterHeight).
   static const double footerHeight = 48;
@@ -648,7 +728,7 @@ class PixelPagedTileGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final pages = pagesOf(tiles);
-    if (pages.length <= 1) return PixelTileGrid(tiles: tiles);
+    if (pages.length <= 1) return PixelTileGrid(tiles: tiles, motion: motion);
     return LayoutBuilder(
       builder: (context, constraints) => OverflowBox(
         minWidth: constraints.maxWidth + pageSpacing * 2,
@@ -659,12 +739,15 @@ class PixelPagedTileGrid extends StatelessWidget {
               ? const PageScrollPhysics()
               : const NeverScrollableScrollPhysics(),
           children: <Widget>[
-            for (final page in pages)
+            for (final (index, page) in pages.indexed)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: pageSpacing),
                 child: Align(
                   alignment: Alignment.topCenter,
-                  child: PixelTileGrid(tiles: page),
+                  child: PixelTileGrid(
+                    tiles: page,
+                    motion: index == 0 ? motion : null,
+                  ),
                 ),
               ),
           ],
@@ -779,4 +862,162 @@ class _PagerDotsPainter extends CustomPainter {
       old.count != count ||
       old.active != active ||
       old.inactive != inactive;
+}
+
+/// AOSP's `verticalSquish` on a quick tile, painted: the tile shows a band
+/// [squish] of its height around its centre, with its shape's corners, and
+/// its row moves up as the rows above it shrink. 1 draws it as laid out.
+/// The first pull's squish of the quick tiles, for parts of a tile that
+/// squish on their own (the icon well). It never rebuilds its dependents:
+/// the animation repaints them.
+class QsTileSquish extends InheritedWidget {
+  const QsTileSquish({required this.squish, required super.child, super.key});
+
+  final Animation<double> squish;
+
+  static Animation<double>? of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<QsTileSquish>()?.squish;
+
+  @override
+  bool updateShouldNotify(QsTileSquish oldWidget) =>
+      !identical(squish, oldWidget.squish);
+}
+
+class _SquishedTile extends SingleChildRenderObjectWidget {
+  const _SquishedTile({
+    required this.row,
+    required this.radius,
+    required this.squish,
+    required super.child,
+    this.stacked = true,
+  });
+
+  final int row;
+
+  /// Moves up as Compose stacks squished rows; false squishes in place.
+  final bool stacked;
+  final double radius;
+  final Animation<double> squish;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderSquishedTile(row, radius, squish, stacked: stacked);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderSquishedTile renderObject,
+  ) {
+    renderObject
+      ..row = row
+      ..stacked = stacked
+      ..radius = radius
+      ..squish = squish;
+  }
+}
+
+class _RenderSquishedTile extends RenderProxyBox {
+  _RenderSquishedTile(
+    this._row,
+    this._radius,
+    this._squish, {
+    required this._stacked,
+  });
+
+  bool _stacked;
+  set stacked(bool value) {
+    if (value == _stacked) return;
+    _stacked = value;
+    markNeedsPaint();
+  }
+
+  double _radius;
+  set radius(double value) {
+    if (value == _radius) return;
+    _radius = value;
+    markNeedsPaint();
+  }
+
+  int _row;
+  set row(int value) {
+    if (value == _row) return;
+    _row = value;
+    markNeedsPaint();
+  }
+
+  Animation<double> _squish;
+  set squish(Animation<double> value) {
+    if (identical(value, _squish)) return;
+    if (attached) _squish.removeListener(markNeedsPaint);
+    _squish = value;
+    if (attached) _squish.addListener(markNeedsPaint);
+    markNeedsPaint();
+  }
+
+  final _clip = LayerHandle<ClipRRectLayer>();
+
+  @override
+  void attach(PipelineOwner owner) {
+    super.attach(owner);
+    _squish.addListener(markNeedsPaint);
+  }
+
+  @override
+  void detach() {
+    _squish.removeListener(markNeedsPaint);
+    super.detach();
+  }
+
+  @override
+  void dispose() {
+    _clip.layer = null;
+    super.dispose();
+  }
+
+  double get _value => _squish.value.clamp(0.0, 1.0);
+
+  /// Compose lays the squished rows out one under the other: a row moves
+  /// up by what the rows above and its own half lost.
+  double get _shift =>
+      _stacked ? -(_row + 0.5) * size.height * (1 - _value) : 0;
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    final child = this.child;
+    if (child == null) return;
+    final s = _value;
+    if (s >= 1) {
+      _clip.layer = null;
+      context.paintChild(child, offset);
+      return;
+    }
+    final h = size.height;
+    final shown = h * s;
+    final at = offset + Offset(0, _shift);
+    _clip.layer = context.pushClipRRect(
+      needsCompositing,
+      at,
+      Offset.zero & size,
+      RRect.fromLTRBR(
+        0,
+        (h - shown) / 2,
+        size.width,
+        (h + shown) / 2,
+        Radius.circular(math.min(_radius, shown / 2)),
+      ),
+      (context, offset) => context.paintChild(child, offset),
+      oldLayer: _clip.layer,
+    );
+  }
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) {
+    if (_value < 1) return false;
+    return super.hitTestChildren(result, position: position);
+  }
+
+  @override
+  void applyPaintTransform(RenderBox child, Matrix4 transform) {
+    transform.translateByDouble(0, _value >= 1 ? 0 : _shift, 0, 1);
+  }
 }

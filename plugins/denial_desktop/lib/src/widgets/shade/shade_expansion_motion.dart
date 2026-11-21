@@ -11,6 +11,13 @@ abstract final class AospShadeInterpolation {
   /// (NotificationShadeDepthController blurs by it), full at half the pull.
   static double scrimAlpha(double fraction) => _easeInOut(unit(fraction / 0.5));
 
+  /// NotificationShadeDepthController's blur: 0.8 of it follows the scrim
+  /// (INTERACTION_BLUR_FRACTION) and 0.2 springs in as soon as the shade
+  /// starts moving (shadeAnimation, ANIMATION_BLUR_FRACTION), which is why
+  /// what is behind blurs at the first touch of a pull.
+  static double blurFraction(double fraction, double engaged) =>
+      0.8 * scrimAlpha(fraction) + 0.2 * unit(engaged);
+
   /// getContentAlpha: the shade's content, from 30 % of the pull on.
   static double contentAlpha(double fraction) =>
       _easeInOut(unit((fraction - 0.3) / 0.7));
@@ -62,4 +69,15 @@ abstract final class AospShadeInterpolation {
     duration: Duration(microseconds: (seconds * 1e6).round()),
     curve: curve,
   );
+}
+
+/// [AospShadeInterpolation.blurFraction] of a shade's panel fraction and its
+/// [ShadeExpansion.engaged] animation.
+class ShadeBlurAnimation extends CompoundAnimation<double> {
+  ShadeBlurAnimation(Animation<double> panel, Animation<double> engaged)
+    : super(first: panel, next: engaged);
+
+  @override
+  double get value =>
+      AospShadeInterpolation.blurFraction(first.value, next.value);
 }

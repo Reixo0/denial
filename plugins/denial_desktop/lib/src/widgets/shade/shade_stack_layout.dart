@@ -1,39 +1,45 @@
 import 'dart:math' as math;
+import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
 import 'notification_shade_list.dart' show AndroidStackExpansion;
-import 'shade_expansion_motion.dart';
 
-/// The parts of the shade's column, top to bottom.
+/// The parts of the shade, each moved on its own.
 enum ShadePart {
-  /// The first pull's status row (time, date, icons).
-  collapsedHeader,
+  /// The shade header's clock (ShadeHeaderController's MotionLayout).
+  clock,
 
-  /// The full quick settings' header (large clock, date, operator).
-  expandedHeader,
+  /// The header's date.
+  date,
 
-  /// The brightness slider, which grows in above the tiles.
+  /// The header's status icons and battery.
+  icons,
+
+  /// The header's network operator, shown in the full quick settings.
+  carrier,
+
+  /// The brightness slider.
   slider,
 
-  /// The tile grid at its full height.
+  /// The tile grid's first page at its full height.
   grid,
 
-  /// The grid's footer row (page dots, edit).
+  /// The row under the grid (page dots, edit).
   gridFooter,
 
   /// The media player.
   media,
 
-  /// The footer actions (settings, power).
+  /// The footer actions (settings, power), at the bottom of the screen.
   footer,
 
   /// The notification stack.
   list,
 }
 
-/// Places one part of the shade's column ([ShadePart]).
+/// Places one part of the shade ([ShadePart]).
 class ShadeStackSlot extends ParentDataWidget<_ShadeStackParentData> {
   const ShadeStackSlot({required this.part, required super.child, super.key});
 
@@ -52,30 +58,43 @@ class ShadeStackSlot extends ParentDataWidget<_ShadeStackParentData> {
   Type get debugTypicalAncestorWidgetClass => ShadeStackLayout;
 }
 
-/// The shade's column laid out as Android's views move: each part is laid
-/// out once at its own size, and the panel and quick-settings fractions only
-/// move, clip and fade them while a finger or a fling drives the shade
-/// (View translation, clip bounds and alpha). Nothing is built or laid out
-/// again during the motion, and each part keeps its own cached layer.
+/// The shade as EvolutionX draws it: AOSP's Compose quick settings
+/// (QSFragmentCompose) over the notification stack, with the classic shade
+/// header.
 ///
-/// Geometry, in this box's units (the shade's dp):
-/// the header grows from [collapsedHeader] to [expandedHeader]; under it the
-/// slider shows its bottom part, then [gap] and the grid cut from
-/// [firstGridHeight] to its full height with its footer row, then the media
-/// player (whole when [mediaActive], else growing with the quick settings),
-/// the footer actions, and [listGap] above the notification stack, which
-/// keeps the height it has under the quick tiles (AOSP moves the stack with
-/// the quick settings' bottom, calculateNotificationsTopPadding).
+/// Every part is laid out once at its own size; the panel fraction (how far
+/// the shade is pulled) and the quick-settings fraction only move, scale,
+/// clip and fade them, so nothing is built or laid out during the motion.
+///
+/// Quick settings (`FromQuickQuickSettingsToQuickSettings`): the grid's
+/// anchor moves linearly from the quick tiles' place to the full quick
+/// settings'; the tiles both show are shared elements and stay opaque; the
+/// rest of the content keeps its place relative to the anchor
+/// (anchoredTranslate) and fades in from 0.43; the footer actions fade in
+/// from 0.9 at the bottom of the screen. Everything of the quick settings
+/// is clipped at the notification stack's top, which follows the finger to
+/// the bottom of the screen (measured on EvolutionX: 235 dp + 701.5 dp × the
+/// fraction).
+///
+/// Header (`combined_qs_header_scene.xml`, progress = the fraction): the
+/// clock moves down into the carrier row and scales by 2.57; the date and
+/// icons fade out by 0.14, jump while hidden and fade in from 0.58; the
+/// operator fades in from 0.58.
+///
+/// First pull (EvolutionX's slow-pull recording): the stack's top comes
+/// down from the screen's top with the panel (AOSP's stackY) and cuts the
+/// quick tiles and an active media player, which stay in place and opaque,
+/// squashed by AOSP's QS squishiness (QsTileMotion). The notifications come
+/// down with that top, squashed, and fade in (getContentAlpha); the header
+/// fades in as the top passes the first row ([ShadeReveal]).
+///
+/// Units are the shade's dp, from the top of the screen.
 class ShadeStackLayout extends MultiChildRenderObjectWidget {
   const ShadeStackLayout({
     super.key,
     required this.panel,
     required this.qs,
-    required this.collapsedHeader,
-    required this.expandedHeader,
-    required this.gap,
-    required this.listGap,
-    required this.firstGridHeight,
+    required this.quickTilesHeight,
     required this.mediaActive,
     required this.onTravel,
     super.children,
@@ -83,26 +102,23 @@ class ShadeStackLayout extends MultiChildRenderObjectWidget {
 
   final Animation<double> panel;
   final Animation<double> qs;
-  final double collapsedHeader;
-  final double expandedHeader;
-  final double gap;
-  final double listGap;
-  final double firstGridHeight;
+
+  /// The quick tiles' grid height (two rows), unsquished.
+  final double quickTilesHeight;
+
+  /// The media player shows in the quick tiles too (AOSP
+  /// showsOnlyActiveMedia): it moves between the two places, opaque.
   final bool mediaActive;
 
-  /// The distance the quick settings' bottom moves from the quick tiles to
-  /// the full quick settings, after each layout.
+  /// The finger's travel from the quick tiles to the full quick settings:
+  /// the notification stack's, which follows it.
   final ValueChanged<double> onTravel;
 
   @override
   RenderShadeStack createRenderObject(BuildContext context) => RenderShadeStack(
     panel: panel,
     qs: qs,
-    collapsedHeader: collapsedHeader,
-    expandedHeader: expandedHeader,
-    gap: gap,
-    listGap: listGap,
-    firstGridHeight: firstGridHeight,
+    quickTilesHeight: quickTilesHeight,
     mediaActive: mediaActive,
     onTravel: onTravel,
   );
@@ -112,11 +128,7 @@ class ShadeStackLayout extends MultiChildRenderObjectWidget {
     renderObject
       ..panel = panel
       ..qs = qs
-      ..collapsedHeader = collapsedHeader
-      ..expandedHeader = expandedHeader
-      ..gap = gap
-      ..listGap = listGap
-      ..firstGridHeight = firstGridHeight
+      ..quickTilesHeight = quickTilesHeight
       ..mediaActive = mediaActive
       ..onTravel = onTravel;
   }
@@ -125,65 +137,82 @@ class ShadeStackLayout extends MultiChildRenderObjectWidget {
 class _ShadeStackParentData extends ContainerBoxParentData<RenderBox> {
   ShadePart? part;
 
-  /// Where the part is drawn and what of it shows, for the current
-  /// fractions (paint and hit testing).
+  /// How the part is drawn for the current fractions.
   Offset place = Offset.zero;
-  Rect clip = Rect.zero;
+  double scale = 1;
+  Rect? clip;
   double alpha = 1;
   bool hittable = false;
 
   final clipLayer = LayerHandle<ClipRectLayer>();
   final opacityLayer = LayerHandle<OpacityLayer>();
+  final transformLayer = LayerHandle<TransformLayer>();
 }
 
-/// The geometry of one frame of the shade.
-class _Frame {
-  _Frame(RenderShadeStack stack) {
-    final e = stack.qs.value.clamp(0.0, 1.0);
-    final p = stack.panel.value.clamp(0.0, 1.0);
-    final m = stack._mediaHeight;
-    final quickTiles = stack._quickTilesBottom;
-    final c = stack.collapsedHeader;
-    final x = stack.expandedHeader;
-    headerHeight = c + (x - c) * e;
-    sliderShown = stack._sliderHeight * e;
-    gridTop = headerHeight + sliderShown + stack.gap;
-    gridShown =
-        stack.firstGridHeight +
-        (stack._fullGridHeight - stack.firstGridHeight) * e;
-    mediaTop = gridTop + gridShown;
-    mediaShown = m * (stack.mediaActive ? 1 : e);
-    footerTop = mediaTop + mediaShown;
-    footerShown = stack._footerHeight * e;
-    listTop = footerTop + footerShown + stack.listGap;
-    // AOSP: the quick settings come down a little with the pull
-    // (getHeaderTranslation, QS_PARALLAX_AMOUNT) and fade in with the
-    // shade's content (getContentAlpha).
-    parallax = -AospShadeInterpolation.qsParallax * quickTiles * (1 - p);
-    contentAlpha = AospShadeInterpolation.contentAlpha(p);
-    listAlpha = AndroidStackExpansion.alpha(p);
-    // AOSP: the QS content fades in from 0.43, the footer actions from 0.9.
-    qsAlpha = ((e - 0.43) / 0.57).clamp(0.0, 1.0);
-    footerAlpha = ((e - 0.9) / 0.1).clamp(0.0, 1.0);
-    expansion = e;
+/// EvolutionX's places, in dp from uiautomator dumps of both states.
+/// The first pull, as EvolutionX's slow-pull recording shows it.
+abstract final class ShadeReveal {
+  /// AOSP's QS squishiness: constrainSquishiness (0.1 + 0.9 ×) of the
+  /// stack's squishiness fraction.
+  static double tileSquish(double panel) =>
+      0.1 + 0.9 * AndroidStackExpansion.squish(panel);
+
+  /// The header fades in quickly as the stack's top passes the first tile
+  /// row (about 90 ms on the recording, as the notifications appear).
+  static double headerAlpha(double panel) =>
+      ((panel - 0.45) / 0.08).clamp(0.0, 1.0);
+}
+
+abstract final class _Places {
+  /// The quick tiles' grid top, under the 48 dp header row.
+  static const double quickGridTop = 48;
+
+  /// The full quick settings' grid top.
+  static const double fullGridTop = 216;
+
+  /// The slider's top over the full grid: 150 dp.
+  static const double sliderAboveGrid = 66;
+
+  /// Between the grid's last element and the media player.
+  static const double mediaGap = 8;
+
+  /// From the quick tiles' bottom to the notification stack.
+  static const double stackGap = 40;
+
+  /// The stack's top in the full quick settings, past the screen's bottom.
+  static const double stackPastBottom = 18;
+
+  /// The footer actions end above the navigation bar: 895 of 919 dp.
+  static const double footerBottom = 24;
+
+  /// The header's rows: 0-48 (first pull), 48-96 operator, 96-120 date.
+  static const double quickRowCentre = 24;
+  static const double clockCentre = 65;
+  static const double carrierCentre = 72;
+  static const double dateCentre = 108;
+  static const double clockScale = 2.57;
+  static const double dateAfterClock = 8;
+}
+
+/// MotionLayout's keyframes for the date and the icons: they leave
+/// (0.1066 of the way down by frame 14), cross while hidden (half-way by
+/// frame 50) and arrive.
+double _keyframed(double t, List<(double, double)> frames) {
+  for (var i = 1; i < frames.length; i++) {
+    final (t1, v1) = frames[i];
+    if (t <= t1) {
+      final (t0, v0) = frames[i - 1];
+      final f = t1 == t0 ? 1.0 : (t - t0) / (t1 - t0);
+      return v0 + (v1 - v0) * f;
+    }
   }
-
-  late final double headerHeight;
-  late final double sliderShown;
-  late final double gridTop;
-  late final double gridShown;
-  late final double mediaTop;
-  late final double mediaShown;
-  late final double footerTop;
-  late final double footerShown;
-  late final double listTop;
-  late final double parallax;
-  late final double contentAlpha;
-  late final double listAlpha;
-  late final double qsAlpha;
-  late final double footerAlpha;
-  late final double expansion;
+  return frames.last.$2;
 }
+
+const _hiddenX = <(double, double)>[(0, 0), (0.14, 0), (0.5, 1), (1, 1)];
+const _hiddenY = <(double, double)>[(0, 0), (0.14, 0.1066), (0.5, 0.5), (1, 1)];
+const _hiddenAlpha = <(double, double)>[(0, 1), (0.14, 0), (0.58, 0), (1, 1)];
+const _carrierAlpha = <(double, double)>[(0, 0), (0.58, 0), (1, 1)];
 
 class RenderShadeStack extends RenderBox
     with
@@ -192,11 +221,7 @@ class RenderShadeStack extends RenderBox
   RenderShadeStack({
     required this._panel,
     required this._qs,
-    required this._collapsedHeader,
-    required this._expandedHeader,
-    required this._gap,
-    required this._listGap,
-    required this._firstGridHeight,
+    required this._quickTilesHeight,
     required this._mediaActive,
     required this.onTravel,
   });
@@ -223,43 +248,11 @@ class RenderShadeStack extends RenderBox
     markNeedsPaint();
   }
 
-  double _collapsedHeader;
-  double get collapsedHeader => _collapsedHeader;
-  set collapsedHeader(double value) {
-    if (value == _collapsedHeader) return;
-    _collapsedHeader = value;
-    markNeedsLayout();
-  }
-
-  double _expandedHeader;
-  double get expandedHeader => _expandedHeader;
-  set expandedHeader(double value) {
-    if (value == _expandedHeader) return;
-    _expandedHeader = value;
-    markNeedsLayout();
-  }
-
-  double _gap;
-  double get gap => _gap;
-  set gap(double value) {
-    if (value == _gap) return;
-    _gap = value;
-    markNeedsLayout();
-  }
-
-  double _listGap;
-  double get listGap => _listGap;
-  set listGap(double value) {
-    if (value == _listGap) return;
-    _listGap = value;
-    markNeedsLayout();
-  }
-
-  double _firstGridHeight;
-  double get firstGridHeight => _firstGridHeight;
-  set firstGridHeight(double value) {
-    if (value == _firstGridHeight) return;
-    _firstGridHeight = value;
+  double _quickTilesHeight;
+  double get quickTilesHeight => _quickTilesHeight;
+  set quickTilesHeight(double value) {
+    if (value == _quickTilesHeight) return;
+    _quickTilesHeight = value;
     markNeedsLayout();
   }
 
@@ -271,13 +264,10 @@ class RenderShadeStack extends RenderBox
     markNeedsLayout();
   }
 
-  // Part sizes from the last layout.
-  double _sliderHeight = 0;
-  double _gridHeight = 0;
-  double _fullGridHeight = 0;
-  double _mediaHeight = 0;
-  double _footerHeight = 0;
-  double _quickTilesBottom = 0;
+  /// The quick tiles' bottom (with an active media player) and the stack's
+  /// top under them, from the last layout.
+  double _quickBottom = 0;
+  double _stackTop = 0;
 
   @override
   void setupParentData(RenderBox child) {
@@ -306,6 +296,7 @@ class RenderShadeStack extends RenderBox
       final data = child.parentData! as _ShadeStackParentData;
       data.clipLayer.layer = null;
       data.opacityLayer.layer = null;
+      data.transformLayer.layer = null;
     }
     super.dispose();
   }
@@ -318,6 +309,9 @@ class RenderShadeStack extends RenderBox
     }
     return null;
   }
+
+  double _height(ShadePart part) => _child(part)?.size.height ?? 0;
+  double _width(ShadePart part) => _child(part)?.size.width ?? 0;
 
   @override
   bool get isRepaintBoundary => true;
@@ -332,124 +326,172 @@ class RenderShadeStack extends RenderBox
   void performLayout() {
     size = constraints.biggest;
     final width = size.width;
-    double layout(ShadePart part, {double? height}) {
-      final child = _child(part);
-      if (child == null) return 0;
-      child.layout(
-        height == null
-            ? BoxConstraints.tightFor(width: width)
-            : BoxConstraints.tightFor(width: width, height: height),
-        parentUsesSize: true,
-      );
-      return child.size.height;
+    for (var child = firstChild; child != null; child = childAfter(child)) {
+      final part = (child.parentData! as _ShadeStackParentData).part;
+      switch (part) {
+        // The header's parts take their own width.
+        case ShadePart.clock ||
+            ShadePart.date ||
+            ShadePart.icons ||
+            ShadePart.carrier:
+          child.layout(
+            BoxConstraints.loose(Size(width, 120)),
+            parentUsesSize: true,
+          );
+        case ShadePart.list:
+          break;
+        default:
+          child.layout(
+            BoxConstraints.tightFor(width: width),
+            parentUsesSize: true,
+          );
+      }
     }
-
-    layout(ShadePart.collapsedHeader, height: collapsedHeader);
-    layout(ShadePart.expandedHeader, height: expandedHeader);
-    _sliderHeight = layout(ShadePart.slider);
-    _gridHeight = layout(ShadePart.grid);
-    _fullGridHeight = _gridHeight + layout(ShadePart.gridFooter);
-    _mediaHeight = layout(ShadePart.media);
-    _footerHeight = layout(ShadePart.footer);
-    _quickTilesBottom =
-        collapsedHeader +
-        gap +
-        firstGridHeight +
-        (mediaActive ? _mediaHeight : 0);
-    layout(
-      ShadePart.list,
-      height: math.max(0, size.height - _quickTilesBottom - listGap),
+    _quickBottom =
+        _Places.quickGridTop +
+        quickTilesHeight +
+        (mediaActive ? _height(ShadePart.media) : 0);
+    _stackTop = _quickBottom + _Places.stackGap;
+    _child(ShadePart.list)?.layout(
+      BoxConstraints.tightFor(
+        width: width,
+        height: math.max(0, size.height - _stackTop),
+      ),
+      parentUsesSize: true,
     );
-    onTravel(
-      expandedHeader -
-          collapsedHeader +
-          _sliderHeight +
-          _fullGridHeight -
-          firstGridHeight +
-          (mediaActive ? 0 : _mediaHeight) +
-          _footerHeight,
-    );
+    onTravel(size.height + _Places.stackPastBottom - _stackTop);
   }
 
-  /// Where each part is and how much of it shows at the current fractions.
+  /// Where each part is, how big and how visible at the current fractions.
   void _place() {
-    final f = _Frame(this);
+    final e = qs.value.clamp(0.0, 1.0);
+    final p = panel.value.clamp(0.0, 1.0);
     final width = size.width;
+    final anchor = lerpDouble(_Places.quickGridTop, _Places.fullGridTop, e)!;
+    final contentAlpha = ((e - 0.43) / 0.57).clamp(0.0, 1.0);
+    final footerAlpha = ((e - 0.9) / 0.1).clamp(0.0, 1.0);
+    // The stack rests at restTop; on the first pull its top comes down
+    // from the screen's top with the panel (AOSP's stackY), uncovering the
+    // quick settings, which are cut there and neither move nor fade.
+    final restTop = lerpDouble(
+      _stackTop,
+      size.height + _Places.stackPastBottom,
+      e,
+    )!;
+    final stackTop = e > 0 ? restTop : _stackTop * p;
+    final headerAlpha = ShadeReveal.headerAlpha(p);
+    final qsClip = Rect.fromLTRB(-width, -size.height, width * 2, stackTop);
+    final gridHeight = _height(ShadePart.grid);
+    final fullMediaTop =
+        _Places.fullGridTop +
+        gridHeight +
+        _height(ShadePart.gridFooter) +
+        _Places.mediaGap;
+    final quickMediaTop =
+        _Places.quickGridTop + quickTilesHeight + _Places.mediaGap;
+
     for (var child = firstChild; child != null; child = childAfter(child)) {
       final data = child.parentData! as _ShadeStackParentData;
       final h = child.size.height;
-      double top;
-      double clipTop;
-      double clipBottom;
-      double alpha;
-      bool hittable;
+      final w = child.size.width;
+      var x = 0.0;
+      var y = 0.0;
+      var scale = 1.0;
+      var alpha = 1.0;
+      Rect? clip = qsClip;
+      var hittable = true;
       switch (data.part) {
-        case ShadePart.collapsedHeader:
-          top = 0;
-          clipTop = 0;
-          clipBottom = f.headerHeight;
-          alpha = (1 - f.expansion * 2).clamp(0.0, 1.0);
+        case ShadePart.clock:
+          // Scaled about its left edge and vertical centre.
+          final centre = lerpDouble(
+            _Places.quickRowCentre,
+            _Places.clockCentre,
+            e,
+          )!;
+          scale = lerpDouble(1, _Places.clockScale, e)!;
+          y = centre - h * scale / 2;
+          clip = null;
           hittable = false;
-        case ShadePart.expandedHeader:
-          // Its content sits at its bottom, which follows the header's.
-          top = f.headerHeight - h;
-          clipTop = 0;
-          clipBottom = f.headerHeight;
-          alpha = ((f.expansion - 0.4) / 0.6).clamp(0.0, 1.0);
+        case ShadePart.date:
+          final fromX = _width(ShadePart.clock) + _Places.dateAfterClock;
+          x = lerpDouble(fromX, 0, _keyframed(e, _hiddenX))!;
+          final centre = lerpDouble(
+            _Places.quickRowCentre,
+            _Places.dateCentre,
+            _keyframed(e, _hiddenY),
+          )!;
+          y = centre - h / 2;
+          alpha = _keyframed(e, _hiddenAlpha);
+          clip = null;
+          hittable = false;
+        case ShadePart.icons:
+          x = width - w;
+          final centre = lerpDouble(
+            _Places.quickRowCentre,
+            _Places.dateCentre,
+            _keyframed(e, _hiddenY),
+          )!;
+          y = centre - h / 2;
+          alpha = _keyframed(e, _hiddenAlpha);
+          clip = null;
+          hittable = false;
+        case ShadePart.carrier:
+          x = width - w;
+          final centre = lerpDouble(
+            _Places.quickRowCentre,
+            _Places.carrierCentre,
+            e,
+          )!;
+          y = centre - h / 2;
+          alpha = _keyframed(e, _carrierAlpha);
+          clip = null;
           hittable = false;
         case ShadePart.slider:
-          // Grows in above the tiles, its bottom part first.
-          top = f.headerHeight + f.sliderShown - h;
-          clipTop = f.headerHeight;
-          clipBottom = f.headerHeight + f.sliderShown;
-          alpha = f.qsAlpha;
+          y = anchor - _Places.sliderAboveGrid;
+          alpha = contentAlpha;
           hittable = alpha > 0.5;
         case ShadePart.grid:
-          top = f.gridTop;
-          clipTop = f.gridTop;
-          clipBottom = f.gridTop + f.gridShown;
-          alpha = 1;
-          hittable = true;
+          // Its shared rows stay opaque; the others fade with the content
+          // inside the grid (QsTileMotion).
+          y = anchor;
         case ShadePart.gridFooter:
-          top = f.gridTop + _gridHeight;
-          clipTop = f.gridTop;
-          clipBottom = f.gridTop + f.gridShown;
-          alpha = f.qsAlpha;
+          y = anchor + gridHeight;
+          alpha = contentAlpha;
           hittable = alpha > 0.5;
         case ShadePart.media:
-          top = f.mediaTop;
-          clipTop = f.mediaTop;
-          clipBottom = f.mediaTop + f.mediaShown;
-          alpha = mediaActive ? 1 : f.qsAlpha;
-          hittable = alpha > 0.5;
+          // The child carries the gap above it.
+          if (mediaActive) {
+            y = lerpDouble(quickMediaTop, fullMediaTop, e)! - _Places.mediaGap;
+          } else {
+            y = fullMediaTop - _Places.fullGridTop + anchor - _Places.mediaGap;
+            alpha = contentAlpha;
+            hittable = alpha > 0.5;
+          }
         case ShadePart.footer:
-          top = f.footerTop;
-          clipTop = f.footerTop;
-          clipBottom = f.footerTop + f.footerShown;
-          alpha = f.footerAlpha;
-          hittable = f.expansion >= 0.99;
+          y = size.height - _Places.footerBottom - h;
+          alpha = footerAlpha;
+          clip = null;
+          hittable = e >= 0.99;
         case ShadePart.list:
-          top = f.listTop;
-          clipTop = f.listTop;
-          clipBottom = size.height;
-          alpha = f.listAlpha;
-          hittable = f.expansion <= 0.01;
+          // The list rises to stackTop by itself (NotificationShadeList).
+          y = restTop;
+          alpha = AndroidStackExpansion.alpha(p);
+          clip = Rect.fromLTRB(-width, stackTop, width * 2, size.height);
+          hittable = e <= 0.01;
         case null:
-          top = 0;
-          clipTop = 0;
-          clipBottom = 0;
           alpha = 0;
-          hittable = false;
       }
-      if (data.part != ShadePart.list) {
-        top += f.parallax;
-        clipTop += f.parallax;
-        clipBottom += f.parallax;
-        alpha *= f.contentAlpha;
+      if (data.part
+          case ShadePart.clock ||
+              ShadePart.date ||
+              ShadePart.icons ||
+              ShadePart.carrier) {
+        alpha *= headerAlpha;
       }
       data
-        ..place = Offset(0, top)
-        ..clip = Rect.fromLTRB(0, clipTop, width, math.max(clipTop, clipBottom))
+        ..place = Offset(x, y)
+        ..scale = scale
+        ..clip = clip
         ..alpha = alpha
         ..hittable = hittable && alpha > 0;
     }
@@ -461,31 +503,57 @@ class RenderShadeStack extends RenderBox
     for (var child = firstChild; child != null; child = childAfter(child)) {
       final data = child.parentData! as _ShadeStackParentData;
       final alpha = (data.alpha * 255).round();
-      if (alpha <= 0 || data.clip.isEmpty) {
+      final clip = data.clip;
+      if (alpha <= 0 || (clip != null && clip.height <= 0)) {
         data.clipLayer.layer = null;
         data.opacityLayer.layer = null;
+        data.transformLayer.layer = null;
         continue;
       }
-      data.clipLayer.layer = context.pushClipRect(
-        needsCompositing,
-        offset,
-        data.clip,
-        (context, offset) {
-          if (alpha >= 255) {
-            data.opacityLayer.layer = null;
-            context.paintChild(child!, offset + data.place);
-            return;
-          }
-          data.opacityLayer.layer = context.pushOpacity(
-            offset,
-            alpha,
-            (context, offset) =>
-                context.paintChild(child!, offset + data.place),
-            oldLayer: data.opacityLayer.layer,
-          );
-        },
-        oldLayer: data.clipLayer.layer,
-      );
+      void faded(PaintingContext context, Offset offset) {
+        if (alpha >= 255) {
+          data.opacityLayer.layer = null;
+          context.paintChild(child!, offset);
+          return;
+        }
+        data.opacityLayer.layer = context.pushOpacity(
+          offset,
+          alpha,
+          (context, offset) => context.paintChild(child!, offset),
+          oldLayer: data.opacityLayer.layer,
+        );
+      }
+
+      void placed(PaintingContext context, Offset offset) {
+        final at = offset + data.place;
+        if (data.scale == 1) {
+          data.transformLayer.layer = null;
+          faded(context, at);
+          return;
+        }
+        final transform = Matrix4.translationValues(at.dx, at.dy, 0)
+          ..scaleByDouble(data.scale, data.scale, 1, 1);
+        data.transformLayer.layer = context.pushTransform(
+          needsCompositing,
+          Offset.zero,
+          transform,
+          faded,
+          oldLayer: data.transformLayer.layer,
+        );
+      }
+
+      if (clip == null) {
+        data.clipLayer.layer = null;
+        placed(context, offset);
+      } else {
+        data.clipLayer.layer = context.pushClipRect(
+          needsCompositing,
+          offset,
+          clip,
+          placed,
+          oldLayer: data.clipLayer.layer,
+        );
+      }
     }
   }
 
@@ -494,7 +562,9 @@ class RenderShadeStack extends RenderBox
     _place();
     for (var child = lastChild; child != null; child = childBefore(child)) {
       final data = child.parentData! as _ShadeStackParentData;
-      if (!data.hittable || !data.clip.contains(position)) continue;
+      if (!data.hittable) continue;
+      final clip = data.clip;
+      if (clip != null && !clip.contains(position)) continue;
       final hit = result.addWithPaintOffset(
         offset: data.place,
         position: position,
@@ -509,6 +579,8 @@ class RenderShadeStack extends RenderBox
   @override
   void applyPaintTransform(RenderBox child, Matrix4 transform) {
     final data = child.parentData! as _ShadeStackParentData;
-    transform.translateByDouble(data.place.dx, data.place.dy, 0, 1);
+    transform
+      ..translateByDouble(data.place.dx, data.place.dy, 0, 1)
+      ..scaleByDouble(data.scale, data.scale, 1, 1);
   }
 }

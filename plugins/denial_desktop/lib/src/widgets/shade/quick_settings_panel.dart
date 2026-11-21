@@ -93,6 +93,7 @@ class QuickSettingsShade extends ConsumerWidget {
         ignoring: !active,
         child: ShadeBackdropScene(
           progress: progress,
+          blur: expansion.blur,
           cached: false,
           child: BackdropGroup(
             child: ClipRect(
@@ -335,14 +336,8 @@ class _PixelShade extends ConsumerStatefulWidget {
 
 class _PixelShadeState extends ConsumerState<_PixelShade>
     with SingleTickerProviderStateMixin {
-  /// Status row of the first pull, and the full header with its clock,
-  /// below the shade's top inset of 8: on EvolutionX the first pull's tiles
-  /// start 48 dp down, the full quick settings' slider 150 dp.
-  static const double _collapsedHeader = 40;
-  static const double _expandedHeader = 142;
-
-  /// The full quick settings' footer actions under the tiles: 8 dp, then a
-  /// 48 dp row (AOSP's footer actions).
+  /// The full quick settings' footer actions, a 48 dp row at the bottom of
+  /// the screen (AOSP's footer actions), with 8 dp above it.
   static const double _footerHeight = 56;
 
   /// The quick settings' fraction: 0 the quick tiles, 1 the full QS.
@@ -361,6 +356,21 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
   /// only in the full quick settings): rebuilt only when crossed.
   final ValueNotifier<bool> _qsCollapsed = ValueNotifier<bool>(true);
   final ValueNotifier<bool> _qsFull = ValueNotifier<bool>(false);
+
+  /// The first tile page's motion: its two quick-tile rows are squashed
+  /// (AOSP's QS squishiness) while the stack's top uncovers them, the other
+  /// rows fade in with the quick settings' content.
+  late final QsTileMotion _tileMotion = QsTileMotion(
+    sharedRows: 2,
+    squish: widget.expansion.panel.drive(
+      Animatable<double>.fromCallback(ShadeReveal.tileSquish),
+    ),
+    contentAlpha: widget.expansion.qs.drive(
+      Animatable<double>.fromCallback(
+        (e) => ((e - 0.43) / 0.57).clamp(0.0, 1.0),
+      ),
+    ),
+  );
 
   void _trackQs() {
     final e = _expansion.value;
@@ -695,7 +705,6 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
   @override
   Widget build(BuildContext context) {
     final padding = MediaQuery.paddingOf(context);
-    final top = math.max(8.0, padding.top);
     final catalog = _catalog(context);
     final tiles = _tiles(catalog);
     final pages = PixelPagedTileGrid.pagesOf(tiles);
@@ -717,35 +726,30 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
     final shade = ShadeDismissGesture(
       expansion: widget.expansion,
       child: Padding(
+        // The parts are placed from the top of the screen, as on
+        // EvolutionX.
         padding: EdgeInsets.fromLTRB(
           PixelQs.margin + padding.left,
-          top,
+          0,
           PixelQs.margin + padding.right,
           0,
         ),
         child: ShadeStackLayout(
           panel: widget.progress,
           qs: _expansion,
-          collapsedHeader: _collapsedHeader,
-          expandedHeader: _expandedHeader,
-          // EvolutionX: 14 dp from the slider to the tiles.
-          gap: 8,
-          listGap: 16,
-          firstGridHeight: twoRows,
+          quickTilesHeight: twoRows,
           mediaActive: mediaActive,
           onTravel: (travel) {
-            // The quick settings follow the finger over their growth.
+            // The finger moves the notification stack 1:1 (AOSP's quick
+            // settings expansion height).
             if (travel > 120) widget.expansion.qsTravel = travel * scale;
           },
           children: <Widget>[
-            const ShadeStackSlot(
-              part: ShadePart.collapsedHeader,
-              child: RepaintBoundary(child: _PixelHeader(expanded: false)),
-            ),
-            const ShadeStackSlot(
-              part: ShadePart.expandedHeader,
-              child: RepaintBoundary(child: _PixelHeader(expanded: true)),
-            ),
+            for (final part in _HeaderPart.values)
+              ShadeStackSlot(
+                part: part.slot,
+                child: RepaintBoundary(child: _PixelHeader(part: part)),
+              ),
             const ShadeStackSlot(
               part: ShadePart.slider,
               child: RepaintBoundary(
@@ -767,6 +771,7 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
                       tiles: tiles,
                       controller: _pages,
                       scrollable: full,
+                      motion: _tileMotion,
                     ),
                   ),
                 ),
@@ -827,8 +832,8 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
               ),
             ),
             // Notifications below the first pull's tiles; the full quick
-            // settings push them away. The rows fade and squish with the
-            // shade's expansion inside the list (AndroidStackExpansion).
+            // settings push them away. On the first pull they come down
+            // from the top squashed and fade in (AndroidStackExpansion).
             ShadeStackSlot(
               part: ShadePart.list,
               child: RepaintBoundary(
@@ -878,24 +883,28 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
 /// The shade's header: the status row (time, date, status icons) on the
 /// first pull; on the full quick settings a large clock with the date and
 /// the network's name.
-class _PixelHeader extends ConsumerWidget {
-  const _PixelHeader({required this.expanded});
+/// The shade header's parts, which ShadeStackLayout moves on their own.
+enum _HeaderPart {
+  clock(ShadePart.clock),
+  date(ShadePart.date),
+  icons(ShadePart.icons),
+  carrier(ShadePart.carrier);
 
-  /// The full quick settings' header, else the first pull's status row.
-  /// ShadeStackLayout fades between the two.
-  final bool expanded;
+  const _HeaderPart(this.slot);
+  final ShadePart slot;
+}
+
+/// One part of the shade header (time, date, status icons, operator), at
+/// the first pull's size; the full quick settings' clock is this one
+/// scaled (AOSP qqs_expand_clock_scale).
+class _PixelHeader extends ConsumerWidget {
+  const _PixelHeader({required this.part});
+
+  final _HeaderPart part;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = phoneSchemeOf(context);
-    final now = ref.watch(clockProvider).value ?? DateTime.now();
-    final time = localizedTime(context, now);
-    // Android's short date ("Sat, 21 Nov"), which always fits.
-    final date = localizedShortDate(context, now);
-    final battery = ref.watch(batteryProvider);
-    final operator = expanded
-        ? ref.watch(mobileNetworkProvider).value?.operatorName ?? ''
-        : '';
     // The header's text and icons keep the size the owner chose (set when
     // the shade was 374 dp wide), a little larger than EvolutionX's.
     final text = TextStyle(
@@ -904,72 +913,36 @@ class _PixelHeader extends ConsumerWidget {
       fontWeight: FontWeight.w500,
       height: 1.2,
     );
-    // The cluster is drawn in Denial's units; in dp it would come out
-    // larger than Android's.
-    final icons = StatusCluster(
-      battery: battery,
-      color: scheme.onSurface,
-      scale: phoneStatusIconScale,
-    );
-    // EvolutionX centres the first pull's status row 26 dp down.
-    final collapsed = Row(
-      children: <Widget>[
-        Text(time, style: text),
-        const SizedBox(width: 11),
-        Expanded(
-          child: Text(
-            date,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: text,
-          ),
+    final Widget child = switch (part) {
+      _HeaderPart.clock => Text(
+        localizedTime(
+          context,
+          ref.watch(clockProvider).value ?? DateTime.now(),
         ),
-        icons,
-      ],
-    );
-    final full = Column(
-      mainAxisAlignment: MainAxisAlignment.end,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: <Widget>[
-            Text(
-              time,
-              style: TextStyle(
-                color: scheme.onSurface,
-                fontSize: 44.5,
-                fontWeight: FontWeight.w500,
-                height: 1,
-              ),
-            ),
-            const Spacer(),
-            if (operator.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 4.5),
-                child: Text(operator.toUpperCase(), style: text),
-              ),
-          ],
+        style: text,
+      ),
+      // Android's short date ("Sat, 21 Nov"), which always fits.
+      _HeaderPart.date => Text(
+        localizedShortDate(
+          context,
+          ref.watch(clockProvider).value ?? DateTime.now(),
         ),
-        // EvolutionX: the clock ends 84 dp down, the date row is centred at
-        // 108 dp and the slider starts at 150 dp.
-        const SizedBox(height: 6),
-        Row(
-          children: <Widget>[
-            Expanded(
-              child: Text(
-                date,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: text,
-              ),
-            ),
-            icons,
-          ],
-        ),
-        const SizedBox(height: 32),
-      ],
-    );
+        maxLines: 1,
+        style: text,
+      ),
+      // The cluster is drawn in Denial's units; in dp it would come out
+      // larger than Android's.
+      _HeaderPart.icons => StatusCluster(
+        battery: ref.watch(batteryProvider),
+        color: scheme.onSurface,
+        scale: phoneStatusIconScale,
+      ),
+      _HeaderPart.carrier => Text(
+        (ref.watch(mobileNetworkProvider).value?.operatorName ?? '')
+            .toUpperCase(),
+        style: text,
+      ),
+    };
     // The owner keeps the header's time, date and status text at their
     // full size: undo the shade's text scale here.
     final media = MediaQuery.of(context);
@@ -979,17 +952,7 @@ class _PixelHeader extends ConsumerWidget {
           media.textScaler.scale(1) / phoneTextScale,
         ),
       ),
-      child: IgnorePointer(
-        child: expanded
-            ? full
-            : Align(
-                alignment: Alignment.topCenter,
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: collapsed,
-                ),
-              ),
-      ),
+      child: IgnorePointer(child: child),
     );
   }
 }

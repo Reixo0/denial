@@ -228,10 +228,13 @@ class _ShadeStatusBarState extends ConsumerState<ShadeStatusBar> {
             // over the clock and icons.
             child: RepaintBoundary(
               child: AnimatedBuilder(
-                animation: progress,
+                animation: Listenable.merge([progress, expansion.engaged]),
                 builder: (context, row) {
-                  final covered = AospShadeInterpolation.scrimAlpha(
-                    progress.value,
+                  // The icons leave as soon as the shade moves, on a short
+                  // fade of their own (CollapsedStatusBarFragment).
+                  final covered = math.max(
+                    AospShadeInterpolation.scrimAlpha(progress.value),
+                    expansion.engaged.value,
                   );
                   if (covered >= 1 || !shown) return const SizedBox.expand();
                   return Opacity(opacity: 1 - covered, child: row);

@@ -13,10 +13,14 @@ class ShadeBackdropScene extends SingleChildRenderObjectWidget {
   const ShadeBackdropScene({
     required this.progress,
     required super.child,
+    this.blur,
     this.cached = false,
     super.key,
   });
   final Animation<double> progress;
+
+  /// How much to blur, 0 to 1; by default the scrim's alpha at [progress].
+  final Animation<double>? blur;
 
   /// The shade shows a backdrop frosted once instead of live material. It
   /// dims the scene with [dim] itself, so this neither dims nor filters.
@@ -33,31 +37,52 @@ class ShadeBackdropScene extends SingleChildRenderObjectWidget {
 
   @override
   RenderObject createRenderObject(BuildContext context) =>
-      RenderShadeBackdropScene(progress, ShellTheme.of(context), cached);
+      RenderShadeBackdropScene(
+        progress,
+        ShellTheme.of(context),
+        cached,
+        blur: blur,
+      );
 
   @override
   void updateRenderObject(
     BuildContext context,
     covariant RenderShadeBackdropScene renderObject,
   ) {
-    renderObject.update(progress, ShellTheme.of(context), cached);
+    renderObject.update(progress, ShellTheme.of(context), cached, blur: blur);
   }
 }
 
 class RenderShadeBackdropScene extends RenderProxyBox {
-  RenderShadeBackdropScene(this._progress, this._theme, this._cached);
+  RenderShadeBackdropScene(
+    this._progress,
+    this._theme,
+    this._cached, {
+    this._blur,
+  });
   Animation<double> _progress;
+  Animation<double>? _blur;
   ShellThemeData _theme;
   bool _cached;
   final _regions = <_RenderShadeBackdropRegion>{};
   final _clip = LayerHandle<ClipPathLayer>();
   final _filter = LayerHandle<BackdropFilterLayer>();
 
-  void update(Animation<double> progress, ShellThemeData theme, bool cached) {
+  void update(
+    Animation<double> progress,
+    ShellThemeData theme,
+    bool cached, {
+    Animation<double>? blur,
+  }) {
     if (_progress != progress) {
       if (attached) _progress.removeListener(markNeedsPaint);
       _progress = progress;
       if (attached) _progress.addListener(markNeedsPaint);
+    }
+    if (_blur != blur) {
+      if (attached) _blur?.removeListener(markNeedsPaint);
+      _blur = blur;
+      if (attached) _blur?.addListener(markNeedsPaint);
     }
     _theme = theme;
     _cached = cached;
@@ -79,11 +104,13 @@ class RenderShadeBackdropScene extends RenderProxyBox {
   void attach(PipelineOwner owner) {
     super.attach(owner);
     _progress.addListener(markNeedsPaint);
+    _blur?.addListener(markNeedsPaint);
   }
 
   @override
   void detach() {
     _progress.removeListener(markNeedsPaint);
+    _blur?.removeListener(markNeedsPaint);
     super.detach();
   }
 
@@ -94,14 +121,15 @@ class RenderShadeBackdropScene extends RenderProxyBox {
       super.paint(context, offset);
       return;
     }
-    final blurFraction = AospShadeInterpolation.scrimAlpha(_progress.value);
+    final scrim = AospShadeInterpolation.scrimAlpha(_progress.value);
+    final blurFraction = _blur?.value ?? scrim;
     // Dim the scene before taking its shared backdrop sample. The panel and
     // cards stay bright, and the shade follows interactive motion directly.
     context.canvas.drawRect(
       offset & size,
       Paint()
         ..color = ShadeBackdropScene.dim.withValues(
-          alpha: ShadeBackdropScene.dim.a * blurFraction,
+          alpha: ShadeBackdropScene.dim.a * scrim,
         ),
     );
     if (_theme.transparencyMode == ShellTransparencyMode.blur &&
