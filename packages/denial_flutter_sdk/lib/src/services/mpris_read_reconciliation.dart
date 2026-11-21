@@ -50,23 +50,11 @@ final class MprisReadReconciliation {
     );
     if (state == null || !_clockChanged) return state;
     final length = state.length;
-    return MprisPlaybackState(
-      serviceName: state.serviceName,
-      identity: state.identity,
-      title: state.title,
-      artists: state.artists,
-      album: state.album,
-      artUrl: state.artUrl,
-      length: length,
+    return state.copyWith(
       position: length > Duration.zero && current.position > length
           ? length
           : current.position,
       observedAt: current.observedAt,
-      status: state.status,
-      canGoNext: state.canGoNext,
-      canGoPrevious: state.canGoPrevious,
-      canPlay: state.canPlay,
-      canPause: state.canPause,
     );
   }
 }

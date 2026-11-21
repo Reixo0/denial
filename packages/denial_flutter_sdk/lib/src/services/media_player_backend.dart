@@ -46,6 +46,7 @@ class MediaPlayerService {
 
   StreamSubscription<DBusNameOwnerChangedEvent>? _ownerSubscription;
   StreamSubscription<DBusPropertiesChangedSignal>? _propertiesSubscription;
+  StreamSubscription<DBusSignal>? _seekedSubscription;
   Timer? _refreshTimer;
   Timer? _signalTimer;
   Timer? _unavailableTimer;
@@ -133,6 +134,54 @@ class MediaPlayerService {
     }
   }
 
+  Future<void> play() => _invoke('Play', _current.canPlay);
+
+  Future<void> pause() => _invoke('Pause', _current.canPause);
+
+  /// Jumps to [position] in the current track (MPRIS `SetPosition`).
+  Future<void> seekTo(Duration position) async {
+    final object = _activeObject;
+    final current = _current;
+    if (object == null || !current.canSeek || _disposed) return;
+    if (current.trackId.isEmpty || !current.trackId.startsWith('/')) return;
+    final target = position < Duration.zero
+        ? Duration.zero
+        : current.length > Duration.zero && position > current.length
+        ? current.length
+        : position;
+    // Show the new position at once; the player's Seeked confirms it.
+    _emit(current.copyWith(position: target, observedAt: _now()));
+    try {
+      await object
+          .callMethod(_playerInterface, 'SetPosition', <DBusValue>[
+            DBusObjectPath(current.trackId),
+            DBusInt64(target.inMicroseconds),
+          ], replySignature: DBusSignature(''))
+          .timeout(_methodTimeout);
+    } on Object {
+      // The player can disappear between the drag and its release.
+    }
+  }
+
+  /// Presses one of the player's own buttons ([MprisCustomAction.id]).
+  Future<void> invokeAction(String id) async {
+    final object = _activeObject;
+    if (object == null ||
+        _disposed ||
+        !_current.actions.any((action) => action.id == id)) {
+      return;
+    }
+    try {
+      await object
+          .callMethod(mprisActionsInterface, 'Invoke', <DBusValue>[
+            DBusString(id),
+          ], replySignature: DBusSignature(''))
+          .timeout(_methodTimeout);
+    } on Object {
+      // The player can disappear between hover and click.
+    }
+  }
+
   Future<void> previous() => _invoke('Previous', _current.canGoPrevious);
 
   Future<void> next() => _invoke('Next', _current.canGoNext);
@@ -178,18 +227,27 @@ class MediaPlayerService {
         ? _activeRead = MprisReadReconciliation(_current)
         : null;
     try {
-      final (player, root) = await (
+      final (player, root, actions) = await (
         object
             .getAllProperties(_playerInterface)
             .timeout(_readTimeout)
             .then((properties) => (properties: properties, observedAt: _now())),
         object.getAllProperties(_rootInterface).timeout(_readTimeout),
+        // Only Droidloom's players have their own buttons.
+        object
+            .getAllProperties(mprisActionsInterface)
+            .timeout(_readTimeout)
+            .then(
+              (properties) => parseMprisCustomActions(properties['Actions']),
+              onError: (Object _) => const <MprisCustomAction>[],
+            ),
       ).wait;
       if (_disposed) return null;
       return _MprisRead(
         object: object,
         player: player.properties,
         root: root,
+        actions: actions,
         observedAt: player.observedAt,
         changes: changes,
       );
@@ -203,19 +261,51 @@ class MediaPlayerService {
       return;
     }
     final previous = _propertiesSubscription;
+    final previousSeeked = _seekedSubscription;
     _propertiesSubscription = null;
+    _seekedSubscription = null;
     await previous?.cancel();
+    await previousSeeked?.cancel();
     if (_disposed) return;
     _activeObject = object;
     if (object != null) {
       _propertiesSubscription = object.propertiesChanged
-          .where((signal) => signal.propertiesInterface == _playerInterface)
+          .where(
+            (signal) =>
+                signal.propertiesInterface == _playerInterface ||
+                signal.propertiesInterface == mprisActionsInterface,
+          )
           .listen(_handlePropertiesChanged, onError: (_) => _scheduleRefresh());
+      _seekedSubscription =
+          DBusRemoteObjectSignalStream(
+            object: object,
+            interface: _playerInterface,
+            name: 'Seeked',
+            signature: DBusSignature('x'),
+          ).listen((signal) {
+            if (_disposed || _activeObject?.name != _current.serviceName) {
+              return;
+            }
+            final micros = (signal.values.first as DBusInt64).value;
+            _emit(
+              _current.copyWith(
+                position: Duration(microseconds: micros < 0 ? 0 : micros),
+                observedAt: _now(),
+              ),
+            );
+          }, onError: (_) {});
     }
   }
 
   void _handlePropertiesChanged(DBusPropertiesChangedSignal signal) {
     if (_disposed || _activeObject?.name != _current.serviceName) {
+      return;
+    }
+    if (signal.propertiesInterface == mprisActionsInterface) {
+      final actions = signal.changedProperties['Actions'];
+      if (actions != null) {
+        _emit(_current.copyWith(actions: parseMprisCustomActions(actions)));
+      }
       return;
     }
     if (signal.values[2].asStringArray().any(mprisPlayerProperties.contains)) {
@@ -297,6 +387,7 @@ class MediaPlayerService {
     _unavailableTimer?.cancel();
     await _ownerSubscription?.cancel();
     await _propertiesSubscription?.cancel();
+    await _seekedSubscription?.cancel();
     await _snapshots.close();
     await _client.close();
   }
@@ -311,15 +402,17 @@ class const _MprisRead({
   required final DBusRemoteObject object,
   required final Map<String, DBusValue> player,
   required final Map<String, DBusValue> root,
+  required final List<MprisCustomAction> actions,
   required final DateTime observedAt,
   required final MprisReadReconciliation? changes,
 }) {
   MprisPlaybackState? resolve() {
     try {
       final reconciliation = changes;
-      return reconciliation == null
+      final state = reconciliation == null
           ? parseMprisPlaybackState(object.name, player, root, observedAt)
           : reconciliation.resolve(object.name, player, root, observedAt);
+      return actions.isEmpty ? state : state?.copyWith(actions: actions);
     } on Object {
       // One malformed player must not discard the other candidates.
       return null;

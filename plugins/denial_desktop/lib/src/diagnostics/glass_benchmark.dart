@@ -41,7 +41,20 @@ class _GlassBenchmark extends StatefulWidget {
 
 class _GlassBenchmarkState extends State<_GlassBenchmark>
     with TickerProviderStateMixin {
-  static const _phases = ['hidden', 'stationary', 'moving', 'moving_backdrop'];
+  static const _phases = [
+    'hidden',
+    'stationary',
+    'moving',
+    'moving_backdrop',
+    // A slow pull of the shade from closed to open and back (2.5 s each
+    // way), then a slow pull of the quick settings from the quick tiles to
+    // full and back (3 s each way): the gestures the owner finds choppy.
+    'pull',
+    'qs',
+  ];
+
+  /// The phases this run measures (indices into [_phases]), in order.
+  var _plan = <int>[0, 1, 2, 3];
   static const _warmupUs = 3000000;
   static const _measureUs = 12000000;
   static const _phaseUs = _warmupUs + _measureUs;
@@ -161,6 +174,15 @@ class _GlassBenchmarkState extends State<_GlassBenchmark>
                 }),
               );
             case 'run':
+              final phases = request['phases'];
+              final plan = phases == null
+                  ? const <int>[0, 1, 2, 3]
+                  : phases is List &&
+                        phases.isNotEmpty &&
+                        phases.length <= _phases.length &&
+                        phases.every(_phases.contains)
+                  ? [for (final name in phases) _phases.indexOf(name as String)]
+                  : throw ArgumentError('Unknown phase');
               final name = request['name'] ?? 'glass';
               if (name is! String ||
                   !RegExp(r'^[a-z0-9_-]{1,64}$').hasMatch(name)) {
@@ -169,7 +191,7 @@ class _GlassBenchmarkState extends State<_GlassBenchmark>
               final output =
                   '${File(widget.output).parent.path}/'
                   '$name-${DateTime.now().microsecondsSinceEpoch}.json';
-              await _requestRun(output, const Duration(seconds: 1));
+              await _requestRun(output, const Duration(seconds: 1), plan);
               client.writeln(jsonEncode({'accepted': true, 'output': output}));
             case 'cancel':
               if (_preparing) throw StateError('Measurement is preparing');
@@ -198,9 +220,14 @@ class _GlassBenchmarkState extends State<_GlassBenchmark>
     );
   }
 
-  Future<void> _requestRun(String output, Duration delay) async {
+  Future<void> _requestRun(
+    String output,
+    Duration delay, [
+    List<int> plan = const <int>[0, 1, 2, 3],
+  ]) async {
     if (_running) throw StateError('A measurement is already running');
     _preparing = true;
+    _plan = plan;
     try {
       await File(output).create(exclusive: true);
       if (!mounted) return;
@@ -237,7 +264,10 @@ class _GlassBenchmarkState extends State<_GlassBenchmark>
       'measurement_us': _measureUs,
     });
     SchedulerBinding.instance.addTimingsCallback(_recordTimings);
-    _watchdog = Timer(const Duration(seconds: 90), () => _finish('stalled'));
+    _watchdog = Timer(
+      Duration(microseconds: _phaseUs * _plan.length + 30000000),
+      () => _finish('stalled'),
+    );
     debugPrint('Denial glass benchmark started ${jsonEncode(_metadata)}');
     _ticker.start();
   }
@@ -246,8 +276,8 @@ class _GlassBenchmarkState extends State<_GlassBenchmark>
     final elapsedUs = elapsed.inMicroseconds;
     final now =
         SchedulerBinding.instance.currentSystemFrameTimeStamp.inMicroseconds;
-    final next = elapsedUs ~/ _phaseUs;
-    if (next >= _phases.length) {
+    final step = elapsedUs ~/ _phaseUs;
+    if (step >= _plan.length) {
       if (_phase >= 0) _ends[_phase] = now;
       _ticker.stop();
       _watchdog?.cancel();
@@ -259,6 +289,7 @@ class _GlassBenchmarkState extends State<_GlassBenchmark>
       );
       return;
     }
+    final next = _plan[step];
     if (_phase != next) {
       if (_phase >= 0) _ends[_phase] = now;
       setState(() => _phase = next);
@@ -274,7 +305,25 @@ class _GlassBenchmarkState extends State<_GlassBenchmark>
       return;
     }
     final wave = math.sin(elapsedUs / 1000000 * math.pi);
-    _progress.value = next == 2 ? 0.55 + 0.4 * wave : 1;
+    double triangle(double seconds) {
+      final t = (phaseTime / 1000000 / seconds) % 2;
+      return Curves.easeInOut.transform(t <= 1 ? t : 2 - t);
+    }
+
+    switch (_phases[next]) {
+      case 'moving':
+        _progress.value = 0.55 + 0.4 * wave;
+        _shade.qs.value = 0;
+      case 'pull':
+        _progress.value = triangle(2.5);
+        _shade.qs.value = 0;
+      case 'qs':
+        _progress.value = 1;
+        _shade.qs.value = triangle(3);
+      default:
+        _progress.value = 1;
+        _shade.qs.value = 0;
+    }
     final size = MediaQuery.sizeOf(context);
     _backdrop.value = Offset(size.width * 0.32 * (1 + wave), 0);
     // A small foreground repaint keeps stationary/hidden phases rendering
@@ -293,7 +342,7 @@ class _GlassBenchmarkState extends State<_GlassBenchmark>
     _watchdog?.cancel();
     SchedulerBinding.instance.removeTimingsCallback(_recordTimings);
     final results = <Map<String, Object?>>[];
-    for (var i = 0; i < _phases.length; i++) {
+    for (final i in _plan) {
       final start = _starts[i];
       final end = _ends[i];
       final frames = _timings.where((frame) {

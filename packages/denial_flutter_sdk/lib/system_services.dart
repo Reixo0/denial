@@ -5,7 +5,7 @@
 library;
 
 export 'package:denial_sdk/system.dart'
-    show MprisPlaybackState, MprisPlaybackStatus;
+    show MprisCustomAction, MprisPlaybackState, MprisPlaybackStatus;
 
 export 'src/models/audio.dart'
     show

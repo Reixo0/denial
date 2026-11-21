@@ -30,16 +30,17 @@ import '../session/power_session_surface.dart';
 import 'package:denial_flutter_sdk/effects.dart';
 
 import 'quick_settings_dialogs.dart';
-import 'notification_shade_list.dart' show AndroidStackExpansion;
 import 'quick_settings_editor.dart';
 import 'quick_settings_tiles.dart';
 import '../../state/qs_tile_layout.dart';
 
 import 'mobile_notification_history.dart';
 import 'shade_backdrop_scene.dart';
+import 'pixel_media_card.dart';
 import 'shade_dismiss_gesture.dart';
 import 'shade_expansion.dart';
 import 'shade_expansion_motion.dart';
+import 'shade_stack_layout.dart';
 import 'status_glyphs.dart';
 import '../../state/phone_desk.dart';
 
@@ -355,11 +356,25 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
   /// The full quick settings' tile pages; each pull starts on the first.
   final PageController _pages = PageController();
 
+  /// Thresholds of the quick settings' fraction that change what the parts
+  /// do (the list takes touches only on the quick tiles, the pages scroll
+  /// only in the full quick settings): rebuilt only when crossed.
+  final ValueNotifier<bool> _qsCollapsed = ValueNotifier<bool>(true);
+  final ValueNotifier<bool> _qsFull = ValueNotifier<bool>(false);
+
+  void _trackQs() {
+    final e = _expansion.value;
+    _qsCollapsed.value = e < 0.01;
+    _qsFull.value = e >= 1;
+  }
+
   @override
   void initState() {
     super.initState();
     widget.progress.addListener(_trackOpen);
     _trackOpen();
+    _expansion.addListener(_trackQs);
+    _trackQs();
   }
 
   void _trackOpen() {
@@ -376,6 +391,11 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
   @override
   void didUpdateWidget(covariant _PixelShade oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.expansion.qs != widget.expansion.qs) {
+      oldWidget.expansion.qs.removeListener(_trackQs);
+      widget.expansion.qs.addListener(_trackQs);
+      _trackQs();
+    }
     if (oldWidget.progress != widget.progress) {
       oldWidget.progress.removeListener(_trackOpen);
       widget.progress.addListener(_trackOpen);
@@ -395,6 +415,9 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
   @override
   void dispose() {
     widget.progress.removeListener(_trackOpen);
+    _expansion.removeListener(_trackQs);
+    _qsCollapsed.dispose();
+    _qsFull.dispose();
     _pages.dispose();
     super.dispose();
   }
@@ -678,127 +701,19 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
     final pages = PixelPagedTileGrid.pagesOf(tiles);
     final rows = PixelPagedTileGrid.rowsOf(pages.isEmpty ? tiles : pages.first);
     final gridHeight = PixelPagedTileGrid.heightOf(tiles);
-    // The grid and AOSP's footer bar under it (page dots).
-    final fullHeight = gridHeight + PixelPagedTileGrid.footerHeight;
+    // The first pull shows the first two tile rows (Android's QQS).
     final twoRows = PixelPagedTileGrid.gridHeight(math.min(2, rows));
-    final motion = Listenable.merge(<Listenable>[_expansion, widget.progress]);
-    final tilesArea = RepaintBoundary(
-      child: AnimatedBuilder(
-        animation: motion,
-        builder: (context, _) {
-          final e = _expansion.value;
-          // The first pull shows the first two tile rows (Android's QQS).
-          final firstHeight = twoRows;
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              SizedBox(
-                height:
-                    _collapsedHeader + (_expandedHeader - _collapsedHeader) * e,
-                child: _PixelHeader(expansion: e),
-              ),
-              // The brightness slider grows in above the tiles.
-              ClipRect(
-                child: Align(
-                  alignment: Alignment.bottomCenter,
-                  heightFactor: e,
-                  // AOSP: the QS content fades in from 0.43.
-                  child: Opacity(
-                    opacity: ((e - 0.43) / 0.57).clamp(0.0, 1.0),
-                    child: const Padding(
-                      padding: EdgeInsets.only(bottom: 6),
-                      child: _BrightnessSlider(),
-                    ),
-                  ),
-                ),
-              ),
-              // EvolutionX: 14 dp from the slider to the tiles.
-              const SizedBox(height: 8),
-              // The full grid, cut to its first two rows on the first pull.
-              ClipRect(
-                child: SizedBox(
-                  height: firstHeight + (fullHeight - firstHeight) * e,
-                  child: OverflowBox(
-                    alignment: Alignment.topCenter,
-                    minHeight: fullHeight,
-                    maxHeight: fullHeight,
-                    child: Column(
-                      children: <Widget>[
-                        SizedBox(
-                          height: gridHeight,
-                          child: PixelPagedTileGrid(
-                            tiles: tiles,
-                            controller: _pages,
-                            scrollable: e >= 1,
-                          ),
-                        ),
-                        SizedBox(
-                          height: PixelPagedTileGrid.footerHeight,
-                          child: Opacity(
-                            opacity: ((e - 0.43) / 0.57).clamp(0.0, 1.0),
-                            // AOSP FooterBar: the page dots centred, the
-                            // edit button at the end.
-                            child: Row(
-                              children: <Widget>[
-                                const Spacer(),
-                                PixelPagerDots(
-                                  controller: _pages,
-                                  count: pages.length,
-                                ),
-                                Expanded(
-                                  child: Align(
-                                    alignment: AlignmentDirectional.centerEnd,
-                                    child: _EditButton(
-                                      onTap: ref
-                                          .read(qsEditingProvider.notifier)
-                                          .start,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              // AOSP: the footer actions (settings, power) belong to the
-              // full quick settings, under the tiles; they grow in with it.
-              ClipRect(
-                child: Align(
-                  alignment: Alignment.topCenter,
-                  heightFactor: e,
-                  child: SizedBox(
-                    height: _footerHeight,
-                    child: IgnorePointer(
-                      ignoring: e < 0.99,
-                      child: Opacity(
-                        // AOSP: footer actions fade in from 0.9.
-                        opacity: ((e - 0.9) / 0.1).clamp(0.0, 1.0),
-                        child: Align(
-                          alignment: AlignmentDirectional.bottomEnd,
-                          child: SizedBox(
-                            height: 48,
-                            child: Center(
-                              child: ShadeActions(
-                                onOpenPower: () => showPowerSessionSurface(ref),
-                                onOpenSettings: _openSettings,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
+    // The media player under the tiles: in the quick tiles only while
+    // active (AOSP showsOnlyActiveMedia), in the full quick settings always.
+    final mediaShown = ref.watch(
+      mediaCardProvider.select((card) => card != null),
     );
+    final mediaActive = ref.watch(
+      mediaCardProvider.select((card) => card?.active ?? false),
+    );
+    final scale = PixelShadeViewport.scaleOf(context);
+    // Every part is built once; the fractions only move, clip and fade
+    // them (ShadeStackLayout).
     final shade = ShadeDismissGesture(
       expansion: widget.expansion,
       child: Padding(
@@ -808,79 +723,130 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
           PixelQs.margin + padding.right,
           0,
         ),
-        child: AnimatedBuilder(
-          animation: motion,
-          child: tilesArea,
-          builder: (context, tilesArea) {
-            final e = _expansion.value;
-            final p = widget.progress.value;
-            // AOSP: the notifications start at the quick settings' bottom
-            // edge (calculateNotificationsTopPadding), so they move only by
-            // the quick settings' growth: the column does that.
-            final firstHeight = twoRows;
-            final travel =
-                _expandedHeader -
-                _collapsedHeader +
-                58 +
-                fullHeight -
-                firstHeight +
-                _footerHeight;
-            // The quick settings follow the finger over the tiles' growth.
-            if (travel > 120) {
-              widget.expansion.qsTravel =
-                  travel * PixelShadeViewport.scaleOf(context);
-            }
-            return Stack(
-              fit: StackFit.expand,
-              children: <Widget>[
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    // AOSP: the quick settings come down a little with the
-                    // pull (getHeaderTranslation, QS_PARALLAX_AMOUNT) and
-                    // fade in with the shade's content (getContentAlpha).
-                    Transform.translate(
-                      offset: Offset(
-                        0,
-                        -AospShadeInterpolation.qsParallax *
-                            (_collapsedHeader + 8 + firstHeight) *
-                            (1 - p),
-                      ),
-                      child: Opacity(
-                        opacity: AospShadeInterpolation.contentAlpha(p),
-                        child: tilesArea,
-                      ),
+        child: ShadeStackLayout(
+          panel: widget.progress,
+          qs: _expansion,
+          collapsedHeader: _collapsedHeader,
+          expandedHeader: _expandedHeader,
+          // EvolutionX: 14 dp from the slider to the tiles.
+          gap: 8,
+          listGap: 16,
+          firstGridHeight: twoRows,
+          mediaActive: mediaActive,
+          onTravel: (travel) {
+            // The quick settings follow the finger over their growth.
+            if (travel > 120) widget.expansion.qsTravel = travel * scale;
+          },
+          children: <Widget>[
+            const ShadeStackSlot(
+              part: ShadePart.collapsedHeader,
+              child: RepaintBoundary(child: _PixelHeader(expanded: false)),
+            ),
+            const ShadeStackSlot(
+              part: ShadePart.expandedHeader,
+              child: RepaintBoundary(child: _PixelHeader(expanded: true)),
+            ),
+            const ShadeStackSlot(
+              part: ShadePart.slider,
+              child: RepaintBoundary(
+                child: Padding(
+                  padding: EdgeInsets.only(bottom: 6),
+                  child: _BrightnessSlider(),
+                ),
+              ),
+            ),
+            ShadeStackSlot(
+              part: ShadePart.grid,
+              child: RepaintBoundary(
+                child: SizedBox(
+                  height: gridHeight,
+                  // The pages scroll only in the full quick settings.
+                  child: ValueListenableBuilder<bool>(
+                    valueListenable: _qsFull,
+                    builder: (context, full, _) => PixelPagedTileGrid(
+                      tiles: tiles,
+                      controller: _pages,
+                      scrollable: full,
                     ),
-                    const SizedBox(height: 16),
-                    // Notifications below the first pull's tiles; the full
-                    // quick settings push them away.
-                    Expanded(
-                      child: IgnorePointer(
-                        ignoring: e > 0.01,
-                        // AOSP: the rows fade with the shade's expansion
-                        // (ShadeInterpolation.getContentAlpha); the list
-                        // squishes and lifts them.
-                        child: Opacity(
-                          opacity: AndroidStackExpansion.alpha(
-                            widget.progress.value,
-                          ),
-                          child: NotificationListener<ScrollNotification>(
-                            onNotification: _onListScroll,
-                            child: _Notifications(
-                              progress: widget.progress,
-                              closed: widget.closed,
-                              active: widget.active && e < 0.01,
-                              expansion: widget.expansion,
-                            ),
+                  ),
+                ),
+              ),
+            ),
+            ShadeStackSlot(
+              part: ShadePart.gridFooter,
+              child: RepaintBoundary(
+                child: SizedBox(
+                  height: PixelPagedTileGrid.footerHeight,
+                  // AOSP FooterBar: the page dots centred, the edit button
+                  // at the end.
+                  child: Row(
+                    children: <Widget>[
+                      const Spacer(),
+                      PixelPagerDots(controller: _pages, count: pages.length),
+                      Expanded(
+                        child: Align(
+                          alignment: AlignmentDirectional.centerEnd,
+                          child: _EditButton(
+                            onTap: ref.read(qsEditingProvider.notifier).start,
                           ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ],
-            );
-          },
+              ),
+            ),
+            if (mediaShown)
+              const ShadeStackSlot(
+                part: ShadePart.media,
+                child: Padding(
+                  padding: EdgeInsets.only(top: PixelMediaCard.gap),
+                  child: RepaintBoundary(child: PixelMediaCard()),
+                ),
+              ),
+            // AOSP: the footer actions (settings, power) belong to the full
+            // quick settings, under the tiles; they grow in with it.
+            ShadeStackSlot(
+              part: ShadePart.footer,
+              child: RepaintBoundary(
+                child: SizedBox(
+                  height: _footerHeight,
+                  child: Align(
+                    alignment: AlignmentDirectional.bottomEnd,
+                    child: SizedBox(
+                      height: 48,
+                      child: Center(
+                        child: ShadeActions(
+                          onOpenPower: () => showPowerSessionSurface(ref),
+                          onOpenSettings: _openSettings,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // Notifications below the first pull's tiles; the full quick
+            // settings push them away. The rows fade and squish with the
+            // shade's expansion inside the list (AndroidStackExpansion).
+            ShadeStackSlot(
+              part: ShadePart.list,
+              child: RepaintBoundary(
+                child: NotificationListener<ScrollNotification>(
+                  onNotification: _onListScroll,
+                  child: ValueListenableBuilder<bool>(
+                    valueListenable: _qsCollapsed,
+                    builder: (context, collapsed, _) => _Notifications(
+                      progress: widget.progress,
+                      closed: widget.closed,
+                      active: widget.active && collapsed,
+                      expansion: widget.expansion,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -913,9 +879,11 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
 /// first pull; on the full quick settings a large clock with the date and
 /// the network's name.
 class _PixelHeader extends ConsumerWidget {
-  const _PixelHeader({required this.expansion});
+  const _PixelHeader({required this.expanded});
 
-  final double expansion;
+  /// The full quick settings' header, else the first pull's status row.
+  /// ShadeStackLayout fades between the two.
+  final bool expanded;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -925,8 +893,9 @@ class _PixelHeader extends ConsumerWidget {
     // Android's short date ("Sat, 21 Nov"), which always fits.
     final date = localizedShortDate(context, now);
     final battery = ref.watch(batteryProvider);
-    final operator = ref.watch(mobileNetworkProvider).value?.operatorName ?? '';
-    final e = expansion;
+    final operator = expanded
+        ? ref.watch(mobileNetworkProvider).value?.operatorName ?? ''
+        : '';
     // The header's text and icons keep the size the owner chose (set when
     // the shade was 374 dp wide), a little larger than EvolutionX's.
     final text = TextStyle(
@@ -958,7 +927,7 @@ class _PixelHeader extends ConsumerWidget {
         icons,
       ],
     );
-    final expanded = Column(
+    final full = Column(
       mainAxisAlignment: MainAxisAlignment.end,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
@@ -1010,32 +979,16 @@ class _PixelHeader extends ConsumerWidget {
           media.textScaler.scale(1) / phoneTextScale,
         ),
       ),
-      child: _headerStack(e, collapsed, expanded),
-    );
-  }
-
-  Widget _headerStack(double e, Widget collapsed, Widget expanded) {
-    return IgnorePointer(
-      child: Stack(
-        fit: StackFit.expand,
-        children: <Widget>[
-          if (e < 1)
-            Opacity(
-              opacity: (1 - e * 2).clamp(0.0, 1.0),
-              child: Align(
+      child: IgnorePointer(
+        child: expanded
+            ? full
+            : Align(
                 alignment: Alignment.topCenter,
                 child: Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: collapsed,
                 ),
               ),
-            ),
-          if (e > 0)
-            Opacity(
-              opacity: ((e - 0.4) / 0.6).clamp(0.0, 1.0),
-              child: ClipRect(child: expanded),
-            ),
-        ],
       ),
     );
   }

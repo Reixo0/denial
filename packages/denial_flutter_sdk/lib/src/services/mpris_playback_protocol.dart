@@ -15,7 +15,36 @@ const mprisPlayerProperties = {
   'CanGoPrevious',
   'CanPlay',
   'CanPause',
+  'CanSeek',
 };
+
+/// Droidloom's interface for an Android app's own media buttons.
+const mprisActionsInterface = 'org.droidloom.MediaPlayer2.Actions';
+
+/// The app's buttons from that interface's `Actions` property (a(ssay)).
+List<MprisCustomAction> parseMprisCustomActions(DBusValue? value) {
+  if (value is! DBusArray) return const <MprisCustomAction>[];
+  final actions = <MprisCustomAction>[];
+  for (final child in value.children.take(4)) {
+    if (child is! DBusStruct || child.children.length != 3) continue;
+    final [id, label, icon] = child.children;
+    if (id is! DBusString || label is! DBusString || icon is! DBusArray) {
+      continue;
+    }
+    final pixels = icon.children
+        .whereType<DBusByte>()
+        .map((b) => b.value)
+        .toList(growable: false);
+    actions.add(
+      MprisCustomAction(
+        id: id.value,
+        label: normalizeBoundedText(label.value, 128),
+        icon: pixels.length == 48 * 48 * 4 ? pixels : const <int>[],
+      ),
+    );
+  }
+  return List.unmodifiable(actions);
+}
 
 MprisPlaybackState? parseMprisPlaybackState(
   String serviceName,
@@ -54,6 +83,9 @@ MprisPlaybackState? parseMprisPlaybackState(
     canGoPrevious: _boolean(player['CanGoPrevious']),
     canPlay: _boolean(player['CanPlay']),
     canPause: _boolean(player['CanPause']),
+    desktopEntry: normalizeBoundedText(_string(root['DesktopEntry']), 256),
+    trackId: metadata.trackId,
+    canSeek: _boolean(player['CanSeek']),
   );
 }
 
@@ -71,6 +103,23 @@ MprisPlaybackState? applyMprisPlayerProperties(
   final previousValue = changed['CanGoPrevious'];
   final playValue = changed['CanPlay'];
   final pauseValue = changed['CanPause'];
+  final seekValue = changed['CanSeek'];
+  final canSeek = seekValue == null ? current.canSeek : _boolean(seekValue);
+  final trackId = metadataValue == null
+      ? current.trackId
+      : _readMetadata(metadataValue, current.identity).trackId;
+  if (seekValue != null &&
+      metadataValue == null &&
+      positionValue == null &&
+      statusValue == null &&
+      nextValue == null &&
+      previousValue == null &&
+      playValue == null &&
+      pauseValue == null) {
+    return canSeek == current.canSeek
+        ? current
+        : current.copyWith(canSeek: canSeek);
+  }
   if (metadataValue == null &&
       positionValue == null &&
       statusValue == null &&
@@ -107,6 +156,8 @@ MprisPlaybackState? applyMprisPlayerProperties(
       canGoPrevious == current.canGoPrevious &&
       canPlay == current.canPlay &&
       canPause == current.canPause &&
+      canSeek == current.canSeek &&
+      trackId == current.trackId &&
       lengthMicros == current.length.inMicroseconds &&
       title == current.title &&
       album == current.album &&
@@ -137,10 +188,15 @@ MprisPlaybackState? applyMprisPlayerProperties(
     canGoPrevious: canGoPrevious,
     canPlay: canPlay,
     canPause: canPause,
+    desktopEntry: current.desktopEntry,
+    trackId: trackId,
+    canSeek: canSeek,
+    actions: current.actions,
   );
 }
 
 typedef _Metadata = ({
+  String trackId,
   int lengthMicros,
   String title,
   List<String> artists,
@@ -162,7 +218,13 @@ _Metadata _readMetadata(DBusValue? value, String identity) {
   } on Object {
     artists = const [];
   }
+  final trackId = properties['mpris:trackid'];
   return (
+    trackId: trackId is DBusObjectPath
+        ? trackId.value
+        : trackId is DBusString
+        ? trackId.value
+        : '',
     lengthMicros: _integer(properties['mpris:length'])
         .clamp(0, _maximumLengthMicros),
     title: title.isEmpty ? identity : title,

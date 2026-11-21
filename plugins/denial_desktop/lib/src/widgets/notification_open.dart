@@ -39,6 +39,20 @@ bool openNotification(WidgetRef ref, int notificationId) {
   return true;
 }
 
+/// Focuses or starts the app [desktopEntry] names (the media player's tap).
+void openDesktopEntry(WidgetRef ref, String desktopEntry) {
+  if (desktopEntry.isEmpty) return;
+  unawaited(
+    _openApp(
+      desktopEntry,
+      repository: ref.read(desktopAppsRepositoryProvider),
+      launcher: ref.read(appLauncherProvider),
+      shell: ref.read(referenceShellProvider.notifier),
+      windows: ref.read(referenceShellProvider).allOpenAppWindows,
+    ),
+  );
+}
+
 /// Opens what a lock-screen tap asked for, once the session is unlocked: a
 /// stacked group opens the shade with the group expanded, anything else its
 /// app.
