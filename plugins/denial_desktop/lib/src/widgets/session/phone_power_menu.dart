@@ -9,28 +9,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:denial_flutter_sdk/effects.dart';
 import 'package:denial_flutter_sdk/localization.dart';
 import 'package:denial_flutter_sdk/motion.dart';
-import 'package:denial_flutter_sdk/shell_theme.dart';
 import 'package:denial_flutter_sdk/state.dart';
 
 import '../../state/phone_desk.dart';
-
-/// Material 3 roles from the shell accent (the wallpaper's colour when the
-/// accent follows it), as Android's system UI derives its own.
-ColorScheme phoneSchemeOf(BuildContext context) {
-  final theme = ShellTheme.of(context);
-  final brightness = context.shellColors.brightness;
-  final key = (theme.accentSeed, brightness);
-  final cached = _schemeCache;
-  if (cached != null && cached.$1 == key) return cached.$2;
-  final scheme = ColorScheme.fromSeed(
-    seedColor: theme.accentSeed,
-    brightness: brightness,
-  );
-  _schemeCache = (key, scheme);
-  return scheme;
-}
-
-((Color, Brightness), ColorScheme)? _schemeCache;
+import '../phone_scheme.dart';
 
 enum _Page { menu, restart, confirm }
 
@@ -226,9 +208,8 @@ class _PhonePowerMenuState extends ConsumerState<PhonePowerMenu> {
                   child: Transform.scale(
                     scale: scale * (0.92 + 0.08 * t),
                     child: MediaQuery(
-                      data: MediaQuery.of(
-                        context,
-                      ).copyWith(size: MediaQuery.sizeOf(context) / scale),
+                      data: MediaQuery.of(context)
+                          .copyWith(size: MediaQuery.sizeOf(context) / scale),
                       child: child!,
                     ),
                   ),

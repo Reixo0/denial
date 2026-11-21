@@ -30,9 +30,13 @@ class MobileNotificationHistory extends ConsumerStatefulWidget {
     required this.closed,
     this.active = true,
     super.key,
+    this.drag,
   });
 
   final Animation<double> progress;
+
+  /// The shade's drag, used when the history does not scroll.
+  final ShadeDragHandlers? drag;
 
   /// The shell is in its closed state (neither open nor actively dragging).
   /// The animation must also reach zero before the next entrance is armed.
@@ -162,6 +166,7 @@ class _MobileNotificationHistoryState
     // actually overflows. Otherwise the parent moves the shade with the finger.
     return ShadeDismissGesture(
       progress: widget.progress,
+      handlers: widget.drag,
       canDrag: () =>
           _scroll.hasClients &&
           _scroll.position.hasContentDimensions &&

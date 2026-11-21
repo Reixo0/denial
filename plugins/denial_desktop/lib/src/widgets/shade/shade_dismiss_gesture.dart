@@ -12,12 +12,17 @@ class ShadeDismissGesture extends ConsumerStatefulWidget {
     required this.progress,
     required this.child,
     this.canDrag,
+    this.handlers,
     super.key,
   });
 
   final Animation<double> progress;
   final Widget child;
   final bool Function()? canDrag;
+
+  /// Takes the vertical drag instead of moving the shade (the phone shade
+  /// uses it to open its full quick settings).
+  final ShadeDragHandlers? handlers;
 
   @override
   ConsumerState<ShadeDismissGesture> createState() =>
@@ -31,6 +36,31 @@ class _ShadeDismissGestureState extends ConsumerState<ShadeDismissGesture> {
   @override
   Widget build(BuildContext context) {
     final controller = ref.read(referenceShellProvider.notifier);
+    final handlers = widget.handlers;
+    if (handlers != null) {
+      // The flag lives in the state: the shade rebuilds this during the
+      // drag, and a local would forget the drag halfway.
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: controller.closeQuickSettings,
+        onVerticalDragStart: (details) {
+          _dragging = widget.canDrag?.call() ?? true;
+          if (_dragging) handlers.onStart(details);
+        },
+        onVerticalDragUpdate: (details) {
+          if (_dragging) handlers.onUpdate(details);
+        },
+        onVerticalDragEnd: (details) {
+          if (_dragging) handlers.onEnd(details);
+          _dragging = false;
+        },
+        onVerticalDragCancel: () {
+          if (_dragging) handlers.onEnd(DragEndDetails(primaryVelocity: 0));
+          _dragging = false;
+        },
+        child: widget.child,
+      );
+    }
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: controller.closeQuickSettings,
@@ -72,4 +102,17 @@ class _ShadeDismissGestureState extends ConsumerState<ShadeDismissGesture> {
       child: widget.child,
     );
   }
+}
+
+/// A vertical drag's callbacks, handed down to the shade's gesture areas.
+class ShadeDragHandlers {
+  const ShadeDragHandlers({
+    required this.onStart,
+    required this.onUpdate,
+    required this.onEnd,
+  });
+
+  final GestureDragStartCallback onStart;
+  final GestureDragUpdateCallback onUpdate;
+  final GestureDragEndCallback onEnd;
 }

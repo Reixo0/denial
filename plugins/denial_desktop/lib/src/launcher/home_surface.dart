@@ -13,6 +13,9 @@ import 'package:denial_flutter_sdk/rendering.dart';
 
 import '../state/home_back.dart';
 import '../state/reference_shell_controller.dart';
+import '../state/reference_shell_metrics.dart';
+import '../state/reference_shell_presentation.dart';
+import '../state/reference_shell_profile.dart';
 import 'home_drag_controller.dart';
 import 'home_grid_geometry.dart';
 import 'home_icon_locator.dart';
@@ -537,15 +540,62 @@ class _HomeSurfaceState extends ConsumerState<HomeSurface>
   bool get _canPullDrawer =>
       !drag.active && !resize.active && folders.open.value == null;
 
+  /// What the current vertical drag on home moves: decided by its first
+  /// movement. Down with the drawer away pulls the shade, as Android's home
+  /// does; anything else the drawer.
+  _HomeVerticalDrag? _verticalDrag;
+
+  void _drawerDragStart(DragStartDetails _) => _verticalDrag = null;
+
   void _drawerDragUpdate(DragUpdateDetails details) {
-    if (!_canPullDrawer) return;
-    _pullDrawer(details.primaryDelta ?? 0);
+    final dy = details.primaryDelta ?? 0;
+    if (_verticalDrag == null) {
+      if (dy == 0) return;
+      final phone =
+          ref.read(referenceShellPresentationProvider) ==
+          ReferenceShellProfile.mobile;
+      if (dy > 0 && phone && !_drawerShown && _canPullDrawer) {
+        _verticalDrag = _HomeVerticalDrag.shade;
+        _menu.value = null;
+        ref.read(referenceShellProvider.notifier).startQuickSettingsDrag();
+      } else {
+        _verticalDrag = _HomeVerticalDrag.drawer;
+      }
+    }
+    switch (_verticalDrag!) {
+      case _HomeVerticalDrag.shade:
+        ref
+            .read(referenceShellProvider.notifier)
+            .updateQuickSettingsDrag(
+              Offset(
+                0,
+                dy *
+                    ReferenceShellMetrics.quickSettingsDragScale(
+                      MediaQuery.sizeOf(context),
+                    ),
+              ),
+            );
+      case _HomeVerticalDrag.drawer:
+        if (!_canPullDrawer) return;
+        _pullDrawer(dy);
+    }
   }
 
   void _drawerDragEnd(DragEndDetails details) {
+    final mode = _verticalDrag;
+    _verticalDrag = null;
+    if (mode == _HomeVerticalDrag.shade) {
+      ref
+          .read(referenceShellProvider.notifier)
+          .endQuickSettingsDrag(details.primaryVelocity ?? 0);
+      return;
+    }
     if (!_drawerShown) return;
     _releaseDrawer(details.primaryVelocity ?? 0, opening: true);
   }
+
+  void _drawerDragCancel() =>
+      _drawerDragEnd(DragEndDetails(primaryVelocity: 0));
 
   // Input --------------------------------------------------------------------
 
@@ -834,8 +884,10 @@ class _HomeSurfaceState extends ConsumerState<HomeSurface>
                 // A swipe up anywhere on home pulls up the app drawer.
                 GestureDetector(
                   behavior: HitTestBehavior.translucent,
+                  onVerticalDragStart: _drawerDragStart,
                   onVerticalDragUpdate: _drawerDragUpdate,
                   onVerticalDragEnd: _drawerDragEnd,
+                  onVerticalDragCancel: _drawerDragCancel,
                   child: opacity == null
                       ? content
                       : FadeSnapshot(opacity: opacity, child: content),
@@ -957,3 +1009,5 @@ class _BackgroundTaps {
     _valid = false;
   }
 }
+
+enum _HomeVerticalDrag { shade, drawer }

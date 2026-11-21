@@ -3592,7 +3592,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String shortDate(String weekday, int day, String month) {
-    return '$weekday $day $month';
+    return '$weekday, $day $month';
   }
 
   @override

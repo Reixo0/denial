@@ -33,7 +33,7 @@ class _SystemShadeLayerState extends ConsumerState<SystemShadeLayer>
   late final ValueListenable<double> _drag;
   bool _mountedPanel = false;
   bool _offstage = true;
-  ShadePage _page = ShadePage.quickSettings;
+  ShadePage _page = ShadePage.notifications;
 
   @override
   void initState() {
@@ -110,15 +110,12 @@ class _SystemShadeLayerState extends ConsumerState<SystemShadeLayer>
     }
   }
 
+  // Android: a pull from anywhere on the status bar shows the notifications
+  // first; pulling again opens the full quick settings.
   void _selectPageFromStatusBar(Offset position) {
-    final width = MediaQuery.sizeOf(context).width;
-    final downOnRight = position.dx >= width / 2;
-    final quickSettingsOnRight =
-        Directionality.of(context) == TextDirection.ltr;
-    final page = downOnRight == quickSettingsOnRight
-        ? ShadePage.quickSettings
-        : ShadePage.notifications;
-    if (_page != page) setState(() => _page = page);
+    if (_page != ShadePage.notifications) {
+      setState(() => _page = ShadePage.notifications);
+    }
   }
 
   @override

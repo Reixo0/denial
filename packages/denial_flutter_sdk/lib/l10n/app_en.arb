@@ -4783,7 +4783,7 @@
   "@settingsWindowOpacityTitle": {
     "description": "English UI text for settingsWindowOpacityTitle."
   },
-  "shortDate": "{weekday} {day} {month}",
+  "shortDate": "{weekday}, {day} {month}",
   "@shortDate": {
     "description": "English UI text for shortDate.",
     "placeholders": {

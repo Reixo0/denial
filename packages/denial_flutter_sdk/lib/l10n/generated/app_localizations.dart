@@ -6398,7 +6398,7 @@ abstract class AppLocalizations {
   /// English UI text for shortDate.
   ///
   /// In en, this message translates to:
-  /// **'{weekday} {day} {month}'**
+  /// **'{weekday}, {day} {month}'**
   String shortDate(String weekday, int day, String month);
 
   /// English UI text for statusBarLiveTime.

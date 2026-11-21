@@ -1,4 +1,5 @@
 import 'package:denial_desktop/src/state/reference_shell_controller.dart';
+import 'package:denial_desktop/src/state/reference_shell_metrics.dart';
 
 import 'dart:math' as math;
 
@@ -19,23 +20,17 @@ import '../../state/reference_shell_profile.dart';
 
 import 'package:denial_flutter_sdk/motion.dart';
 import 'package:denial_flutter_sdk/rendering.dart'
-    show
-        CompositedTranslation,
-        WindowBackdropCache,
-        WindowBackdropMotion,
-        WindowBackdropSlice;
+    show WindowBackdropCache, WindowBackdropSlice;
 import 'package:denial_flutter_sdk/shell_theme.dart';
-import 'package:denial_flutter_sdk/tokens.dart';
 
 import '../connectivity/bluetooth_detail_surface.dart';
 import '../connectivity/wifi_detail_surface.dart';
 import '../connectivity/mobile_data_tile.dart';
+import '../phone_scheme.dart';
 import '../session/power_session_surface.dart';
 
 import 'package:denial_flutter_sdk/effects.dart';
 
-import '../liquid/water_reveal.dart';
-import 'liquid_range_bar.dart';
 import 'quick_settings_tiles.dart';
 
 import 'mobile_notification_history.dart';
@@ -43,9 +38,12 @@ import 'shade_backdrop_scene.dart';
 import 'shade_dismiss_gesture.dart';
 import 'shade_expansion_motion.dart';
 import 'shade_reference_geometry.dart';
-import 'status_bar.dart';
+import 'status_glyphs.dart';
 import '../../state/phone_desk.dart';
 
+/// Which state an opened shade starts in: Android's first pull
+/// ([notifications]: a row of tiles over the notifications) or the full
+/// quick settings.
 enum ShadePage { notifications, quickSettings }
 
 /// The scene's backdrop frosted once, when the translucent shade can show it
@@ -66,9 +64,9 @@ EdgeInsets _divideInsets(EdgeInsets insets, double divisor) => EdgeInsets.only(
   bottom: insets.bottom / divisor,
 );
 
-/// ColorOS-style split notification and control-center shade. [progress] is
-/// `0` when hidden and `1` when open. The originating half of the status bar
-/// selects a page; a horizontal swipe switches pages once fully expanded.
+/// Android 17's notification shade and quick settings. [progress] is `0`
+/// when hidden and `1` when open. [page] picks the state it opens in; a
+/// vertical drag on the tiles moves between the two.
 class QuickSettingsShade extends ConsumerWidget {
   const QuickSettingsShade({
     super.key,
@@ -111,8 +109,6 @@ class QuickSettingsShade extends ConsumerWidget {
                   ),
                   _FullScreenShade(
                     progress: progress,
-                    // Notifications scroll over the status row.
-                    header: ShadeHeaderStatusLayer(progress: progress),
                     child: Focus(
                       autofocus: active,
                       canRequestFocus: active,
@@ -124,20 +120,13 @@ class QuickSettingsShade extends ConsumerWidget {
                         }
                         return KeyEventResult.ignored;
                       },
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () {},
-                        child: _ColorOsReferenceViewport(
-                          child: ColorOsShadeContentTranslation(
-                            progress: progress,
-                            child: _ShadeChrome(
-                              progress: progress,
-                              closed: closed,
-                              active: active,
-                              page: page,
-                              onPageChanged: onPageChanged,
-                            ),
-                          ),
+                      child: PixelShadeViewport(
+                        child: _PixelShade(
+                          progress: progress,
+                          closed: closed,
+                          active: active,
+                          page: page,
+                          onPageChanged: onPageChanged,
                         ),
                       ),
                     ),
@@ -153,16 +142,9 @@ class QuickSettingsShade extends ConsumerWidget {
 }
 
 class _FullScreenShade extends StatelessWidget {
-  const _FullScreenShade({
-    required this.progress,
-    required this.header,
-    required this.child,
-  });
+  const _FullScreenShade({required this.progress, required this.child});
 
   final Animation<double> progress;
-
-  /// Drawn over the shade's material, beneath [child].
-  final Widget header;
   final Widget child;
 
   @override
@@ -190,9 +172,6 @@ class _FullScreenShade extends StatelessWidget {
         child: ShadeBackdropRegion(
           occludesNotifications: false,
           borderRadius: BorderRadius.zero,
-          // The frosted wallpaper fades in as the live material's strength
-          // would ramp, and its overlay dims the scene beneath. Notification
-          // cards draw the same dimmed frost as their glass.
           child: WindowBackdropCache(
             backdrop: cache.backdrop,
             motion: cache.motion,
@@ -214,9 +193,6 @@ class _FullScreenShade extends StatelessWidget {
                   },
                 ),
                 background,
-                header,
-                // Live glass would blur the panel backing and the dim
-                // together. The cards' frost carries both in its overlay.
                 WindowBackdropCache(
                   backdrop: cache.backdrop,
                   motion: cache.motion,
@@ -249,7 +225,6 @@ class _FullScreenShade extends StatelessWidget {
             fit: StackFit.expand,
             children: [
               Positioned.fill(child: background),
-              header,
               child,
             ],
           ),
@@ -263,7 +238,6 @@ class _FullScreenShade extends StatelessWidget {
               strength: blur,
               separateChild: true,
               borderRadius: BorderRadius.zero,
-              // Screen-wide: a glass edge would frame it inside the screen.
               edgeless: true,
               child: composedShade!,
             );
@@ -274,299 +248,34 @@ class _FullScreenShade extends StatelessWidget {
   }
 }
 
-class _ShadeChrome extends StatelessWidget {
-  const _ShadeChrome({
-    required this.progress,
-    required this.closed,
-    required this.active,
-    required this.page,
-    required this.onPageChanged,
-  });
+/// Lays the shade out in Android's dp: the phone's short side is taken as
+/// [shortSide] dp (Android's width on this phone), and the whole shade,
+/// text included, is scaled to fill the real screen.
+class PixelShadeViewport extends StatelessWidget {
+  const PixelShadeViewport({super.key, required this.child});
 
-  final Animation<double> progress;
-  final bool closed;
-  final bool active;
-  final ShadePage page;
-  final ValueChanged<ShadePage>? onPageChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final padding = MediaQuery.paddingOf(context);
-    final headerTop = math.max(40.0, padding.top);
-    const statusHeight = 18.0;
-    final contentTop = headerTop + statusHeight + ShadeHeaderClock.statusGap;
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        Positioned.fill(
-          top: contentTop,
-          child: _ShadePager(
-            progress: progress,
-            closed: closed,
-            active: active,
-            page: page,
-            onPageChanged: onPageChanged,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _ShadePager extends StatefulWidget {
-  const _ShadePager({
-    required this.progress,
-    required this.closed,
-    required this.active,
-    required this.page,
-    required this.onPageChanged,
-  });
-
-  final Animation<double> progress;
-  final bool closed;
-  final bool active;
-  final ShadePage page;
-  final ValueChanged<ShadePage>? onPageChanged;
-
-  @override
-  State<_ShadePager> createState() => _ShadePagerState();
-}
-
-class _ShadePagerState extends State<_ShadePager>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _settle;
-  Animation<double>? _settleValue;
-  double _dragFraction = 0;
-  bool _dragging = false;
-
-  // Each page moves as its own layer; a page swipe rebuilds nothing.
-  final _pageTranslations = [
-    ValueNotifier(Offset.zero),
-    ValueNotifier(Offset.zero),
-  ];
-  late final _pageMotion = Listenable.merge(_pageTranslations);
-  double _width = 0;
-  int _currentIndex = 0;
-
-  /// Moves the pages to [fraction]. Rebuilds only when the neighbor page
-  /// starts or stops being painted.
-  void _setDragFraction(double fraction) {
-    final wasMoving = _dragFraction != 0;
-    _dragFraction = fraction;
-    _syncPages();
-    if (wasMoving != (fraction != 0) && mounted) setState(() {});
-  }
-
-  void _syncPages() {
-    for (var index = 0; index < _pageTranslations.length; index++) {
-      _pageTranslations[index].value = Offset(
-        (index - _currentIndex + _dragFraction) * _width,
-        0,
-      );
-    }
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _settle = AnimationController(vsync: this, duration: Motion.cardSettle)
-      ..addListener(() {
-        final animation = _settleValue;
-        if (animation != null) _setDragFraction(animation.value);
-      });
-  }
-
-  @override
-  void didUpdateWidget(covariant _ShadePager oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.active && !widget.active) {
-      _settle.stop();
-      _settleValue = null;
-      _dragFraction = 0;
-      _dragging = false;
-      return;
-    }
-    if (oldWidget.page != widget.page && !_settle.isAnimating) {
-      _dragFraction = 0;
-    }
-  }
-
-  @override
-  void dispose() {
-    _settle.dispose();
-    for (final translation in _pageTranslations) {
-      translation.dispose();
-    }
-    super.dispose();
-  }
-
-  int _index(ShadePage page, TextDirection direction) =>
-      direction == TextDirection.ltr
-      ? (page == ShadePage.notifications ? 0 : 1)
-      : (page == ShadePage.quickSettings ? 0 : 1);
-
-  ShadePage _pageAt(int index, TextDirection direction) =>
-      direction == TextDirection.ltr
-      ? (index == 0 ? ShadePage.notifications : ShadePage.quickSettings)
-      : (index == 0 ? ShadePage.quickSettings : ShadePage.notifications);
-
-  void _startHorizontalDrag(DragStartDetails _) {
-    if (widget.progress.value < 0.98) return;
-    _settle.stop();
-    _settleValue = null;
-    _setDragFraction(0);
-    _dragging = true;
-  }
-
-  void _updateHorizontalDrag(
-    DragUpdateDetails details,
-    double width,
-    TextDirection direction,
-  ) {
-    if (!_dragging || width <= 0) return;
-    final index = _index(widget.page, direction);
-    final next = _dragFraction + details.delta.dx / width;
-    _setDragFraction(
-      next.clamp(index == 0 ? -1.0 : 0.0, index == 0 ? 0.0 : 1.0).toDouble(),
-    );
-  }
-
-  void _endHorizontalDrag(
-    DragEndDetails details,
-    double width,
-    TextDirection direction,
-  ) {
-    if (!_dragging) return;
-    _dragging = false;
-    final index = _index(widget.page, direction);
-    final velocity = details.primaryVelocity ?? 0;
-    final displacement = _dragFraction.abs() * width;
-    final referenceScale = colorOsShadeScaleForViewport(
-      MediaQuery.sizeOf(context),
-    );
-    final fling =
-        velocity.abs() >= 250 * referenceScale &&
-        displacement >= 30 * referenceScale;
-    final towardNext = fling ? velocity < 0 : _dragFraction < 0;
-    final change = displacement >= 90 * referenceScale || fling;
-    final targetIndex = change
-        ? (index + (towardNext ? 1 : -1)).clamp(0, 1)
-        : index;
-    final changing = targetIndex != index;
-    final target = changing ? (targetIndex > index ? -1.0 : 1.0) : 0.0;
-    _settleValue = Tween<double>(
-      begin: _dragFraction,
-      end: target,
-    ).animate(CurvedAnimation(parent: _settle, curve: Motion.standard));
-    _settle.duration = MediaQuery.disableAnimationsOf(context)
-        ? Duration.zero
-        : Motion.cardSettle;
-    _settle
-      ..value = 0
-      ..forward().whenComplete(() {
-        if (!mounted) return;
-        if (changing) {
-          widget.onPageChanged?.call(_pageAt(targetIndex, direction));
-        }
-        _settleValue = null;
-        _setDragFraction(0);
-      });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final direction = Directionality.of(context);
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        final currentIndex = _index(widget.page, direction);
-        _width = width;
-        _currentIndex = currentIndex;
-        _syncPages();
-        final pixelRatio = MediaQuery.devicePixelRatioOf(context);
-        Widget buildPage(ShadePage page) {
-          final index = _index(page, direction);
-          final isCurrent = index == currentIndex;
-          return Positioned.fill(
-            child: CompositedTranslation(
-              translation: _pageTranslations[index],
-              devicePixelRatio: pixelRatio,
-              child: IgnorePointer(
-                ignoring: !isCurrent,
-                child: ExcludeSemantics(
-                  excluding: !isCurrent,
-                  // The other page is a full width away until a page drag or
-                  // its settle moves it. Keep it laid out, but do not paint
-                  // its glass and lists off screen.
-                  child: Offstage(
-                    offstage: !isCurrent && _dragFraction == 0,
-                    child: page == ShadePage.quickSettings
-                        ? _ControlCenterPage(progress: widget.progress)
-                        : _NotificationCenterPage(
-                            progress: widget.progress,
-                            closed: widget.closed,
-                            active: widget.active && isCurrent,
-                          ),
-                  ),
-                ),
-              ),
-            ),
-          );
-        }
-
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onHorizontalDragStart: _startHorizontalDrag,
-          onHorizontalDragUpdate: (details) =>
-              _updateHorizontalDrag(details, width, direction),
-          onHorizontalDragEnd: (details) =>
-              _endHorizontalDrag(details, width, direction),
-          onHorizontalDragCancel: () => _endHorizontalDrag(
-            DragEndDetails(primaryVelocity: 0),
-            width,
-            direction,
-          ),
-          child: WindowBackdropMotion(
-            motion: _pageMotion,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                buildPage(ShadePage.notifications),
-                buildPage(ShadePage.quickSettings),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _ColorOsReferenceViewport extends StatelessWidget {
-  const _ColorOsReferenceViewport({required this.child});
+  static const double shortSide = 374;
 
   final Widget child;
+
+  /// The viewport's dp-to-pixel scale for widgets inside it.
+  static double scaleOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_PixelScale>()?.scale ?? 1;
+
+  static double scaleFor(Size size) {
+    final side = size.shortestSide;
+    if (!side.isFinite || side <= 0) return 1;
+    return math.max(1.0, side / shortSide);
+  }
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final viewport = Size(constraints.maxWidth, constraints.maxHeight);
-        final scale = colorOsShadeScaleForViewport(viewport);
-        final referenceSize = Size(
-          viewport.width / scale,
-          viewport.height / scale,
-        );
+        final scale = scaleFor(viewport);
+        final size = viewport / scale;
         final media = MediaQuery.of(context);
-        final referenceMedia = media.copyWith(
-          size: referenceSize,
-          devicePixelRatio: media.devicePixelRatio * scale,
-          textScaler: TextScaler.linear(media.textScaler.scale(1) / scale),
-          padding: _divideInsets(media.padding, scale),
-          viewPadding: _divideInsets(media.viewPadding, scale),
-          viewInsets: _divideInsets(media.viewInsets, scale),
-          systemGestureInsets: _divideInsets(media.systemGestureInsets, scale),
-        );
         return ClipRect(
           child: Align(
             alignment: Alignment.topLeft,
@@ -574,10 +283,20 @@ class _ColorOsReferenceViewport extends StatelessWidget {
               scale: scale,
               alignment: Alignment.topLeft,
               child: SizedBox.fromSize(
-                size: referenceSize,
+                size: size,
                 child: MediaQuery(
-                  data: referenceMedia,
-                  child: ShadeReferenceGeometry(scale: scale, child: child),
+                  data: media.copyWith(
+                    size: size,
+                    devicePixelRatio: media.devicePixelRatio * scale,
+                    padding: _divideInsets(media.padding, scale),
+                    viewPadding: _divideInsets(media.viewPadding, scale),
+                    viewInsets: _divideInsets(media.viewInsets, scale),
+                    systemGestureInsets: _divideInsets(
+                      media.systemGestureInsets,
+                      scale,
+                    ),
+                  ),
+                  child: _PixelScale(scale: scale, child: child),
                 ),
               ),
             ),
@@ -588,148 +307,249 @@ class _ColorOsReferenceViewport extends StatelessWidget {
   }
 }
 
-class _ControlCenterPage extends StatelessWidget {
-  const _ControlCenterPage({required this.progress});
+class _PixelScale extends InheritedWidget {
+  const _PixelScale({required this.scale, required super.child});
 
-  final Animation<double> progress;
+  final double scale;
 
   @override
-  Widget build(BuildContext context) {
-    final padding = MediaQuery.paddingOf(context);
-    return ShadeDismissGesture(
-      progress: progress,
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(padding.left, 0, padding.right, 0),
-        child: Column(
-          children: [
-            // The status bar draws the grown clock and date in this block.
-            SizedBox(
-              height:
-                  ShadeHeaderClock.blockHeight *
-                  ShadeReferenceGeometry.inverseScaleOf(context),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 28),
-                child: Align(
-                  alignment: AlignmentDirectional.centerEnd,
-                  // Water, like the tiles: it follows the shade and is
-                  // gone before the shade is.
-                  child: WaterReveal(
-                    progress: progress,
-                    start: 0.4,
-                    span: 0.3,
-                    child: const _ShadeHeaderActions(),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: SingleChildScrollView(
-                primary: false,
-                padding: const EdgeInsets.fromLTRB(28, 0, 28, 24),
-                child: RepaintBoundary(
-                  child: _QuickSettingsTilesSection(progress: progress),
-                ),
-              ),
-            ),
-            SizedBox(height: math.max(4, padding.bottom)),
-          ],
-        ),
-      ),
-    );
-  }
+  bool updateShouldNotify(_PixelScale oldWidget) => scale != oldWidget.scale;
 }
 
-class _NotificationCenterPage extends ConsumerWidget {
-  const _NotificationCenterPage({
+/// How a drag on the shade is being used.
+enum _DragMode { expansion, closing, none }
+
+class _PixelShade extends ConsumerStatefulWidget {
+  const _PixelShade({
     required this.progress,
     required this.closed,
     required this.active,
+    required this.page,
+    required this.onPageChanged,
   });
 
   final Animation<double> progress;
   final bool closed;
   final bool active;
+  final ShadePage page;
+  final ValueChanged<ShadePage>? onPageChanged;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final padding = MediaQuery.paddingOf(context);
-    final empty = ref.watch(
-      desktopNotificationsProvider.select((state) => state.history.isEmpty),
-    );
-    return ShadeDismissGesture(
-      progress: progress,
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(padding.left, 0, padding.right, 0),
-        child: Column(
-          children: [
-            SizedBox(
-              height:
-                  ShadeHeaderClock.blockHeight *
-                      ShadeReferenceGeometry.inverseScaleOf(context) +
-                  16,
-            ),
-            Expanded(
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  MobileNotificationHistory(
-                    progress: progress,
-                    closed: closed,
-                    active: active,
-                  ),
-                  if (empty) const _EmptyNotifications(),
-                ],
-              ),
-            ),
-            SizedBox(height: math.max(4, padding.bottom)),
-          ],
-        ),
-      ),
-    );
-  }
+  ConsumerState<_PixelShade> createState() => _PixelShadeState();
 }
 
-class _QuickSettingsTilesSection extends ConsumerWidget {
-  const _QuickSettingsTilesSection({required this.progress});
+class _PixelShadeState extends ConsumerState<_PixelShade>
+    with SingleTickerProviderStateMixin {
+  /// Status row of the first pull, and the full header with its clock.
+  static const double _collapsedHeader = 36;
+  static const double _expandedHeader = 92;
 
-  final Animation<double> progress;
+  /// Drag distance, in dp, that opens the full quick settings.
+  static const double _expansionTravel = 320;
+
+  late final AnimationController _expansion = AnimationController(
+    vsync: this,
+    value: widget.page == ShadePage.quickSettings ? 1 : 0,
+  );
+  _DragMode? _drag;
+  double _closeDistance = 0;
+
+  /// The shade reached fully open since it was last closed: moving back
+  /// down its progress is closing, which runs the stages backwards.
+  bool _wasOpen = false;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  void initState() {
+    super.initState();
+    widget.progress.addListener(_trackOpen);
+    _trackOpen();
+  }
+
+  void _trackOpen() {
+    final p = widget.progress.value;
+    if (p >= 0.999) {
+      _wasOpen = true;
+    } else if (p <= 0.001) {
+      _wasOpen = false;
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _PixelShade oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.progress != widget.progress) {
+      oldWidget.progress.removeListener(_trackOpen);
+      widget.progress.addListener(_trackOpen);
+      _trackOpen();
+    }
+    final target = widget.page == ShadePage.quickSettings ? 1.0 : 0.0;
+    if (widget.closed || !widget.active) {
+      // Closed: every pull starts on the notifications, as Android's does.
+      _expansion.stop();
+      _expansion.value = 0;
+      _drag = null;
+      if (widget.page != ShadePage.notifications) {
+        final onPageChanged = widget.onPageChanged;
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => onPageChanged?.call(ShadePage.notifications),
+        );
+      }
+    } else if (oldWidget.page != widget.page && _drag == null) {
+      _settle(target);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.progress.removeListener(_trackOpen);
+    _expansion.dispose();
+    super.dispose();
+  }
+
+  void _settle(double target, {double velocity = 0}) {
+    final duration = MediaQuery.disableAnimationsOf(context)
+        ? Duration.zero
+        : const Duration(milliseconds: 380);
+    _expansion
+        .animateTo(
+          target,
+          duration: duration,
+          curve: Motion.md3EmphasizedDecelerate,
+        )
+        .whenComplete(() {
+          if (!mounted) return;
+          final page = target >= 1
+              ? ShadePage.quickSettings
+              : ShadePage.notifications;
+          if (page != widget.page) widget.onPageChanged?.call(page);
+        });
+  }
+
+  void _dragStart(DragStartDetails _) {
+    _drag = null;
+    _closeDistance = 0;
+    _expansion.stop();
+  }
+
+  void _dragUpdate(DragUpdateDetails details) => _dragBy(details.delta.dy);
+
+  /// Starts moving the shade itself (closing it) with the drag.
+  void _startClosing() {
+    _drag = _DragMode.closing;
+    ref
+        .read(referenceShellProvider.notifier)
+        .startQuickSettingsDrag(progress: widget.progress.value);
+  }
+
+  void _dragBy(double dy) {
+    final controller = ref.read(referenceShellProvider.notifier);
+    if (_drag == null) {
+      if (dy > 0) {
+        _drag = _expansion.value < 1 ? _DragMode.expansion : _DragMode.none;
+      } else if (dy < 0) {
+        if (_expansion.value > 0) {
+          _drag = _DragMode.expansion;
+        } else {
+          _startClosing();
+        }
+      } else {
+        return;
+      }
+    }
+    switch (_drag!) {
+      case _DragMode.expansion:
+        final next = _expansion.value + dy / _expansionTravel;
+        if (next >= 0) {
+          _expansion.value = next;
+          break;
+        }
+        // Pushed past the first pull: the same drag closes the shade.
+        _expansion.value = 0;
+        _startClosing();
+        _dragBy(next * _expansionTravel);
+      case _DragMode.closing:
+        _closeDistance += dy;
+        final scale = PixelShadeViewport.scaleOf(context);
+        controller.updateQuickSettingsDrag(
+          Offset(
+            0,
+            dy *
+                scale *
+                ReferenceShellMetrics.quickSettingsDragScale(
+                  MediaQuery.sizeOf(context) * scale,
+                ),
+          ),
+        );
+      case _DragMode.none:
+        break;
+    }
+  }
+
+  void _dragEnd(DragEndDetails details) {
+    final velocity = details.primaryVelocity ?? 0;
+    final controller = ref.read(referenceShellProvider.notifier);
+    switch (_drag) {
+      case _DragMode.expansion:
+        final target = velocity > 300
+            ? 1.0
+            : velocity < -300
+            ? 0.0
+            : (_expansion.value >= 0.5 ? 1.0 : 0.0);
+        _settle(target, velocity: velocity);
+      case _DragMode.closing:
+        if (_closeDistance <= -32 || velocity <= -500) {
+          controller.closeQuickSettings(releaseVelocity: velocity);
+        } else {
+          controller.endQuickSettingsDrag(velocity);
+        }
+      case _DragMode.none || null:
+        break;
+    }
+    _drag = null;
+  }
+
+  /// A scrolling notification list pulled down past its top opens the
+  /// full quick settings, as a drag on the rest of the shade does.
+  bool _onListScroll(ScrollNotification notification) {
+    if (notification is OverscrollNotification &&
+        notification.dragDetails != null &&
+        (notification.overscroll < 0 || _drag != null)) {
+      if (_drag == null) _dragStart(DragStartDetails());
+      _dragBy(-notification.overscroll);
+    } else if (notification is ScrollEndNotification && _drag != null) {
+      _dragEnd(
+        DragEndDetails(
+          primaryVelocity: notification.dragDetails?.primaryVelocity ?? 0,
+        ),
+      );
+    }
+    return false;
+  }
+
+  void _openSettingsPage(String page) {
+    ref.read(referenceShellProvider.notifier).closeQuickSettings();
+    ref.read(denialBridgeProvider).launchApplication(<String>[
+      'denial-phone-settings',
+      page,
+    ]);
+  }
+
+  List<Widget> _tiles(BuildContext context) {
+    final ref = this.ref;
+    final l10n = context.l10n;
     final profile = ref.watch(
       quickSettingsProvider.select((state) => state.profile),
     );
-    final quickSettingsController = ref.read(quickSettingsProvider.notifier);
     final network = ref.watch(networkConnectivityProvider);
     final networkController = ref.read(networkConnectivityProvider.notifier);
     final bluetooth = ref.watch(bluetoothProvider);
     final bluetoothController = ref.read(bluetoothProvider.notifier);
-    final notificationPolicy = (
-      doNotDisturb: ref.watch(
-        desktopNotificationsProvider.select((state) => state.doNotDisturb),
-      ),
-      loaded:
-          ref.watch(shellSettingsSyncStatusProvider).phase ==
-          ShellSettingsSyncPhase.ready,
+    final doNotDisturb = ref.watch(
+      desktopNotificationsProvider.select((state) => state.doNotDisturb),
     );
-    final notificationController = ref.read(
-      desktopNotificationsProvider.notifier,
-    );
-    final l10n = context.l10n;
-    final networkSnapshot = network.snapshot;
-    final wifiToggleEnabled =
-        !network.initializing &&
-        networkSnapshot.serviceAvailable &&
-        networkSnapshot.wifiDeviceAvailable &&
-        networkSnapshot.wirelessHardwareEnabled &&
-        networkSnapshot.radioPermission != NetworkPermission.denied &&
-        !network.radioChanging;
-    final bluetoothToggleEnabled =
-        !bluetooth.initializing &&
-        bluetooth.serviceAvailable &&
-        bluetooth.available &&
-        !bluetooth.powerChanging;
+    final settingsReady =
+        ref.watch(shellSettingsSyncStatusProvider).phase ==
+        ShellSettingsSyncPhase.ready;
     final rotationLock = ref.watch(rotationLockProvider);
     final recording = ref.watch(screenRecordingProvider);
     final presentation = ref.watch(referenceShellPresentationProvider);
@@ -740,21 +560,80 @@ class _QuickSettingsTilesSection extends ConsumerWidget {
                 .length ??
             0) <=
         1;
-    final footerTiles = [
+    final snapshot = network.snapshot;
+    final popups = ref.read(shellPopupControllerProvider.notifier);
+    return <Widget>[
+      QuickTile(
+        icon: Icons.wifi_rounded,
+        onSettings: () => _openSettingsPage('wifi'),
+        title: l10n.commonWifi,
+        subtitle: wifiStatusLabel(network, l10n),
+        active: snapshot.wirelessEnabled && snapshot.wifiDeviceAvailable,
+        enabled:
+            !network.initializing &&
+            snapshot.serviceAvailable &&
+            snapshot.wifiDeviceAvailable &&
+            snapshot.wirelessHardwareEnabled &&
+            snapshot.radioPermission != NetworkPermission.denied &&
+            !network.radioChanging,
+        busy: network.radioChanging,
+        wide: true,
+        onTap: networkController.toggleWireless,
+        onDetails: () => popups.show(
+          keyName: 'wifi-details',
+          debugLabel: 'Wi-Fi details',
+          builder: (_, handle) => WifiDetailSurface(onClose: handle.close),
+        ),
+      ),
+      QuickTile(
+        icon: Icons.bluetooth_rounded,
+        onSettings: () => _openSettingsPage('bluetooth'),
+        title: l10n.commonBluetooth,
+        subtitle: bluetoothStatusLabel(bluetooth, l10n),
+        active: bluetooth.powered && bluetooth.available,
+        enabled:
+            !bluetooth.initializing &&
+            bluetooth.serviceAvailable &&
+            bluetooth.available &&
+            !bluetooth.powerChanging,
+        busy: bluetooth.powerChanging,
+        wide: true,
+        onTap: bluetoothController.togglePower,
+        onDetails: () => popups.show(
+          keyName: 'bluetooth-details',
+          debugLabel: 'Bluetooth details',
+          builder: (_, handle) => BluetoothDetailSurface(onClose: handle.close),
+        ),
+      ),
+      QuickTile(
+        icon: Icons.do_not_disturb_on_rounded,
+        onSettings: () => _openSettingsPage('notifications'),
+        title: l10n.quickSettingsSilent,
+        active: doNotDisturb,
+        enabled: settingsReady,
+        onTap: ref
+            .read(desktopNotificationsProvider.notifier)
+            .toggleDoNotDisturb,
+      ),
       if (rotationLock.supported)
         QuickTile(
           icon: rotationLock.locked
               ? Icons.screen_lock_rotation_rounded
               : Icons.screen_rotation_rounded,
           title: l10n.quickSettingsAutoRotate,
-          subtitle: rotationLock.error != null
-              ? l10n.commonError
-              : (rotationLock.locked ? l10n.commonOff : l10n.commonOn),
+          onSettings: () => _openSettingsPage('display'),
           active: !rotationLock.locked,
           enabled: !rotationLock.busy,
           busy: rotationLock.busy,
           onTap: () => ref.read(rotationLockProvider.notifier).toggle(),
         ),
+      QuickTile(
+        icon: profileIcon(profile),
+        onSettings: () => _openSettingsPage('battery'),
+        title: profileLabel(profile, l10n),
+        active: profile != PowerProfile.balanced,
+        onTap: ref.read(quickSettingsProvider.notifier).cycleProfile,
+      ),
       if (recording.available)
         QuickTile(
           icon: recording.recording
@@ -768,69 +647,312 @@ class _QuickSettingsTilesSection extends ConsumerWidget {
           busy: recording.busy,
           onTap: () => ref.read(screenRecordingProvider.notifier).toggle(),
         ),
+      MobileDataTile(onSettings: () => _openSettingsPage('mobile')),
       if (singleOutput)
         QuickTile(
           icon: Icons.desktop_windows_rounded,
+          onSettings: () => _openSettingsPage('monitor'),
           title: l10n.shellPresentationDesktop,
-          subtitle: presentation == ReferenceShellProfile.desktop
-              ? l10n.commonOn
-              : l10n.commonOff,
           active: presentation == ReferenceShellProfile.desktop,
-          wide: true,
           onTap: () {
             ref.read(referenceShellProvider.notifier).closeQuickSettings();
             ref.read(referenceShellPresentationProvider.notifier).toggle();
           },
         ),
     ];
-    return QuickSettingsTiles(
-      expansionProgress: progress,
-      footerTiles: footerTiles,
-      mobileDataTile: const MobileDataTile(),
-      brightnessControl: const _BrightnessRangeBar(),
-      volumeControl: const _VolumeRangeBar(),
-      wifi:
-          networkSnapshot.wirelessEnabled &&
-          networkSnapshot.wifiDeviceAvailable,
-      wifiSubtitle: wifiStatusLabel(network, l10n),
-      wifiEnabled: wifiToggleEnabled,
-      wifiBusy: network.radioChanging,
-      bluetooth: bluetooth.powered && bluetooth.available,
-      bluetoothSubtitle: bluetoothStatusLabel(bluetooth, l10n),
-      bluetoothEnabled: bluetoothToggleEnabled,
-      bluetoothBusy: bluetooth.powerChanging,
-      dnd: notificationPolicy.doNotDisturb,
-      dndReady: notificationPolicy.loaded,
-      profile: profile,
-      onToggleWifi: networkController.toggleWireless,
-      onOpenWifi: () {
-        ref
-            .read(shellPopupControllerProvider.notifier)
-            .show(
-              keyName: 'wifi-details',
-              debugLabel: 'Wi-Fi details',
-              builder: (_, handle) => WifiDetailSurface(onClose: handle.close),
+  }
+
+  /// Rows the grid needs for [tiles] (wide tiles take two columns).
+  static int _rows(List<Widget> tiles) {
+    var rows = 0;
+    var used = PixelQs.columns;
+    for (final tile in tiles) {
+      final span = tile is QuickTile && !tile.wide ? 1 : 2;
+      if (used + span > PixelQs.columns) {
+        rows++;
+        used = 0;
+      }
+      used += span;
+    }
+    return rows;
+  }
+
+  static double _gridHeight(int rows) =>
+      rows <= 0 ? 0 : rows * PixelQs.tileHeight + (rows - 1) * PixelQs.gap;
+
+  void _openSettings() {
+    ref.read(referenceShellProvider.notifier).closeQuickSettings();
+    ref.read(denialBridgeProvider).launchApplication(const <String>[
+      'denial-phone-settings',
+    ]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final padding = MediaQuery.paddingOf(context);
+    final top = math.max(8.0, padding.top);
+    final tiles = _tiles(context);
+    final rows = _rows(tiles);
+    final fullHeight = _gridHeight(rows);
+    final oneRow = _gridHeight(math.min(1, rows));
+    final twoRows = _gridHeight(math.min(2, rows));
+    final motion = Listenable.merge(<Listenable>[_expansion, widget.progress]);
+    final handlers = ShadeDragHandlers(
+      onStart: _dragStart,
+      onUpdate: _dragUpdate,
+      onEnd: _dragEnd,
+    );
+    final tilesArea = RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: motion,
+        builder: (context, _) {
+          final e = _expansion.value;
+          final stages = _ShadeStages(widget.progress.value, closing: _wasOpen);
+          // The first pull shows one tile row, then unfolds the second.
+          final firstHeight = oneRow + (twoRows - oneRow) * stages.secondRow;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              SizedBox(
+                height:
+                    _collapsedHeader + (_expandedHeader - _collapsedHeader) * e,
+                child: _PixelHeader(expansion: e),
+              ),
+              // The brightness slider grows in above the tiles.
+              ClipRect(
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  heightFactor: e,
+                  child: Opacity(
+                    opacity: e,
+                    child: const Padding(
+                      padding: EdgeInsets.only(bottom: 12),
+                      child: _BrightnessSlider(),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              // The full grid, cut to its first two rows on the first pull.
+              ClipRect(
+                child: SizedBox(
+                  height: firstHeight + (fullHeight - firstHeight) * e,
+                  child: OverflowBox(
+                    alignment: Alignment.topCenter,
+                    minHeight: fullHeight,
+                    maxHeight: fullHeight,
+                    child: PixelTileGrid(tiles: tiles),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: ref.read(referenceShellProvider.notifier).closeQuickSettings,
+      onVerticalDragStart: _dragStart,
+      onVerticalDragUpdate: _dragUpdate,
+      onVerticalDragEnd: _dragEnd,
+      onVerticalDragCancel: () => _dragEnd(DragEndDetails(primaryVelocity: 0)),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          PixelQs.margin + padding.left,
+          top,
+          PixelQs.margin + padding.right,
+          0,
+        ),
+        child: AnimatedBuilder(
+          animation: motion,
+          child: tilesArea,
+          builder: (context, tilesArea) {
+            final e = _expansion.value;
+            final stages = _ShadeStages(
+              widget.progress.value,
+              closing: _wasOpen,
             );
-      },
-      onToggleBluetooth: bluetoothController.togglePower,
-      onOpenBluetooth: () {
-        ref
-            .read(shellPopupControllerProvider.notifier)
-            .show(
-              keyName: 'bluetooth-details',
-              debugLabel: 'Bluetooth details',
-              builder: (_, handle) =>
-                  BluetoothDetailSurface(onClose: handle.close),
+            final height = MediaQuery.sizeOf(context).height;
+            // Closing, the notifications go up with the finger.
+            final lift = -stages.lift * height * 0.5;
+            final notificationsShown = stages.notifications * (1 - e * 1.4);
+            return Stack(
+              fit: StackFit.expand,
+              children: <Widget>[
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    // Revealed from the top while settling down into place.
+                    ClipRect(
+                      clipper: _RevealClipper(stages.header),
+                      child: Transform.translate(
+                        offset: Offset(0, -24 * (1 - stages.header)),
+                        child: Opacity(
+                          opacity: stages.header,
+                          child: tilesArea,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    // Notifications below the first pull's tiles; the full
+                    // quick settings push them away.
+                    Expanded(
+                      child: IgnorePointer(
+                        ignoring: e > 0.01,
+                        child: Opacity(
+                          opacity: notificationsShown.clamp(0.0, 1.0),
+                          child: Transform.translate(
+                            offset: Offset(
+                              0,
+                              120 * e + lift + 12 * (1 - stages.notifications),
+                            ),
+                            child: NotificationListener<ScrollNotification>(
+                              onNotification: _onListScroll,
+                              child: _Notifications(
+                                progress: widget.progress,
+                                closed: widget.closed,
+                                active: widget.active && e < 0.01,
+                                drag: handlers,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                // The full quick settings' footer, at the bottom of the screen.
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: math.max(16.0, padding.bottom + 8),
+                  child: IgnorePointer(
+                    ignoring: e < 0.99,
+                    child: Opacity(
+                      opacity: ((e - 0.5) * 2).clamp(0.0, 1.0),
+                      child: Align(
+                        alignment: AlignmentDirectional.centerEnd,
+                        child: ShadeActions(
+                          onOpenPower: () => showPowerSessionSurface(ref),
+                          onOpenSettings: _openSettings,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             );
-      },
-      onToggleDnd: notificationController.toggleDoNotDisturb,
-      onCycleProfile: quickSettingsController.cycleProfile,
+          },
+        ),
+      ),
     );
   }
 }
 
-class _BrightnessRangeBar extends ConsumerWidget {
-  const _BrightnessRangeBar();
+/// The shade's header: the status row (time, date, status icons) on the
+/// first pull; on the full quick settings a large clock with the date and
+/// the network's name.
+class _PixelHeader extends ConsumerWidget {
+  const _PixelHeader({required this.expansion});
+
+  final double expansion;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final scheme = phoneSchemeOf(context);
+    final now = ref.watch(clockProvider).value ?? DateTime.now();
+    final time = localizedTime(context, now);
+    // Android's short date ("Sat, 21 Nov"), which always fits.
+    final date = localizedShortDate(context, now);
+    final battery = ref.watch(batteryProvider);
+    final operator = ref.watch(mobileNetworkProvider).value?.operatorName ?? '';
+    final e = expansion;
+    final text = TextStyle(
+      color: scheme.onSurface,
+      fontSize: 14,
+      fontWeight: FontWeight.w500,
+      height: 1.2,
+    );
+    final icons = StatusCluster(battery: battery, color: scheme.onSurface);
+    final collapsed = Row(
+      children: <Widget>[
+        Text(time, style: text),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            date,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: text,
+          ),
+        ),
+        icons,
+      ],
+    );
+    final expanded = Column(
+      mainAxisAlignment: MainAxisAlignment.end,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: <Widget>[
+            Text(
+              time,
+              style: TextStyle(
+                color: scheme.onSurface,
+                fontSize: 40,
+                fontWeight: FontWeight.w500,
+                height: 1,
+              ),
+            ),
+            const Spacer(),
+            if (operator.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(operator.toUpperCase(), style: text),
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: Text(
+                date,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: text,
+              ),
+            ),
+            icons,
+          ],
+        ),
+        const SizedBox(height: 8),
+      ],
+    );
+    return IgnorePointer(
+      child: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          if (e < 1)
+            Opacity(
+              opacity: (1 - e * 2).clamp(0.0, 1.0),
+              child: Align(alignment: Alignment.topCenter, child: collapsed),
+            ),
+          if (e > 0)
+            Opacity(
+              opacity: ((e - 0.4) / 0.6).clamp(0.0, 1.0),
+              child: ClipRect(child: expanded),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BrightnessSlider extends ConsumerWidget {
+  const _BrightnessSlider();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -844,11 +966,8 @@ class _BrightnessRangeBar extends ConsumerWidget {
       ),
     );
     final controller = ref.read(displayBrightnessProvider.notifier);
-    return LiquidRangeBar(
-      iconScale: ShadeReferenceGeometry.inverseScaleOf(context),
-      icon: Icons.brightness_6_rounded,
+    return PixelBrightnessSlider(
       value: brightness,
-      trackColor: context.shellColors.brightnessTrack,
       onChanged: (value) {
         if (output != null) controller.setLevel(output, value);
       },
@@ -859,34 +978,33 @@ class _BrightnessRangeBar extends ConsumerWidget {
   }
 }
 
-class _VolumeRangeBar extends ConsumerWidget {
-  const _VolumeRangeBar();
+class _Notifications extends ConsumerWidget {
+  const _Notifications({
+    required this.progress,
+    required this.closed,
+    required this.active,
+    required this.drag,
+  });
+
+  final Animation<double> progress;
+  final bool closed;
+  final bool active;
+  final ShadeDragHandlers drag;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final volume = ref.watch(
-      quickSettingsProvider.select((state) => state.volume),
+    final empty = ref.watch(
+      desktopNotificationsProvider.select((state) => state.history.isEmpty),
     );
-    final controller = ref.read(quickSettingsProvider.notifier);
-    return LiquidRangeBar(
-      iconScale: ShadeReferenceGeometry.inverseScaleOf(context),
-      icon: Icons.volume_up_rounded,
-      value: volume,
-      trackColor: context.shellColors.volumeTrack,
-      // The bar shows the level itself: no volume indicator over the shade.
-      onChangeStart: controller.beginVolumeInteraction,
-      onChanged: controller.setDashboardVolume,
-      onChangeEnd: controller.commitDashboardVolume,
+    if (empty) return const _EmptyNotifications();
+    return _DenialNotificationScale(
+      child: MobileNotificationHistory(
+        progress: progress,
+        closed: closed,
+        active: active,
+        drag: drag,
+      ),
     );
-  }
-}
-
-class _ShadeHeaderActions extends ConsumerWidget {
-  const _ShadeHeaderActions();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return ShadeActions(onOpenPower: () => showPowerSessionSurface(ref));
   }
 }
 
@@ -895,28 +1013,135 @@ class _EmptyNotifications extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = phoneSchemeOf(context);
     return IgnorePointer(
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.notifications_none_rounded,
-              size: 32 * ShadeReferenceGeometry.inverseScaleOf(context),
-              color: context.shellColors.textTertiary,
-            ),
-            const SizedBox(height: 10),
-            Text(
-              context.l10n.notificationsNone,
-              style: ShellText.base.copyWith(
-                color: context.shellColors.textSecondary,
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
+      child: Align(
+        alignment: const Alignment(0, -0.6),
+        child: Text(
+          context.l10n.notificationsNone,
+          style: TextStyle(
+            color: scheme.onSurfaceVariant,
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
         ),
       ),
     );
   }
+}
+
+/// Draws Denial's own notification cards at the size they had before the
+/// shade moved to Android's dp (they were laid out for the ColorOS reference
+/// geometry). Goes when the cards are redone in Android's style.
+class _DenialNotificationScale extends StatelessWidget {
+  const _DenialNotificationScale({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final scale = PixelShadeViewport.scaleOf(context);
+    final media = MediaQuery.of(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final native = Size(
+          constraints.maxWidth * scale,
+          constraints.maxHeight * scale,
+        );
+        final screenWidth = (constraints.maxWidth + PixelQs.margin * 2) * scale;
+        final reference = colorOsShadeScaleForViewport(
+          Size(screenWidth, screenWidth * 2),
+        );
+        final referenceSize = native / reference;
+        return ClipRect(
+          child: OverflowBox(
+            alignment: Alignment.topLeft,
+            minWidth: native.width,
+            maxWidth: native.width,
+            minHeight: native.height,
+            maxHeight: native.height,
+            child: Transform.scale(
+              scale: reference / scale,
+              alignment: Alignment.topLeft,
+              child: OverflowBox(
+                alignment: Alignment.topLeft,
+                minWidth: referenceSize.width,
+                maxWidth: referenceSize.width,
+                minHeight: referenceSize.height,
+                maxHeight: referenceSize.height,
+                child: MediaQuery(
+                  data: media.copyWith(
+                    size: referenceSize,
+                    devicePixelRatio:
+                        media.devicePixelRatio / scale * reference,
+                    textScaler: TextScaler.linear(1 / reference),
+                    padding: EdgeInsets.zero,
+                    viewPadding: EdgeInsets.zero,
+                  ),
+                  child: ShadeReferenceGeometry(scale: reference, child: child),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Where each part of the shade is along Android's pull, from the shade's
+/// progress (the finger's share of the screen height). Opening, the blur
+/// comes first, then the header and the first tile row are revealed from the
+/// top, the notifications fade in and the second tile row unfolds. Closing an
+/// open shade runs the same stages backwards over the first part of the
+/// push, so the shade answers the finger at once.
+class _ShadeStages {
+  factory _ShadeStages(double progress, {required bool closing}) {
+    final p = progress.clamp(0.0, 1.0);
+    double stage(double begin, double end) =>
+        Curves.easeOut.transform(((p - begin) / (end - begin)).clamp(0.0, 1.0));
+    return closing
+        ? _ShadeStages._(
+            header: stage(0.45, 0.72),
+            notifications: stage(0.76, 0.97),
+            secondRow: stage(0.66, 0.9),
+            lift: 1 - p,
+          )
+        : _ShadeStages._(
+            header: stage(0.15, 0.35),
+            notifications: stage(0.33, 0.5),
+            secondRow: stage(0.45, 0.6),
+            lift: 0,
+          );
+  }
+
+  const _ShadeStages._({
+    required this.header,
+    required this.notifications,
+    required this.secondRow,
+    required this.lift,
+  });
+
+  final double header;
+  final double notifications;
+  final double secondRow;
+
+  /// The finger's travel since an open shade started closing, as a share of
+  /// the screen height.
+  final double lift;
+}
+
+/// Shows the top [fraction] of its child.
+class _RevealClipper extends CustomClipper<Rect> {
+  const _RevealClipper(this.fraction);
+
+  final double fraction;
+
+  @override
+  Rect getClip(Size size) =>
+      Rect.fromLTWH(0, 0, size.width, size.height * fraction);
+
+  @override
+  bool shouldReclip(_RevealClipper oldClipper) =>
+      oldClipper.fraction != fraction;
 }
