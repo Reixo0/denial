@@ -17,7 +17,8 @@ use super::native_shortcut::{
     ShortcutInputDefinition, ShortcutInputKind, ShortcutTarget, ShortcutValidation,
 };
 use super::notification_server::{
-    Notification, NotificationEvent, NotificationEventKind, NotificationUrgency,
+    Notification, NotificationEvent, NotificationEventKind, NotificationImageData,
+    NotificationUrgency,
 };
 use super::options::{
     MAX_MAXIMIZE_PADDING, MAX_SYSTEM_BAR_THICKNESS, SystemBarOptions, SystemBarSide,

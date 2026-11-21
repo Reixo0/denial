@@ -91,6 +91,8 @@ pub(super) struct Notification {
     pub(super) desktop_entry: String,
     pub(super) image_path: String,
     pub(super) image_data: Option<NotificationImageData>,
+    /// `x-denial-small-icon`: the status bar icon, white on clear.
+    pub(super) small_icon: Option<NotificationImageData>,
     pub(super) resident: bool,
     pub(super) transient: bool,
     pub(super) suppress_sound: bool,
@@ -113,6 +115,10 @@ pub(super) struct Notification {
     pub(super) messages: Vec<NotificationMessage>,
     /// `x-denial-clearable`: false keeps it until the app closes it.
     pub(super) clearable: bool,
+    /// `x-denial-channel`: the sender's name for this kind of notification.
+    pub(super) channel: String,
+    /// `x-denial-controls`: the settings the sender takes as actions.
+    pub(super) controls: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -714,6 +720,15 @@ impl NotificationStore {
         let Some(stored) = self.notifications.get_mut(&notification_id) else {
             return ActionDecision::UnknownNotification;
         };
+        // A setting can be changed again, and leaves the notification.
+        if stored
+            .notification
+            .controls
+            .iter()
+            .any(|control| control == action_key)
+        {
+            return ActionDecision::Invoke { resident: true };
+        }
         if !stored
             .notification
             .actions
@@ -753,6 +768,9 @@ fn changes_content(previous: &Notification, next: &Notification) -> bool {
         || previous.app_icon != next.app_icon
         || previous.image_path != next.image_path
         || previous.image_data != next.image_data
+        || previous.small_icon != next.small_icon
+        || previous.channel != next.channel
+        || previous.controls != next.controls
 }
 
 enum ActionDecision {
@@ -845,7 +863,8 @@ fn normalize_notification(
         category: hint_string(hints, "category"),
         desktop_entry,
         image_path,
-        image_data: parse_image_data(hints),
+        image_data: parse_image_data(hints, &["image-data", "image_data", "icon_data"]),
+        small_icon: parse_image_data(hints, &["x-denial-small-icon"]),
         resident: hint_bool(hints, "resident"),
         transient: hint_bool(hints, "transient"),
         suppress_sound: hint_bool(hints, "suppress-sound"),
@@ -871,7 +890,31 @@ fn normalize_notification(
             .get("x-denial-clearable")
             .and_then(|value| bool::try_from(value).ok())
             .unwrap_or(true),
+        channel: hint_string(hints, "x-denial-channel"),
+        controls: parse_controls(hints),
     }
+}
+
+/// The settings a sender takes as actions: only Denial's known ones.
+fn parse_controls(hints: &HashMap<String, OwnedValue>) -> Vec<String> {
+    const KNOWN: [&str; 4] = [
+        "x-denial-alerting",
+        "x-denial-silent",
+        "x-denial-turn-off",
+        "x-denial-settings",
+    ];
+    let Some(controls) = hints
+        .get("x-denial-controls")
+        .and_then(|value| value.try_clone().ok())
+        .and_then(|value| Vec::<String>::try_from(value).ok())
+    else {
+        return Vec::new();
+    };
+    KNOWN
+        .into_iter()
+        .filter(|known| controls.iter().any(|control| control == known))
+        .map(str::to_owned)
+        .collect()
 }
 
 fn now_ms() -> i64 {
@@ -920,15 +963,17 @@ fn normalize_actions(actions: Vec<String>) -> Vec<NotificationAction> {
     normalized
 }
 
-fn parse_image_data(hints: &HashMap<String, OwnedValue>) -> Option<NotificationImageData> {
+fn parse_image_data(
+    hints: &HashMap<String, OwnedValue>,
+    keys: &[&str],
+) -> Option<NotificationImageData> {
     type RawImage = (i32, i32, i32, bool, i32, i32, Vec<u8>);
 
     let (width, height, row_stride, has_alpha, bits_per_sample, channels, data) =
-        ["image-data", "image_data", "icon_data"]
-            .into_iter()
+        keys.iter()
             .find_map(|key| {
                 hints
-                    .get(key)
+                    .get(*key)
                     .and_then(|value| value.try_clone().ok())
                     .and_then(|value| RawImage::try_from(value).ok())
             })?;

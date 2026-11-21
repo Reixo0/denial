@@ -866,6 +866,15 @@ table DesktopNotification {
   // False for notifications the user can't dismiss; they leave only when the
   // app closes them.
   clearable:bool = true;
+  // The notification's small icon (Android's status bar icon): white on
+  // clear, drawn tinted. Absent when the sender has none.
+  small_icon:DesktopNotificationImageData;
+  // The sender's name for the kind of notification (Android's channel).
+  channel:string;
+  // Settings the sender takes as actions (`x-denial-alerting`,
+  // `x-denial-silent`, `x-denial-turn-off`, `x-denial-settings`); they never
+  // show as buttons and never close the notification.
+  controls:[string];
 }
 
 table DesktopNotificationEvent {

@@ -1374,6 +1374,8 @@ class DenialWireCodec {
     final soundName = source.soundName ?? '';
     final soundFile = source.soundFile ?? '';
     final groupKey = source.groupKey ?? '';
+    final channel = source.channel ?? '';
+    final controls = source.controls ?? const <String>[];
     final sourceMessages =
         source.messages ?? const <generated.DesktopNotificationMessage>[];
     final sourceActions =
@@ -1389,6 +1391,9 @@ class DenialWireCodec {
         soundName.length > denialWireMaxStringLength ||
         soundFile.length > denialWireMaxStringLength ||
         groupKey.length > denialWireMaxStringLength ||
+        channel.length > denialWireMaxStringLength ||
+        controls.length > 4 ||
+        controls.any((control) => control.length > denialWireMaxStringLength) ||
         sourceActions.length > denialWireMaxNotificationActions ||
         sourceMessages.length > denialWireMaxNotificationMessages) {
       rejectedStructuredMessages += 1;
@@ -1421,9 +1426,12 @@ class DenialWireCodec {
       );
     }
 
-    model.DesktopNotificationImageData? image;
-    final sourceImage = source.imageData;
-    if (sourceImage != null) {
+    // A malformed image rejects the whole event.
+    var malformed = false;
+    model.DesktopNotificationImageData? decodeImage(
+      generated.DesktopNotificationImageData? sourceImage,
+    ) {
+      if (sourceImage == null) return null;
       final data = sourceImage.data ?? const <int>[];
       final expectedChannels = sourceImage.hasAlpha ? 4 : 3;
       final requiredBytes = sourceImage.rowStride * sourceImage.height;
@@ -1437,10 +1445,10 @@ class DenialWireCodec {
           requiredBytes <= 0 ||
           requiredBytes > denialWireMaxNotificationImageBytes ||
           data.length != requiredBytes) {
-        rejectedStructuredMessages += 1;
+        malformed = true;
         return null;
       }
-      image = model.DesktopNotificationImageData(
+      return model.DesktopNotificationImageData(
         width: sourceImage.width,
         height: sourceImage.height,
         rowStride: sourceImage.rowStride,
@@ -1449,6 +1457,13 @@ class DenialWireCodec {
         channels: sourceImage.channels,
         data: Uint8List.fromList(data),
       );
+    }
+
+    final image = decodeImage(source.imageData);
+    final smallIcon = decodeImage(source.smallIcon);
+    if (malformed) {
+      rejectedStructuredMessages += 1;
+      return null;
     }
 
     return model.DesktopNotificationEvent(
@@ -1493,6 +1508,9 @@ class DenialWireCodec {
         timeMs: source.timeMs,
         messages: List<model.DesktopNotificationMessage>.unmodifiable(messages),
         clearable: source.clearable,
+        smallIcon: smallIcon,
+        channel: channel,
+        controls: List<String>.unmodifiable(controls),
       ),
     );
   }

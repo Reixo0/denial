@@ -195,6 +195,17 @@ class DesktopNotificationsController extends Notifier<DesktopNotificationsState>
     );
   }
 
+  /// Changes one of the sender's settings for this notification (see
+  /// [DesktopNotification.controls]). It can be changed again, and the
+  /// notification stays.
+  bool invokeControl(int notificationId, String control) {
+    final notification = state.active[notificationId];
+    if (notification == null || !notification.controls.contains(control)) {
+      return false;
+    }
+    return _invokeAction(notificationId, control);
+  }
+
   bool invokeDefaultAction(int notificationId) {
     final notification = state.active[notificationId];
     if (notification == null ||

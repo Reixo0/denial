@@ -10829,6 +10829,9 @@ impl<'a> DesktopNotification<'a> {
   pub const VT_TIME_MS: flatbuffers::VOffsetT = 58;
   pub const VT_MESSAGES: flatbuffers::VOffsetT = 60;
   pub const VT_CLEARABLE: flatbuffers::VOffsetT = 62;
+  pub const VT_SMALL_ICON: flatbuffers::VOffsetT = 64;
+  pub const VT_CHANNEL: flatbuffers::VOffsetT = 66;
+  pub const VT_CONTROLS: flatbuffers::VOffsetT = 68;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -10841,6 +10844,9 @@ impl<'a> DesktopNotification<'a> {
   ) -> flatbuffers::WIPOffset<DesktopNotification<'bldr>> {
     let mut builder = DesktopNotificationBuilder::new(_fbb);
     builder.add_time_ms(args.time_ms);
+    if let Some(x) = args.controls { builder.add_controls(x); }
+    if let Some(x) = args.channel { builder.add_channel(x); }
+    if let Some(x) = args.small_icon { builder.add_small_icon(x); }
     if let Some(x) = args.messages { builder.add_messages(x); }
     if let Some(x) = args.group_key { builder.add_group_key(x); }
     builder.add_expire_timeout_ms(args.expire_timeout_ms);
@@ -11084,6 +11090,27 @@ impl<'a> DesktopNotification<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<bool>(DesktopNotification::VT_CLEARABLE, Some(true)).unwrap()}
   }
+  #[inline]
+  pub fn small_icon(&self) -> Option<DesktopNotificationImageData<'a>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<DesktopNotificationImageData>>(DesktopNotification::VT_SMALL_ICON, None)}
+  }
+  #[inline]
+  pub fn channel(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(DesktopNotification::VT_CHANNEL, None)}
+  }
+  #[inline]
+  pub fn controls(&self) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>>>>(DesktopNotification::VT_CONTROLS, None)}
+  }
 }
 
 impl flatbuffers::Verifiable for DesktopNotification<'_> {
@@ -11123,6 +11150,9 @@ impl flatbuffers::Verifiable for DesktopNotification<'_> {
      .visit_field::<i64>("time_ms", Self::VT_TIME_MS, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<DesktopNotificationMessage>>>>("messages", Self::VT_MESSAGES, false)?
      .visit_field::<bool>("clearable", Self::VT_CLEARABLE, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<DesktopNotificationImageData>>("small_icon", Self::VT_SMALL_ICON, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("channel", Self::VT_CHANNEL, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<&'_ str>>>>("controls", Self::VT_CONTROLS, false)?
      .finish();
     Ok(())
   }
@@ -11158,6 +11188,9 @@ pub struct DesktopNotificationArgs<'a> {
     pub time_ms: i64,
     pub messages: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<DesktopNotificationMessage<'a>>>>>,
     pub clearable: bool,
+    pub small_icon: Option<flatbuffers::WIPOffset<DesktopNotificationImageData<'a>>>,
+    pub channel: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub controls: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>>>>,
 }
 impl<'a> Default for DesktopNotificationArgs<'a> {
   #[inline]
@@ -11193,6 +11226,9 @@ impl<'a> Default for DesktopNotificationArgs<'a> {
       time_ms: 0,
       messages: None,
       clearable: true,
+      small_icon: None,
+      channel: None,
+      controls: None,
     }
   }
 }
@@ -11323,6 +11359,18 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> DesktopNotificationBuilder<'a, 
     self.fbb_.push_slot::<bool>(DesktopNotification::VT_CLEARABLE, clearable, true);
   }
   #[inline]
+  pub fn add_small_icon(&mut self, small_icon: flatbuffers::WIPOffset<DesktopNotificationImageData<'b >>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<DesktopNotificationImageData>>(DesktopNotification::VT_SMALL_ICON, small_icon);
+  }
+  #[inline]
+  pub fn add_channel(&mut self, channel: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(DesktopNotification::VT_CHANNEL, channel);
+  }
+  #[inline]
+  pub fn add_controls(&mut self, controls: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<&'b  str>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(DesktopNotification::VT_CONTROLS, controls);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> DesktopNotificationBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     DesktopNotificationBuilder {
@@ -11370,6 +11418,9 @@ impl core::fmt::Debug for DesktopNotification<'_> {
       ds.field("time_ms", &self.time_ms());
       ds.field("messages", &self.messages());
       ds.field("clearable", &self.clearable());
+      ds.field("small_icon", &self.small_icon());
+      ds.field("channel", &self.channel());
+      ds.field("controls", &self.controls());
       ds.finish()
   }
 }

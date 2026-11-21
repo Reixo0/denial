@@ -6193,10 +6193,13 @@ class DesktopNotification {
   int get timeMs => const fb.Int64Reader().vTableGet(_bc, _bcOffset, 58, 0);
   List<DesktopNotificationMessage>? get messages => const fb.ListReader<DesktopNotificationMessage>(DesktopNotificationMessage.reader).vTableGetNullable(_bc, _bcOffset, 60);
   bool get clearable => const fb.BoolReader().vTableGet(_bc, _bcOffset, 62, true);
+  DesktopNotificationImageData? get smallIcon => DesktopNotificationImageData.reader.vTableGetNullable(_bc, _bcOffset, 64);
+  String? get channel => const fb.StringReader().vTableGetNullable(_bc, _bcOffset, 66);
+  List<String>? get controls => const fb.ListReader<String>(fb.StringReader()).vTableGetNullable(_bc, _bcOffset, 68);
 
   @override
   String toString() {
-    return 'DesktopNotification{id: ${id}, sender: ${sender}, appName: ${appName}, appIcon: ${appIcon}, summary: ${summary}, body: ${body}, actions: ${actions}, urgency: ${urgency}, category: ${category}, desktopEntry: ${desktopEntry}, imagePath: ${imagePath}, imageData: ${imageData}, resident: ${resident}, transient: ${transient}, suppressSound: ${suppressSound}, actionIcons: ${actionIcons}, soundName: ${soundName}, soundFile: ${soundFile}, x: ${x}, y: ${y}, hasPosition: ${hasPosition}, progress: ${progress}, hasProgress: ${hasProgress}, expireTimeoutMs: ${expireTimeoutMs}, alert: ${alert}, groupKey: ${groupKey}, groupSummary: ${groupSummary}, timeMs: ${timeMs}, messages: ${messages}, clearable: ${clearable}}';
+    return 'DesktopNotification{id: ${id}, sender: ${sender}, appName: ${appName}, appIcon: ${appIcon}, summary: ${summary}, body: ${body}, actions: ${actions}, urgency: ${urgency}, category: ${category}, desktopEntry: ${desktopEntry}, imagePath: ${imagePath}, imageData: ${imageData}, resident: ${resident}, transient: ${transient}, suppressSound: ${suppressSound}, actionIcons: ${actionIcons}, soundName: ${soundName}, soundFile: ${soundFile}, x: ${x}, y: ${y}, hasPosition: ${hasPosition}, progress: ${progress}, hasProgress: ${hasProgress}, expireTimeoutMs: ${expireTimeoutMs}, alert: ${alert}, groupKey: ${groupKey}, groupSummary: ${groupSummary}, timeMs: ${timeMs}, messages: ${messages}, clearable: ${clearable}, smallIcon: ${smallIcon}, channel: ${channel}, controls: ${controls}}';
   }
 }
 
@@ -6214,7 +6217,7 @@ class DesktopNotificationBuilder {
   final fb.Builder fbBuilder;
 
   void begin() {
-    fbBuilder.startTable(30);
+    fbBuilder.startTable(33);
   }
 
   int addId(int? id) {
@@ -6337,6 +6340,18 @@ class DesktopNotificationBuilder {
     fbBuilder.addBool(29, clearable);
     return fbBuilder.offset;
   }
+  int addSmallIconOffset(int? offset) {
+    fbBuilder.addOffset(30, offset);
+    return fbBuilder.offset;
+  }
+  int addChannelOffset(int? offset) {
+    fbBuilder.addOffset(31, offset);
+    return fbBuilder.offset;
+  }
+  int addControlsOffset(int? offset) {
+    fbBuilder.addOffset(32, offset);
+    return fbBuilder.offset;
+  }
 
   int finish() {
     return fbBuilder.endTable();
@@ -6374,6 +6389,9 @@ class DesktopNotificationObjectBuilder extends fb.ObjectBuilder {
   final int? _timeMs;
   final List<DesktopNotificationMessageObjectBuilder>? _messages;
   final bool? _clearable;
+  final DesktopNotificationImageDataObjectBuilder? _smallIcon;
+  final String? _channel;
+  final List<String>? _controls;
 
   DesktopNotificationObjectBuilder({
     int? id,
@@ -6406,6 +6424,9 @@ class DesktopNotificationObjectBuilder extends fb.ObjectBuilder {
     int? timeMs,
     List<DesktopNotificationMessageObjectBuilder>? messages,
     bool? clearable,
+    DesktopNotificationImageDataObjectBuilder? smallIcon,
+    String? channel,
+    List<String>? controls,
   })
       : _id = id,
         _sender = sender,
@@ -6436,7 +6457,10 @@ class DesktopNotificationObjectBuilder extends fb.ObjectBuilder {
         _groupSummary = groupSummary,
         _timeMs = timeMs,
         _messages = messages,
-        _clearable = clearable;
+        _clearable = clearable,
+        _smallIcon = smallIcon,
+        _channel = channel,
+        _controls = controls;
 
   /// Finish building, and store into the [fbBuilder].
   @override
@@ -6468,7 +6492,12 @@ class DesktopNotificationObjectBuilder extends fb.ObjectBuilder {
         : fbBuilder.writeString(_groupKey!);
     final int? messagesOffset = _messages == null ? null
         : fbBuilder.writeList(_messages!.map((b) => b.getOrCreateOffset(fbBuilder)).toList());
-    fbBuilder.startTable(30);
+    final int? smallIconOffset = _smallIcon?.getOrCreateOffset(fbBuilder);
+    final int? channelOffset = _channel == null ? null
+        : fbBuilder.writeString(_channel!);
+    final int? controlsOffset = _controls == null ? null
+        : fbBuilder.writeList(_controls!.map(fbBuilder.writeString).toList());
+    fbBuilder.startTable(33);
     fbBuilder.addUint32(0, _id);
     fbBuilder.addOffset(1, senderOffset);
     fbBuilder.addOffset(2, appNameOffset);
@@ -6499,6 +6528,9 @@ class DesktopNotificationObjectBuilder extends fb.ObjectBuilder {
     fbBuilder.addInt64(27, _timeMs);
     fbBuilder.addOffset(28, messagesOffset);
     fbBuilder.addBool(29, _clearable);
+    fbBuilder.addOffset(30, smallIconOffset);
+    fbBuilder.addOffset(31, channelOffset);
+    fbBuilder.addOffset(32, controlsOffset);
     return fbBuilder.endTable();
   }
 

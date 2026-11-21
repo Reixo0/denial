@@ -1631,7 +1631,7 @@ fn encode_notification<'a>(
         ));
     }
     let actions = builder.create_vector(&action_offsets);
-    let image_data = notification.image_data.as_ref().map(|image| {
+    let mut image = |image: &NotificationImageData| {
         let data = builder.create_vector(&image.data);
         fb::DesktopNotificationImageData::create(
             builder,
@@ -1645,7 +1645,9 @@ fn encode_notification<'a>(
                 data: Some(data),
             },
         )
-    });
+    };
+    let image_data = notification.image_data.as_ref().map(&mut image);
+    let small_icon = notification.small_icon.as_ref().map(&mut image);
     let sender = builder.create_string(&notification.sender);
     let app_name = builder.create_string(&notification.app_name);
     let app_icon = builder.create_string(&notification.app_icon);
@@ -1657,6 +1659,13 @@ fn encode_notification<'a>(
     let sound_name = builder.create_string(&notification.sound_name);
     let sound_file = builder.create_string(&notification.sound_file);
     let group_key = builder.create_string(&notification.group_key);
+    let channel = builder.create_string(&notification.channel);
+    let control_offsets = notification
+        .controls
+        .iter()
+        .map(|control| builder.create_string(control))
+        .collect::<Vec<_>>();
+    let controls = builder.create_vector(&control_offsets);
     let message_offsets = notification
         .messages
         .iter()
@@ -1693,6 +1702,9 @@ fn encode_notification<'a>(
             desktop_entry: Some(desktop_entry),
             image_path: Some(image_path),
             image_data,
+            small_icon,
+            channel: Some(channel),
+            controls: Some(controls),
             resident: notification.resident,
             transient: notification.transient,
             suppress_sound: notification.suppress_sound,

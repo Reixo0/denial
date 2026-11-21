@@ -71,6 +71,9 @@ class DesktopNotification {
     this.timeMs = 0,
     this.messages = const [],
     this.clearable = true,
+    this.smallIcon,
+    this.channel = '',
+    this.controls = const <String>[],
   });
 
   final int id;
@@ -120,6 +123,17 @@ class DesktopNotification {
 
   /// False when the user can't dismiss it; it leaves when its app closes it.
   final bool clearable;
+
+  /// The status bar icon (Android's small icon): white on clear, drawn
+  /// tinted. Null when the sender has none.
+  final DesktopNotificationImageData? smallIcon;
+
+  /// The sender's name for this kind of notification (Android's channel).
+  final String channel;
+
+  /// The settings the sender takes as actions: `x-denial-alerting`,
+  /// `x-denial-silent`, `x-denial-turn-off`, `x-denial-settings`.
+  final List<String> controls;
 
   /// Ongoing notifications belong in history, without a heads-up banner.
   bool get historyOnly => resident || expireTimeoutMs == 0;

@@ -1136,13 +1136,22 @@ pub(super) fn validate_notification_event(event: &NotificationEvent) -> Result<(
                     &notification.image_path,
                     &notification.sound_name,
                     &notification.sound_file,
+                    &notification.channel,
                 ]
                 .into_iter()
                 .any(|value| value.len() > MAX_STRING_BYTES)
+                || notification.controls.len() > 4
+                || notification
+                    .controls
+                    .iter()
+                    .any(|control| control.len() > MAX_STRING_BYTES)
             {
                 return Err(WireError::String);
             }
-            if let Some(image) = notification.image_data.as_ref() {
+            for image in [&notification.image_data, &notification.small_icon]
+                .into_iter()
+                .flatten()
+            {
                 let expected_channels = if image.has_alpha { 4 } else { 3 };
                 let required = (image.row_stride as usize)
                     .checked_mul(image.height as usize)
