@@ -94,7 +94,7 @@ class RenderShadeBackdropScene extends RenderProxyBox {
       super.paint(context, offset);
       return;
     }
-    final blurFraction = ColorOsShadeMotion.blurFraction(_progress.value);
+    final blurFraction = AospShadeInterpolation.scrimAlpha(_progress.value);
     // Dim the scene before taking its shared backdrop sample. The panel and
     // cards stay bright, and the shade follows interactive motion directly.
     context.canvas.drawRect(

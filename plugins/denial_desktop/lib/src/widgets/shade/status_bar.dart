@@ -24,7 +24,7 @@ import 'quick_settings_panel.dart' show PixelShadeViewport;
 import 'status_glyphs.dart';
 
 /// The status row's geometry and its path into the shade header, shared by
-/// [ShadeStatusBar] and [ShadeHeaderStatusLayer].
+/// [ShadeStatusBar].
 class _StatusGeometry {
   _StatusGeometry.of(BuildContext context)
     : topPadding = MediaQuery.paddingOf(context).top,
@@ -48,7 +48,9 @@ class _StatusGeometry {
     double progress,
     Color foreground,
   ) {
-    final fraction = ColorOsShadeMotion.translationFraction(progress);
+    // The row's path into a shade header, unused since the shade draws its
+    // own header: the bar only draws it closed.
+    final fraction = unit(progress / 0.86);
     final color = _statusColorAt(context, foreground, progress);
     return [_cluster(fraction, color), ..._clock(context, fraction, color)];
   }
@@ -147,7 +149,7 @@ Color _statusColorAt(BuildContext context, Color foreground, double progress) {
   return Color.lerp(
     foreground,
     context.shellColors.panelText,
-    ColorOsShadeMotion.blurFraction(progress),
+    AospShadeInterpolation.scrimAlpha(progress),
   )!;
 }
 
@@ -155,9 +157,9 @@ Color _statusColorAt(BuildContext context, Color foreground, double progress) {
 /// shade. Time and battery are isolated into their own consumers so their
 /// periodic updates never rebuild the drag surface.
 ///
-/// While the shade is open, the shade draws the whole row beneath its
-/// notifications through [ShadeHeaderStatusLayer]; the bar keeps only its
-/// drag surface. A landscape view shows no bar, only that surface.
+/// As on Android it fades under the shade's scrim while the shade comes
+/// down, and the shade's own header takes over the clock and icons. A
+/// landscape view shows no bar, only its drag surface.
 class ShadeStatusBar extends ConsumerStatefulWidget {
   const ShadeStatusBar({super.key, required this.expansion});
 
@@ -228,7 +230,7 @@ class _ShadeStatusBarState extends ConsumerState<ShadeStatusBar> {
               child: AnimatedBuilder(
                 animation: progress,
                 builder: (context, row) {
-                  final covered = ColorOsShadeMotion.blurFraction(
+                  final covered = AospShadeInterpolation.scrimAlpha(
                     progress.value,
                   );
                   if (covered >= 1 || !shown) return const SizedBox.expand();
@@ -242,40 +244,6 @@ class _ShadeStatusBarState extends ConsumerState<ShadeStatusBar> {
               ),
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-/// The status row of an open shade: icons, clock and date, which the shade
-/// draws beneath its notifications so they scroll over it. It continues the
-/// status bar exactly, in the same screen coordinates.
-class ShadeHeaderStatusLayer extends ConsumerWidget {
-  const ShadeHeaderStatusLayer({super.key, required this.progress});
-
-  final Animation<double> progress;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final foreground = _statusForeground(context, ref);
-    final geometry = _StatusGeometry.of(context);
-    return IgnorePointer(
-      child: RepaintBoundary(
-        child: AnimatedBuilder(
-          animation: progress,
-          builder: (context, _) {
-            if (progress.value <= 0) return const SizedBox.expand();
-            return Stack(
-              fit: StackFit.expand,
-              clipBehavior: Clip.none,
-              children: geometry.foreground(
-                context,
-                progress.value,
-                foreground,
-              ),
-            );
-          },
         ),
       ),
     );

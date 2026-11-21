@@ -51,7 +51,7 @@ WindowBackdropCache? _frostedShadeBackdrop(BuildContext context) =>
     : null;
 
 final _blurFraction = Animatable<double>.fromCallback(
-  ColorOsShadeMotion.blurFraction,
+  AospShadeInterpolation.scrimAlpha,
 );
 
 EdgeInsets _divideInsets(EdgeInsets insets, double divisor) => EdgeInsets.only(
@@ -149,7 +149,7 @@ class _FullScreenShade extends StatelessWidget {
       animation: progress,
       child: ColoredBox(color: panel),
       builder: (context, background) => Opacity(
-        opacity: ColorOsShadeMotion.blurFraction(progress.value),
+        opacity: AospShadeInterpolation.scrimAlpha(progress.value),
         child: background,
       ),
     );
@@ -208,7 +208,7 @@ class _FullScreenShade extends StatelessWidget {
             ],
           ),
           builder: (context, composedShade) {
-            final blur = ColorOsShadeMotion.blurFraction(progress.value);
+            final blur = AospShadeInterpolation.scrimAlpha(progress.value);
             return ShellBackdropBlur(
               grouped: true,
               blur:
@@ -340,12 +340,13 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
   static const double _collapsedHeader = 40;
   static const double _expandedHeader = 142;
 
+  /// The full quick settings' footer actions under the tiles: 8 dp, then a
+  /// 48 dp row (AOSP's footer actions).
+  static const double _footerHeight = 56;
+
   /// The quick settings' fraction: 0 the quick tiles, 1 the full QS.
   AnimationController get _expansion => widget.expansion.qs;
 
-  /// The shade reached fully open since it was last closed: moving back
-  /// down its progress is closing, which runs the stages backwards.
-  bool _wasOpen = false;
   bool _closedBefore = true;
 
   /// The notification list's overscroll is moving the shade.
@@ -370,11 +371,6 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
       });
     }
     _closedBefore = p <= 0.001;
-    if (p >= 0.999) {
-      _wasOpen = true;
-    } else if (p <= 0.001) {
-      _wasOpen = false;
-    }
   }
 
   @override
@@ -684,7 +680,6 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
     final gridHeight = PixelPagedTileGrid.heightOf(tiles);
     // The grid and AOSP's footer bar under it (page dots).
     final fullHeight = gridHeight + PixelPagedTileGrid.footerHeight;
-    final oneRow = PixelPagedTileGrid.gridHeight(math.min(1, rows));
     final twoRows = PixelPagedTileGrid.gridHeight(math.min(2, rows));
     final motion = Listenable.merge(<Listenable>[_expansion, widget.progress]);
     final tilesArea = RepaintBoundary(
@@ -692,9 +687,8 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
         animation: motion,
         builder: (context, _) {
           final e = _expansion.value;
-          final stages = _ShadeStages(widget.progress.value, closing: _wasOpen);
-          // The first pull shows one tile row, then unfolds the second.
-          final firstHeight = oneRow + (twoRows - oneRow) * stages.secondRow;
+          // The first pull shows the first two tile rows (Android's QQS).
+          final firstHeight = twoRows;
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
@@ -770,6 +764,36 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
                   ),
                 ),
               ),
+              // AOSP: the footer actions (settings, power) belong to the
+              // full quick settings, under the tiles; they grow in with it.
+              ClipRect(
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  heightFactor: e,
+                  child: SizedBox(
+                    height: _footerHeight,
+                    child: IgnorePointer(
+                      ignoring: e < 0.99,
+                      child: Opacity(
+                        // AOSP: footer actions fade in from 0.9.
+                        opacity: ((e - 0.9) / 0.1).clamp(0.0, 1.0),
+                        child: Align(
+                          alignment: AlignmentDirectional.bottomEnd,
+                          child: SizedBox(
+                            height: 48,
+                            child: Center(
+                              child: ShadeActions(
+                                onOpenPower: () => showPowerSessionSurface(ref),
+                                onOpenSettings: _openSettings,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ],
           );
         },
@@ -789,44 +813,42 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
           child: tilesArea,
           builder: (context, tilesArea) {
             final e = _expansion.value;
-            final stages = _ShadeStages(
-              widget.progress.value,
-              closing: _wasOpen,
-            );
-            final height = MediaQuery.sizeOf(context).height;
-            // The full quick settings push the notifications down to the
-            // bottom of the screen, as Android's stack follows the QS height
-            // (no fade). The column already moves them by the tiles' growth.
-            final firstHeight = oneRow + (twoRows - oneRow) * stages.secondRow;
-            final restingTop = top + _collapsedHeader + 8 + firstHeight + 16;
+            final p = widget.progress.value;
+            // AOSP: the notifications start at the quick settings' bottom
+            // edge (calculateNotificationsTopPadding), so they move only by
+            // the quick settings' growth: the column does that.
+            final firstHeight = twoRows;
             final travel =
                 _expandedHeader -
                 _collapsedHeader +
                 58 +
                 fullHeight -
-                firstHeight;
+                firstHeight +
+                _footerHeight;
             // The quick settings follow the finger over the tiles' growth.
-            if (stages.secondRow >= 1 && travel > 120) {
+            if (travel > 120) {
               widget.expansion.qsTravel =
                   travel * PixelShadeViewport.scaleOf(context);
             }
-            final growth = e * travel;
-            final pushed = e * (height - restingTop) - growth;
             return Stack(
               fit: StackFit.expand,
               children: <Widget>[
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
-                    // Revealed from the top while settling down into place.
-                    ClipRect(
-                      clipper: _RevealClipper(stages.header),
-                      child: Transform.translate(
-                        offset: Offset(0, -24 * (1 - stages.header)),
-                        child: Opacity(
-                          opacity: stages.header,
-                          child: tilesArea,
-                        ),
+                    // AOSP: the quick settings come down a little with the
+                    // pull (getHeaderTranslation, QS_PARALLAX_AMOUNT) and
+                    // fade in with the shade's content (getContentAlpha).
+                    Transform.translate(
+                      offset: Offset(
+                        0,
+                        -AospShadeInterpolation.qsParallax *
+                            (_collapsedHeader + 8 + firstHeight) *
+                            (1 - p),
+                      ),
+                      child: Opacity(
+                        opacity: AospShadeInterpolation.contentAlpha(p),
+                        child: tilesArea,
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -842,42 +864,19 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
                           opacity: AndroidStackExpansion.alpha(
                             widget.progress.value,
                           ),
-                          child: Transform.translate(
-                            offset: Offset(0, pushed),
-                            child: NotificationListener<ScrollNotification>(
-                              onNotification: _onListScroll,
-                              child: _Notifications(
-                                progress: widget.progress,
-                                closed: widget.closed,
-                                active: widget.active && e < 0.01,
-                                expansion: widget.expansion,
-                              ),
+                          child: NotificationListener<ScrollNotification>(
+                            onNotification: _onListScroll,
+                            child: _Notifications(
+                              progress: widget.progress,
+                              closed: widget.closed,
+                              active: widget.active && e < 0.01,
+                              expansion: widget.expansion,
                             ),
                           ),
                         ),
                       ),
                     ),
                   ],
-                ),
-                // The full quick settings' footer, at the bottom of the screen.
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: math.max(16.0, padding.bottom + 8),
-                  child: IgnorePointer(
-                    ignoring: e < 0.99,
-                    child: Opacity(
-                      // AOSP: footer actions fade in from 0.9.
-                      opacity: ((e - 0.9) / 0.1).clamp(0.0, 1.0),
-                      child: Align(
-                        alignment: AlignmentDirectional.centerEnd,
-                        child: ShadeActions(
-                          onOpenPower: () => showPowerSessionSurface(ref),
-                          onOpenSettings: _openSettings,
-                        ),
-                      ),
-                    ),
-                  ),
                 ),
               ],
             );
@@ -1117,46 +1116,6 @@ class _EmptyNotifications extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Where each part of the shade is along Android's pull, from the shade's
-/// progress (the finger's share of the screen height). Opening, the blur
-/// comes first, then the header and the first tile row are revealed from the
-/// top, the notifications fade in and the second tile row unfolds. Closing an
-/// open shade runs the same stages backwards over the first part of the
-/// push, so the shade answers the finger at once.
-class _ShadeStages {
-  factory _ShadeStages(double progress, {required bool closing}) {
-    final p = progress.clamp(0.0, 1.0);
-    double stage(double begin, double end) =>
-        Curves.easeOut.transform(((p - begin) / (end - begin)).clamp(0.0, 1.0));
-    return closing
-        ? _ShadeStages._(header: stage(0.45, 0.72), secondRow: stage(0.66, 0.9))
-        : _ShadeStages._(
-            header: stage(0.15, 0.35),
-            secondRow: stage(0.45, 0.6),
-          );
-  }
-
-  const _ShadeStages._({required this.header, required this.secondRow});
-
-  final double header;
-  final double secondRow;
-}
-
-/// Shows the top [fraction] of its child.
-class _RevealClipper extends CustomClipper<Rect> {
-  const _RevealClipper(this.fraction);
-
-  final double fraction;
-
-  @override
-  Rect getClip(Size size) =>
-      Rect.fromLTWH(0, 0, size.width, size.height * fraction);
-
-  @override
-  bool shouldReclip(_RevealClipper oldClipper) =>
-      oldClipper.fraction != fraction;
 }
 
 /// AOSP's EditModeButton: an icon button (40 dp, the pencil, 24 dp).

@@ -31,7 +31,7 @@ final shadeCoversProvider = Provider<ValueListenable<bool>>((ref) {
   final progress = ref.watch(shadeProgressProvider);
   final covers = SelectedListenable(
     progress,
-    () => ColorOsShadeMotion.blurFraction(progress.value) >= 1.0,
+    () => AospShadeInterpolation.scrimAlpha(progress.value) >= 1.0,
   );
   ref.onDispose(covers.dispose);
   return covers;
