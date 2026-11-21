@@ -33,9 +33,6 @@ abstract final class PixelNotificationMetrics {
   /// Between neighbouring cards of the stack.
   static const double divider = 2;
 
-  /// surfaceEffect1's opacity (0x8a).
-  static const double surfaceAlpha = 0x8a / 255;
-
   static const double titleSize = 14;
   static const double textSize = 14;
   static const double infoSize = 12;
@@ -235,9 +232,7 @@ class _PixelNotificationCardState extends State<PixelNotificationCard> {
     // shade's blur: on EvolutionX #8a111417, the surfaceContainerLow tone at
     // 54 % (`cmd overlay lookup android android:color/
     // system_surface_effect_1_dark`).
-    var background = scheme.surfaceContainerLow.withValues(
-      alpha: PixelNotificationMetrics.surfaceAlpha,
-    );
+    var background = scheme.surfaceEffect1;
     if (_pressed) {
       background = Color.alphaBlend(
         scheme.onSurface.withValues(alpha: 0.08),

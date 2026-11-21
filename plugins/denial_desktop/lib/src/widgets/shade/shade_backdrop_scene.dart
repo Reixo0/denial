@@ -23,7 +23,8 @@ class ShadeBackdropScene extends SingleChildRenderObjectWidget {
   final bool cached;
 
   /// Dims the scene beneath an open shade, scaled by its blur fraction.
-  static const Color dim = Color.fromRGBO(0, 0, 0, 0.2);
+  // Android's classic shade scrim (shade_panel_scrim: #404040 at 0.4).
+  static const Color dim = Color(0x66404040);
 
   static bool sharesBlur(BuildContext context) =>
       context.findAncestorRenderObjectOfType<RenderShadeBackdropScene>() !=

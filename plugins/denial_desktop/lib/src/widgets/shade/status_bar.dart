@@ -161,41 +161,49 @@ class ShadeStatusBar extends ConsumerWidget {
       right: 0,
       top: 0,
       height: geometry.hitHeight,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onVerticalDragStart: (details) {
-          onDragStart?.call(details.localPosition);
-          controller.startQuickSettingsDrag(progress: shadeProgress?.value);
-        },
-        onVerticalDragUpdate: (details) {
-          controller.updateQuickSettingsDrag(
-            Offset(
-              0.0,
-              details.delta.dy *
-                  ReferenceShellMetrics.quickSettingsDragScale(
-                    MediaQuery.sizeOf(context),
-                  ),
+      // Android: once the shade is open its header owns the top of the
+      // screen; the strip only pulls it down. A drag already under way
+      // keeps going (its pointer was routed when it went down).
+      child: AnimatedBuilder(
+        animation: progress,
+        builder: (context, strip) =>
+            IgnorePointer(ignoring: progress.value >= 0.99, child: strip),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onVerticalDragStart: (details) {
+            onDragStart?.call(details.localPosition);
+            controller.startQuickSettingsDrag(progress: shadeProgress?.value);
+          },
+          onVerticalDragUpdate: (details) {
+            controller.updateQuickSettingsDrag(
+              Offset(
+                0.0,
+                details.delta.dy *
+                    ReferenceShellMetrics.quickSettingsDragScale(
+                      MediaQuery.sizeOf(context),
+                    ),
+              ),
+            );
+          },
+          onVerticalDragEnd: (details) {
+            controller.endQuickSettingsDrag(details.primaryVelocity ?? 0.0);
+          },
+          onVerticalDragCancel: () => controller.endQuickSettingsDrag(0.0),
+          // A clock or battery change repaints only the status bar; sharing a
+          // picture with the rest of the chrome would damage everything down
+          // to the home pill.
+          child: RepaintBoundary(
+            child: AnimatedBuilder(
+              animation: progress,
+              // Only the change to and from closed rebuilds the row.
+              builder: (context, _) => progress.value > 0 || !shown
+                  ? const SizedBox.expand()
+                  : Stack(
+                      fit: StackFit.expand,
+                      clipBehavior: Clip.none,
+                      children: geometry.foreground(context, 0, foreground),
+                    ),
             ),
-          );
-        },
-        onVerticalDragEnd: (details) {
-          controller.endQuickSettingsDrag(details.primaryVelocity ?? 0.0);
-        },
-        onVerticalDragCancel: () => controller.endQuickSettingsDrag(0.0),
-        // A clock or battery change repaints only the status bar; sharing a
-        // picture with the rest of the chrome would damage everything down
-        // to the home pill.
-        child: RepaintBoundary(
-          child: AnimatedBuilder(
-            animation: progress,
-            // Only the change to and from closed rebuilds the row.
-            builder: (context, _) => progress.value > 0 || !shown
-                ? const SizedBox.expand()
-                : Stack(
-                    fit: StackFit.expand,
-                    clipBehavior: Clip.none,
-                    children: geometry.foreground(context, 0, foreground),
-                  ),
           ),
         ),
       ),

@@ -5,11 +5,32 @@ import 'package:flutter/widgets.dart';
 
 import 'shade_backdrop_scene.dart';
 
+/// Android's notification stack while the shade opens or closes, from AOSP
+/// StackScrollAlgorithm and NotificationStackScrollLayout. [f] is the
+/// shade's expansion fraction.
+abstract final class AndroidStackExpansion {
+  /// How much of each row's height, and of the gap below it, shows:
+  /// the interpolated stack height over its end height, from
+  /// `StackScrollAlgorithm.START_FRACTION` (0.5) to 1.
+  static double squish(double f) => 0.5 + 0.5 * f.clamp(0.0, 1.0);
+
+  /// The rows' alpha: `ShadeInterpolation.getContentAlpha`.
+  static double alpha(double f) {
+    final mapped = ((f - 0.3) / 0.7).clamp(0.0, 1.0);
+    final eased = mapped * 1.2 - 0.2;
+    if (eased <= 0) return 0;
+    final rest = 1 - eased;
+    return 1 - 0.5 * (1 - math.cos(math.pi * rest * rest));
+  }
+}
+
 /// A normal, lazily laid-out list with expansion-aware vertical positions.
-/// [progress] compresses vertical spacing without cropping the cards;
-/// [entrance] invalidates the cached silhouettes while descendant rows run
-/// their ColorOS alpha/scale/spacing reveal. Neither animation rebuilds or
-/// resizes notification cards or scroll extent.
+/// While [progress] is below 1 the rows sit at their positions times
+/// [AndroidStackExpansion.squish] (the rows clip themselves to the same
+/// fraction), and the whole stack rises toward the top of the screen as
+/// Android's `stackY` does. [entrance] invalidates the cached silhouettes.
+/// Neither animation rebuilds or resizes notification cards or scroll
+/// extent.
 ///
 /// Rows that overlap while the stack compresses stack by direction: opening
 /// from closed, each row lies over the ones below it; closing from open, the
@@ -90,7 +111,6 @@ class _RenderNotificationShadeList extends RenderSliverList {
   final _clips = <RenderBox, LayerHandle<ClipPathLayer>>{};
   List<_NotificationPaintRow>? _cachedRows;
   RenderShadeBackdropScene? _scene;
-  double _exitExtent = 0;
   double _restingOpen = 0;
   bool _lastOnTop = false;
 
@@ -104,16 +124,9 @@ class _RenderNotificationShadeList extends RenderSliverList {
   @override
   void performLayout() {
     super.performLayout();
-    _exitExtent = 0;
     final live = <RenderBox>{};
     for (var child = firstChild; child != null; child = childAfter(child)) {
       live.add(child);
-      final y = super.childMainAxisPosition(child);
-      if (y < constraints.remainingPaintExtent &&
-          y + child.size.height > 0 &&
-          child.size.height > _exitExtent) {
-        _exitExtent = child.size.height;
-      }
     }
     for (final child
         in _clips.keys.where((child) => !live.contains(child)).toList()) {
@@ -157,21 +170,14 @@ class _RenderNotificationShadeList extends RenderSliverList {
 
   double get _open => _progress.value.clamp(0.0, 1.0);
 
-  // Complete the row exit before the shade itself reaches zero. Stopping at
-  // exactly one row height leaves a visible strip pinned to the screen edge
-  // until the enclosing shade is removed.
-  static const double _exitTravel = 1.2;
-
-  /// How far a closed row sits above its list: past the top of the screen,
-  /// so rows leave over the header rather than stopping below it. It is the
-  /// list's live distance from the screen top, so the shade's own motion
-  /// cannot leave a row on screen.
-  double get _exitDistance {
+  /// The list's distance below the top of the screen: Android's stack
+  /// starts there (`stackY` = expansion × its resting top).
+  double get _stackTop {
     final toScreen = Matrix4.tryInvert(getTransformTo(null));
     final screenTop = toScreen == null
         ? 0.0
         : MatrixUtils.transformPoint(toScreen, Offset.zero).dy;
-    return math.max(0.0, -screenTop) + _exitExtent * _exitTravel;
+    return math.max(0.0, -screenTop);
   }
 
   @override
@@ -210,8 +216,9 @@ class _RenderNotificationShadeList extends RenderSliverList {
   @override
   double childMainAxisPosition(RenderBox child) {
     final open = _open;
-    final base = super.childMainAxisPosition(child) * open;
-    return open >= 1 ? base : base - _exitDistance * (1 - open);
+    final base = super.childMainAxisPosition(child);
+    if (open >= 1) return base;
+    return base * AndroidStackExpansion.squish(open) - _stackTop * (1 - open);
   }
 
   @override

@@ -15,6 +15,10 @@ import 'package:denial_flutter_sdk/system_services.dart';
 import '../phone_scheme.dart';
 import 'quick_settings_panel.dart' show PixelShadeViewport;
 
+/// Icons in the dialogs, in the [PixelShadeViewport.screenshotWidth] units
+/// they were measured in.
+const double _iconSize = 20;
+
 /// Shows one of Android 17's quick-settings dialogs, grown out of the tile
 /// at [origin] (on screen). [builder] gets the dialog's close, which
 /// shrinks it back into the tile.
@@ -110,6 +114,7 @@ class _QsDialogFrameState extends State<_QsDialogFrame>
   @override
   Widget build(BuildContext context) {
     return PixelShadeViewport(
+      width: PixelShadeViewport.screenshotWidth,
       child: Builder(
         builder: (context) {
           final scheme = phoneSchemeOf(context);
@@ -528,7 +533,7 @@ class _ItemRowState extends State<_ItemRow> {
                     color: widget.dimmed
                         ? foreground.withValues(alpha: 0.6)
                         : foreground,
-                    size: phoneIconSize,
+                    size: _iconSize,
                   ),
                   child: widget.leading,
                 ),
@@ -564,7 +569,7 @@ class _ItemRowState extends State<_ItemRow> {
                 ),
                 if (widget.trailing case final trailing?)
                   IconTheme(
-                    data: IconThemeData(color: foreground, size: phoneIconSize),
+                    data: IconThemeData(color: foreground, size: _iconSize),
                     child: trailing,
                   ),
               ],

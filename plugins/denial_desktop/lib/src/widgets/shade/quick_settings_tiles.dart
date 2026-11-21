@@ -12,13 +12,26 @@ import '../phone_scheme.dart';
 /// Android 17 quick-settings geometry, in dp (the shade lays itself out in
 /// Android's units; see `PixelShadeViewport`).
 abstract final class PixelQs {
+  // AOSP: qs_horizontal_margin, qs_tile_margin_horizontal/vertical,
+  // common_tile_default_tile_height and _toggle_target_size.
   static const double margin = 16;
   static const double gap = 8;
-  static const double tileHeight = 64;
+  static const double tileHeight = 72;
   static const int columns = 4;
 
   /// A wide tile's icon well.
-  static const double well = 48;
+  static const double well = 56;
+}
+
+/// A placed tile with its size from the saved layout, for the grid.
+class QsTileSize extends StatelessWidget {
+  const QsTileSize({required this.wide, required this.child, super.key});
+
+  final bool wide;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => child;
 }
 
 /// One quick-settings tile: a pill with an icon, or with [wide] a two-column
@@ -143,12 +156,14 @@ class _QuickTileState extends State<QuickTile> {
       curve: Curves.easeOutCubic,
       height: PixelQs.tileHeight,
       decoration: BoxDecoration(
+        // AOSP Tile.kt: active primary, inactive surfaceEffect1; corners
+        // 24 dp active, round inactive (common_tile_default_*).
         color: _pressedOver(
-          active ? scheme.primary : scheme.surfaceContainerHigh,
+          active ? scheme.primary : scheme.surfaceEffect1,
           scheme,
         ),
         borderRadius: BorderRadius.circular(
-          active ? 20 : PixelQs.tileHeight / 2,
+          active ? 24 : PixelQs.tileHeight / 2,
         ),
       ),
       alignment: Alignment.center,
@@ -174,7 +189,12 @@ class _QuickTileState extends State<QuickTile> {
       width: PixelQs.well,
       height: PixelQs.well,
       decoration: BoxDecoration(
-        color: active ? scheme.primary : const Color(0x00000000),
+        // Dual-target tiles show surfaceEffect2 in an inactive well.
+        color: active
+            ? scheme.primary
+            : details != null
+            ? scheme.surfaceEffect2
+            : const Color(0x00000000),
         borderRadius: BorderRadius.circular(active ? 16 : PixelQs.well / 2),
       ),
       alignment: Alignment.center,
@@ -191,9 +211,16 @@ class _QuickTileState extends State<QuickTile> {
       duration: _morph,
       curve: Curves.easeOutCubic,
       height: PixelQs.tileHeight,
-      padding: const EdgeInsets.all(8),
+      // AOSP largeTilePadding: start 8, end 12 (8 on dual-target tiles).
+      padding: EdgeInsetsDirectional.fromSTEB(
+        8,
+        0,
+        details != null ? 8 : 12,
+        0,
+      ),
+      alignment: AlignmentDirectional.centerStart,
       decoration: BoxDecoration(
-        color: _pressedOver(scheme.surfaceContainerHigh, scheme),
+        color: _pressedOver(scheme.surfaceEffect1, scheme),
         borderRadius: BorderRadius.circular(
           active ? 24 : PixelQs.tileHeight / 2,
         ),
@@ -210,7 +237,8 @@ class _QuickTileState extends State<QuickTile> {
               )
             else
               well,
-            const SizedBox(width: 10),
+            // AOSP TileArrangementPadding.
+            const SizedBox(width: 6),
             Expanded(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -220,10 +248,12 @@ class _QuickTileState extends State<QuickTile> {
                     widget.title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
+                    // titleSmallEmphasized and labelMedium, both onSurface
+                    // (AOSP CommonTile.kt).
                     style: TextStyle(
                       color: scheme.onSurface,
-                      fontSize: 15,
-                      height: 1.25,
+                      fontSize: 14,
+                      height: 1.43,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -233,9 +263,10 @@ class _QuickTileState extends State<QuickTile> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: scheme.onSurfaceVariant,
-                        fontSize: 13,
-                        height: 1.3,
+                        color: scheme.onSurface,
+                        fontSize: 12,
+                        height: 1.33,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                 ],
@@ -255,7 +286,11 @@ class PixelTileGrid extends StatelessWidget {
 
   final List<Widget> tiles;
 
-  static bool _wide(Widget tile) => tile is QuickTile ? tile.wide : true;
+  static bool _wide(Widget tile) => switch (tile) {
+    QsTileSize(:final wide) => wide,
+    QuickTile(:final wide) => wide,
+    _ => true,
+  };
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -298,10 +333,14 @@ class PixelBrightnessSlider extends StatefulWidget {
 }
 
 class _PixelBrightnessSliderState extends State<PixelBrightnessSlider> {
-  static const double _height = 48;
+  // AOSP BrightnessSliderDimensions.Default: 40 dp track with 12 dp outer
+  // and 2 dp inner corners, a 4×52 dp thumb 6 dp clear of the track.
+  static const double _height = 52;
   static const double _track = 40;
   static const double _handle = 4;
   static const double _handleGap = 6;
+  static const double _outer = 12;
+  static const double _inner = 2;
 
   double? _dragValue;
 
@@ -361,8 +400,8 @@ class _PixelBrightnessSliderState extends State<PixelBrightnessSlider> {
                         decoration: BoxDecoration(
                           color: scheme.primary,
                           borderRadius: const BorderRadius.horizontal(
-                            left: Radius.circular(_track / 2),
-                            right: Radius.circular(4),
+                            left: Radius.circular(_outer),
+                            right: Radius.circular(_inner),
                           ),
                         ),
                       ),
@@ -375,10 +414,10 @@ class _PixelBrightnessSliderState extends State<PixelBrightnessSlider> {
                       height: _track,
                       child: DecoratedBox(
                         decoration: BoxDecoration(
-                          color: scheme.surfaceContainerHighest,
+                          color: scheme.surfaceEffect1,
                           borderRadius: const BorderRadius.horizontal(
-                            left: Radius.circular(4),
-                            right: Radius.circular(_track / 2),
+                            left: Radius.circular(_inner),
+                            right: Radius.circular(_outer),
                           ),
                         ),
                       ),
@@ -395,16 +434,18 @@ class _PixelBrightnessSliderState extends State<PixelBrightnessSlider> {
                       ),
                     ),
                   ),
+                  // The icon ends the empty track, 6 dp in (onSurface), or,
+                  // when that is too short, the filled one (onPrimary).
+                  // Its 28 dp box holds a 24 dp glyph.
                   Positioned(
-                    right: 12,
+                    left: iconOnFill ? math.max(8.0, filledEnd - 8 - 24) : null,
+                    right: iconOnFill ? null : 8,
                     top: 0,
                     bottom: 0,
                     child: Icon(
                       Icons.brightness_medium_rounded,
-                      size: phoneIconSize,
-                      color: iconOnFill
-                          ? scheme.onPrimary
-                          : scheme.onSurfaceVariant,
+                      size: 24,
+                      color: iconOnFill ? scheme.onPrimary : scheme.onSurface,
                     ),
                   ),
                 ],
@@ -531,3 +572,211 @@ String profileLabel(String profile, AppLocalizations l10n) => switch (profile) {
   PowerProfile.performance => l10n.quickSettingsHighPerformance,
   _ => l10n.quickSettingsBalanced,
 };
+
+/// Android's paginated tile grid (AOSP PaginatedGridLayout): four rows a
+/// page (`quick_settings_paginated_grid_num_rows`), pages side by side
+/// 16 dp apart, swiped sideways.
+class PixelPagedTileGrid extends StatelessWidget {
+  const PixelPagedTileGrid({
+    super.key,
+    required this.tiles,
+    required this.controller,
+    required this.scrollable,
+  });
+
+  static const int rowsPerPage = 4;
+
+  /// The bar under the grid with the page dots (AOSP FooterHeight).
+  static const double footerHeight = 48;
+  static const double pageSpacing = 16;
+
+  final List<Widget> tiles;
+  final PageController controller;
+
+  /// Only the full quick settings page; the first pull shows page one.
+  final bool scrollable;
+
+  static int _span(Widget tile) => PixelTileGrid._wide(tile) ? 2 : 1;
+
+  /// [tiles] split into pages of at most [rowsPerPage] rows.
+  static List<List<Widget>> pagesOf(List<Widget> tiles) {
+    final pages = <List<Widget>>[];
+    var page = <Widget>[];
+    var rows = 0;
+    var used = PixelQs.columns;
+    for (final tile in tiles) {
+      final span = _span(tile);
+      if (used + span > PixelQs.columns) {
+        rows++;
+        used = 0;
+        if (rows > rowsPerPage) {
+          pages.add(page);
+          page = <Widget>[];
+          rows = 1;
+        }
+      }
+      page.add(tile);
+      used += span;
+    }
+    if (page.isNotEmpty) pages.add(page);
+    return pages;
+  }
+
+  /// Rows [tiles] take in one grid.
+  static int rowsOf(List<Widget> tiles) {
+    var rows = 0;
+    var used = PixelQs.columns;
+    for (final tile in tiles) {
+      final span = _span(tile);
+      if (used + span > PixelQs.columns) {
+        rows++;
+        used = 0;
+      }
+      used += span;
+    }
+    return rows;
+  }
+
+  static double gridHeight(int rows) =>
+      rows <= 0 ? 0 : rows * PixelQs.tileHeight + (rows - 1) * PixelQs.gap;
+
+  /// The tallest page's height.
+  static double heightOf(List<Widget> tiles) => gridHeight(
+    pagesOf(tiles).fold(0, (rows, page) => math.max(rows, rowsOf(page))),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final pages = pagesOf(tiles);
+    if (pages.length <= 1) return PixelTileGrid(tiles: tiles);
+    return LayoutBuilder(
+      builder: (context, constraints) => OverflowBox(
+        minWidth: constraints.maxWidth + pageSpacing * 2,
+        maxWidth: constraints.maxWidth + pageSpacing * 2,
+        child: PageView(
+          controller: controller,
+          physics: scrollable
+              ? const PageScrollPhysics()
+              : const NeverScrollableScrollPhysics(),
+          children: <Widget>[
+            for (final page in pages)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: pageSpacing),
+                child: Align(
+                  alignment: Alignment.topCenter,
+                  child: PixelTileGrid(tiles: page),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Android's pager dots (AOSP PagerDots): 6 dp dots 4 dp apart, the current
+/// page's twice as wide, stretching toward the next as the pages move; in
+/// onSurfaceVariant, the others at half alpha. A tap goes to the next page.
+class PixelPagerDots extends StatelessWidget {
+  const PixelPagerDots({
+    super.key,
+    required this.controller,
+    required this.count,
+  });
+
+  static const double _dot = 6;
+  static const double _space = 4;
+
+  final PageController controller;
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    if (count < 2) return const SizedBox.shrink();
+    final scheme = phoneSchemeOf(context);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        if (!controller.hasClients) return;
+        final page = (controller.page ?? 0).round();
+        controller.animateToPage(
+          (page + 1) % count,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+      },
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: SizedBox(
+          width: _dot * 2 + (_dot + _space) * (count - 1),
+          height: _dot,
+          child: AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) {
+              final position =
+                  controller.hasClients &&
+                      controller.position.hasContentDimensions
+                  ? controller.page ?? 0
+                  : 0.0;
+              return CustomPaint(
+                painter: _PagerDotsPainter(
+                  position: position.clamp(0.0, count - 1.0),
+                  count: count,
+                  active: scheme.onSurfaceVariant,
+                  inactive: scheme.onSurfaceVariant.withValues(alpha: 0.5),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PagerDotsPainter extends CustomPainter {
+  _PagerDotsPainter({
+    required this.position,
+    required this.count,
+    required this.active,
+    required this.inactive,
+  });
+
+  final double position;
+  final int count;
+  final Color active;
+  final Color inactive;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const dot = PixelPagerDots._dot;
+    final current = position.floor();
+    final fraction = position - current;
+    // AOSP: the current dot gives width to the neighbour the pages move
+    // toward; colours switch at the page change.
+    final shown = position.round();
+    var x = 0.0;
+    for (var page = 0; page < count; page++) {
+      final width = page == current
+          ? dot * 2 - dot * fraction
+          : page == current + 1
+          ? dot + dot * fraction
+          : dot;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(x, 0, width, size.height),
+          Radius.circular(size.height / 2),
+        ),
+        Paint()..color = page == shown ? active : inactive,
+      );
+      x += width + PixelPagerDots._space;
+    }
+  }
+
+  @override
+  bool shouldRepaint(_PagerDotsPainter old) =>
+      old.position != position ||
+      old.count != count ||
+      old.active != active ||
+      old.inactive != inactive;
+}

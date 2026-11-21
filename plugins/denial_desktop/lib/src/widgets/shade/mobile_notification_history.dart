@@ -242,6 +242,7 @@ class _MobileNotificationHistoryState
                       ),
                     NotificationGroupRow(:final group) => _HistoryNotification(
                       key: key,
+                      expansion: widget.progress,
                       record: group.newest,
                       group: group,
                       roundTop: roundTop,
@@ -256,6 +257,7 @@ class _MobileNotificationHistoryState
                     ),
                     NotificationRow(:final record) => _HistoryNotification(
                       key: key,
+                      expansion: widget.progress,
                       record: record,
                       roundTop: roundTop,
                       roundBottom: roundBottom,
@@ -400,6 +402,7 @@ class _ColorOsNotificationReveal extends StatelessWidget {
 
 class _HistoryNotification extends StatelessWidget {
   const _HistoryNotification({
+    required this.expansion,
     required this.record,
     required this.preview,
     required this.interactive,
@@ -413,6 +416,9 @@ class _HistoryNotification extends StatelessWidget {
     super.key,
   });
 
+  /// The shade's expansion: below 1 the card shows only
+  /// [AndroidStackExpansion.squish] of its height, as Android's rows do.
+  final Animation<double> expansion;
   final DesktopNotificationRecord record;
   final bool roundTop;
   final bool roundBottom;
@@ -453,21 +459,57 @@ class _HistoryNotification extends StatelessWidget {
                   onDismiss();
                 }
               : null,
-          child: PixelNotificationCard(
-            notification: notification,
-            interactive: interactive,
-            previewMode: preview,
-            roundTop: roundTop,
-            roundBottom: roundBottom,
-            group: group,
-            onExpandGroup: onExpand,
-            onOpen: onOpen,
-            onAction: onAction,
+          child: ClipRRect(
+            clipper: _SquishClipper(
+              expansion,
+              BorderRadius.vertical(
+                top: Radius.circular(
+                  roundTop
+                      ? PixelNotificationMetrics.radius
+                      : PixelNotificationMetrics.innerRadius,
+                ),
+                bottom: Radius.circular(
+                  roundBottom
+                      ? PixelNotificationMetrics.radius
+                      : PixelNotificationMetrics.innerRadius,
+                ),
+              ),
+            ),
+            child: PixelNotificationCard(
+              notification: notification,
+              interactive: interactive,
+              previewMode: preview,
+              roundTop: roundTop,
+              roundBottom: roundBottom,
+              group: group,
+              onExpandGroup: onExpand,
+              onOpen: onOpen,
+              onAction: onAction,
+            ),
           ),
         ),
       ),
     );
   }
+}
+
+/// A card cut to [AndroidStackExpansion.squish] of its height, keeping its
+/// corners: Android shortens a row's actual height while the shade moves.
+class _SquishClipper extends CustomClipper<RRect> {
+  _SquishClipper(this.expansion, this.radius) : super(reclip: expansion);
+
+  final Animation<double> expansion;
+  final BorderRadius radius;
+
+  @override
+  RRect getClip(Size size) {
+    final squish = AndroidStackExpansion.squish(expansion.value);
+    return radius.toRRect(Offset.zero & Size(size.width, size.height * squish));
+  }
+
+  @override
+  bool shouldReclip(_SquishClipper oldClipper) =>
+      oldClipper.radius != radius || oldClipper.expansion != expansion;
 }
 
 /// Android's "Silent" heading over the low-importance stack (SystemUI's
@@ -480,12 +522,12 @@ class _SilentSectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = phoneSchemeOf(context);
-    // 48 dp, plus 6 dp so the gap from the stack above is EvolutionX's
-    // 62 dp.
+    // 48 dp, plus 14 dp so the gap from the stack above is EvolutionX's
+    // 70 dp, the label centred 45 dp below it.
     return SizedBox(
-      height: 54,
+      height: 62,
       child: Padding(
-        padding: const EdgeInsetsDirectional.only(start: 13, top: 6),
+        padding: const EdgeInsetsDirectional.only(start: 14, top: 12),
         child: Align(
           alignment: AlignmentDirectional.centerStart,
           child: Text(

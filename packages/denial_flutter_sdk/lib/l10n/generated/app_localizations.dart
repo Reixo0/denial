@@ -2232,6 +2232,108 @@ abstract class AppLocalizations {
   /// **'One moment…'**
   String get powerMenuWorking;
 
+  /// English UI text for qsEditTiles.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit tiles'**
+  String get qsEditTiles;
+
+  /// English UI text for qsEditSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Select tiles to rearrange and resize'**
+  String get qsEditSubtitle;
+
+  /// English UI text for qsEditRemove.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove'**
+  String get qsEditRemove;
+
+  /// English UI text for qsEditReset.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset'**
+  String get qsEditReset;
+
+  /// English UI text for qsEditBack.
+  ///
+  /// In en, this message translates to:
+  /// **'Back'**
+  String get qsEditBack;
+
+  /// English UI text for qsEditAddTile.
+  ///
+  /// In en, this message translates to:
+  /// **'Add tile'**
+  String get qsEditAddTile;
+
+  /// English UI text for qsEditResizeTile.
+  ///
+  /// In en, this message translates to:
+  /// **'Resize tile'**
+  String get qsEditResizeTile;
+
+  /// English UI text for qsCategoryConnectivity.
+  ///
+  /// In en, this message translates to:
+  /// **'Connectivity'**
+  String get qsCategoryConnectivity;
+
+  /// English UI text for qsCategoryUtilities.
+  ///
+  /// In en, this message translates to:
+  /// **'Utilities'**
+  String get qsCategoryUtilities;
+
+  /// English UI text for qsCategoryDisplay.
+  ///
+  /// In en, this message translates to:
+  /// **'Display'**
+  String get qsCategoryDisplay;
+
+  /// English UI text for powerMenuArrange.
+  ///
+  /// In en, this message translates to:
+  /// **'Arrange Tiles'**
+  String get powerMenuArrange;
+
+  /// English UI text for powerMenuAddActions.
+  ///
+  /// In en, this message translates to:
+  /// **'Add Actions'**
+  String get powerMenuAddActions;
+
+  /// English UI text for powerMenuEdit.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit'**
+  String get powerMenuEdit;
+
+  /// English UI text for powerMenuDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get powerMenuDone;
+
+  /// English UI text for powerMenuRemove.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove'**
+  String get powerMenuRemove;
+
+  /// English UI text for powerMenuResize.
+  ///
+  /// In en, this message translates to:
+  /// **'Resize'**
+  String get powerMenuResize;
+
+  /// English UI text for powerMenuScreenshot.
+  ///
+  /// In en, this message translates to:
+  /// **'Screenshot'**
+  String get powerMenuScreenshot;
+
   /// English UI text for powerAuthenticationRequired.
   ///
   /// In en, this message translates to:
@@ -2459,6 +2561,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Pair new device'**
   String get quickSettingsPairNewDevice;
+
+  /// Quick Settings tile that turns the rear flash on as a torch.
+  ///
+  /// In en, this message translates to:
+  /// **'Flashlight'**
+  String get quickSettingsFlashlight;
 
   /// Quick Settings tile that starts a screen recording, and stops it when tapped again.
   ///

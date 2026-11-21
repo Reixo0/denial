@@ -1243,6 +1243,57 @@ class AppLocalizationsEn extends AppLocalizations {
   String get powerMenuWorking => 'One moment…';
 
   @override
+  String get qsEditTiles => 'Edit tiles';
+
+  @override
+  String get qsEditSubtitle => 'Select tiles to rearrange and resize';
+
+  @override
+  String get qsEditRemove => 'Remove';
+
+  @override
+  String get qsEditReset => 'Reset';
+
+  @override
+  String get qsEditBack => 'Back';
+
+  @override
+  String get qsEditAddTile => 'Add tile';
+
+  @override
+  String get qsEditResizeTile => 'Resize tile';
+
+  @override
+  String get qsCategoryConnectivity => 'Connectivity';
+
+  @override
+  String get qsCategoryUtilities => 'Utilities';
+
+  @override
+  String get qsCategoryDisplay => 'Display';
+
+  @override
+  String get powerMenuArrange => 'Arrange Tiles';
+
+  @override
+  String get powerMenuAddActions => 'Add Actions';
+
+  @override
+  String get powerMenuEdit => 'Edit';
+
+  @override
+  String get powerMenuDone => 'Done';
+
+  @override
+  String get powerMenuRemove => 'Remove';
+
+  @override
+  String get powerMenuResize => 'Resize';
+
+  @override
+  String get powerMenuScreenshot => 'Screenshot';
+
+  @override
   String powerAuthenticationRequired(String description) {
     return 'Authentication required · $description';
   }
@@ -1380,6 +1431,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get quickSettingsPairNewDevice => 'Pair new device';
+
+  @override
+  String get quickSettingsFlashlight => 'Flashlight';
 
   @override
   String get quickSettingsScreenRecording => 'Screen recording';

@@ -1204,6 +1204,57 @@ class AppLocalizationsZh extends AppLocalizations {
   String get powerMenuWorking => '请稍候…';
 
   @override
+  String get qsEditTiles => '编辑图块';
+
+  @override
+  String get qsEditSubtitle => '选择图块以重新排列和调整大小';
+
+  @override
+  String get qsEditRemove => '移除';
+
+  @override
+  String get qsEditReset => '重置';
+
+  @override
+  String get qsEditBack => '返回';
+
+  @override
+  String get qsEditAddTile => '添加图块';
+
+  @override
+  String get qsEditResizeTile => '调整图块大小';
+
+  @override
+  String get qsCategoryConnectivity => '连接';
+
+  @override
+  String get qsCategoryUtilities => '实用工具';
+
+  @override
+  String get qsCategoryDisplay => '显示';
+
+  @override
+  String get powerMenuArrange => '排列图块';
+
+  @override
+  String get powerMenuAddActions => '添加操作';
+
+  @override
+  String get powerMenuEdit => '编辑';
+
+  @override
+  String get powerMenuDone => '完成';
+
+  @override
+  String get powerMenuRemove => '移除';
+
+  @override
+  String get powerMenuResize => '调整大小';
+
+  @override
+  String get powerMenuScreenshot => '屏幕截图';
+
+  @override
   String powerAuthenticationRequired(String description) {
     return '需要验证 · $description';
   }
@@ -1334,6 +1385,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get quickSettingsPairNewDevice => '与新设备配对';
+
+  @override
+  String get quickSettingsFlashlight => '手电筒';
 
   @override
   String get quickSettingsScreenRecording => '屏幕录制';

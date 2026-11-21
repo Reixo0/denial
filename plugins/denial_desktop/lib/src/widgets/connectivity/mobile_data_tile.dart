@@ -8,10 +8,13 @@ import 'package:denial_flutter_sdk/system_services.dart';
 import '../shade/quick_settings_tiles.dart';
 
 class MobileDataTile extends ConsumerStatefulWidget {
-  const MobileDataTile({super.key, this.onSettings});
+  const MobileDataTile({super.key, this.onSettings, this.wide = true});
 
   /// Opens mobile data's page in Settings (a long press).
   final VoidCallback? onSettings;
+
+  /// A large tile (two columns) or an icon tile.
+  final bool wide;
   @override
   ConsumerState<MobileDataTile> createState() => _MobileDataTileState();
 }
@@ -45,7 +48,7 @@ class _MobileDataTileState extends ConsumerState<MobileDataTile> {
       active: state.enabled,
       enabled: state.canToggle && !_busy,
       busy: _busy,
-      wide: true,
+      wide: widget.wide,
       onSettings: widget.onSettings,
       onTap: () async {
         setState(() {

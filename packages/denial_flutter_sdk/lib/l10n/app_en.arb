@@ -1768,6 +1768,74 @@
   "@powerMenuWorking": {
     "description": "English UI text for powerMenuWorking."
   },
+  "qsEditTiles": "Edit tiles",
+  "@qsEditTiles": {
+    "description": "English UI text for qsEditTiles."
+  },
+  "qsEditSubtitle": "Select tiles to rearrange and resize",
+  "@qsEditSubtitle": {
+    "description": "English UI text for qsEditSubtitle."
+  },
+  "qsEditRemove": "Remove",
+  "@qsEditRemove": {
+    "description": "English UI text for qsEditRemove."
+  },
+  "qsEditReset": "Reset",
+  "@qsEditReset": {
+    "description": "English UI text for qsEditReset."
+  },
+  "qsEditBack": "Back",
+  "@qsEditBack": {
+    "description": "English UI text for qsEditBack."
+  },
+  "qsEditAddTile": "Add tile",
+  "@qsEditAddTile": {
+    "description": "English UI text for qsEditAddTile."
+  },
+  "qsEditResizeTile": "Resize tile",
+  "@qsEditResizeTile": {
+    "description": "English UI text for qsEditResizeTile."
+  },
+  "qsCategoryConnectivity": "Connectivity",
+  "@qsCategoryConnectivity": {
+    "description": "English UI text for qsCategoryConnectivity."
+  },
+  "qsCategoryUtilities": "Utilities",
+  "@qsCategoryUtilities": {
+    "description": "English UI text for qsCategoryUtilities."
+  },
+  "qsCategoryDisplay": "Display",
+  "@qsCategoryDisplay": {
+    "description": "English UI text for qsCategoryDisplay."
+  },
+  "powerMenuArrange": "Arrange Tiles",
+  "@powerMenuArrange": {
+    "description": "English UI text for powerMenuArrange."
+  },
+  "powerMenuAddActions": "Add Actions",
+  "@powerMenuAddActions": {
+    "description": "English UI text for powerMenuAddActions."
+  },
+  "powerMenuEdit": "Edit",
+  "@powerMenuEdit": {
+    "description": "English UI text for powerMenuEdit."
+  },
+  "powerMenuDone": "Done",
+  "@powerMenuDone": {
+    "description": "English UI text for powerMenuDone."
+  },
+  "powerMenuRemove": "Remove",
+  "@powerMenuRemove": {
+    "description": "English UI text for powerMenuRemove."
+  },
+  "powerMenuResize": "Resize",
+  "@powerMenuResize": {
+    "description": "English UI text for powerMenuResize."
+  },
+  "powerMenuScreenshot": "Screenshot",
+  "@powerMenuScreenshot": {
+    "description": "English UI text for powerMenuScreenshot."
+  },
   "powerAuthenticationRequired": "Authentication required · {description}",
   "@powerAuthenticationRequired": {
     "description": "English UI text for powerAuthenticationRequired.",
@@ -1964,6 +2032,10 @@
   "quickSettingsPairNewDevice": "Pair new device",
   "@quickSettingsPairNewDevice": {
     "description": "Row in the phone's Bluetooth dialog that opens Bluetooth pairing in Phone Settings."
+  },
+  "quickSettingsFlashlight": "Flashlight",
+  "@quickSettingsFlashlight": {
+    "description": "Quick Settings tile that turns the rear flash on as a torch."
   },
   "quickSettingsScreenRecording": "Screen recording",
   "@quickSettingsScreenRecording": {
