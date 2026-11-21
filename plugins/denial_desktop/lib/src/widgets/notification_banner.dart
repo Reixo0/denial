@@ -21,6 +21,7 @@ import 'package:denial_flutter_sdk/tokens.dart';
 import 'mobile_ui_metrics.dart';
 import 'notification_media.dart';
 import 'notification_open.dart';
+import 'phone_scheme.dart';
 
 export 'notification_open.dart' show openLockNotification, openNotification;
 
@@ -37,6 +38,7 @@ part 'notification_card_controls.dart';
 part 'notification_transition.dart';
 part 'mobile_notification_banner.dart';
 part 'mobile_notification_card.dart';
+part 'pixel_notification_card.dart';
 
 class NotificationBannerLayer extends ConsumerWidget {
   const NotificationBannerLayer({super.key, this.mobile = false});

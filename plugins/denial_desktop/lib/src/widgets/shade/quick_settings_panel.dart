@@ -37,7 +37,6 @@ import 'mobile_notification_history.dart';
 import 'shade_backdrop_scene.dart';
 import 'shade_dismiss_gesture.dart';
 import 'shade_expansion_motion.dart';
-import 'shade_reference_geometry.dart';
 import 'status_glyphs.dart';
 import '../../state/phone_desk.dart';
 
@@ -1033,13 +1032,11 @@ class _Notifications extends ConsumerWidget {
       desktopNotificationsProvider.select((state) => state.history.isEmpty),
     );
     if (empty) return const _EmptyNotifications();
-    return _DenialNotificationScale(
-      child: MobileNotificationHistory(
-        progress: progress,
-        closed: closed,
-        active: active,
-        drag: drag,
-      ),
+    return MobileNotificationHistory(
+      progress: progress,
+      closed: closed,
+      active: active,
+      drag: drag,
     );
   }
 }
@@ -1062,65 +1059,6 @@ class _EmptyNotifications extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-/// Draws Denial's own notification cards at the size they had before the
-/// shade moved to Android's dp (they were laid out for the ColorOS reference
-/// geometry). Goes when the cards are redone in Android's style.
-class _DenialNotificationScale extends StatelessWidget {
-  const _DenialNotificationScale({required this.child});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    final scale = PixelShadeViewport.scaleOf(context);
-    final media = MediaQuery.of(context);
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final native = Size(
-          constraints.maxWidth * scale,
-          constraints.maxHeight * scale,
-        );
-        final screenWidth = (constraints.maxWidth + PixelQs.margin * 2) * scale;
-        final reference = colorOsShadeScaleForViewport(
-          Size(screenWidth, screenWidth * 2),
-        );
-        final referenceSize = native / reference;
-        return ClipRect(
-          child: OverflowBox(
-            alignment: Alignment.topLeft,
-            minWidth: native.width,
-            maxWidth: native.width,
-            minHeight: native.height,
-            maxHeight: native.height,
-            child: Transform.scale(
-              scale: reference / scale,
-              alignment: Alignment.topLeft,
-              child: OverflowBox(
-                alignment: Alignment.topLeft,
-                minWidth: referenceSize.width,
-                maxWidth: referenceSize.width,
-                minHeight: referenceSize.height,
-                maxHeight: referenceSize.height,
-                child: MediaQuery(
-                  data: media.copyWith(
-                    size: referenceSize,
-                    devicePixelRatio:
-                        media.devicePixelRatio / scale * reference,
-                    textScaler: TextScaler.linear(1 / reference),
-                    padding: EdgeInsets.zero,
-                    viewPadding: EdgeInsets.zero,
-                  ),
-                  child: ShadeReferenceGeometry(scale: reference, child: child),
-                ),
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 }

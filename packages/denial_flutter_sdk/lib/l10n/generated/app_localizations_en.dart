@@ -1331,6 +1331,27 @@ class AppLocalizationsEn extends AppLocalizations {
   String get quickSettingsAutoRotate => 'Auto-rotate';
 
   @override
+  String get notificationSectionSilent => 'Silent';
+
+  @override
+  String get notificationTimeNow => 'now';
+
+  @override
+  String notificationTimeMinutes(int count) {
+    return '${count}m';
+  }
+
+  @override
+  String notificationTimeHours(int count) {
+    return '${count}h';
+  }
+
+  @override
+  String notificationTimeDays(int count) {
+    return '${count}d';
+  }
+
+  @override
   String get quickSettingsWifiHint => 'Tap a network to connect';
 
   @override

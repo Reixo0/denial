@@ -7,6 +7,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:denial_flutter_sdk/localization.dart';
+import 'package:denial_flutter_sdk/models.dart' show DesktopNotificationUrgency;
 import 'package:denial_flutter_sdk/system_services.dart';
 import 'package:denial_flutter_sdk/state.dart';
 import 'package:denial_flutter_sdk/motion.dart';
@@ -17,9 +18,8 @@ import 'package:denial_flutter_sdk/tokens.dart' show ShellText;
 
 import '../notification_banner.dart';
 import '../notification_rows.dart';
-import '../mobile_ui_metrics.dart';
+import '../phone_scheme.dart';
 import 'notification_shade_list.dart';
-import 'shade_backdrop_scene.dart';
 import 'shade_dismiss_gesture.dart';
 
 /// A separate scrollable notification stack for the notification page.
@@ -154,10 +154,25 @@ class _MobileNotificationHistoryState
         ? const <DesktopNotificationGroup>[]
         : state.groups;
     // Locked, groups stay folded and history only shows.
-    final rows = notificationHistoryRows(
-      groups,
-      locked ? const <String>{} : ref.watch(expandedNotificationGroupsProvider),
+    final expandedGroups = locked
+        ? const <String>{}
+        : ref.watch(expandedNotificationGroupsProvider);
+    // Android's sections: alerting notifications first, then the silent
+    // ones (Droidloom passes Android's low importance as low urgency) under
+    // their heading, each section its own stack.
+    bool silent(DesktopNotificationGroup group) => group.members.every(
+      (record) => record.notification.urgency == DesktopNotificationUrgency.low,
     );
+    final alertingRows = notificationHistoryRows(
+      groups.where((group) => !silent(group)).toList(),
+      expandedGroups,
+    );
+    final silentRows = notificationHistoryRows(
+      groups.where(silent).toList(),
+      expandedGroups,
+    );
+    final rows = <NotificationHistoryRow>[...alertingRows, ...silentRows];
+    final silentStart = silentRows.isEmpty ? -1 : alertingRows.length;
     final indices = <Object, int>{
       for (var i = 0; i < rows.length; i++) rows[i].key: i,
     };
@@ -188,25 +203,12 @@ class _MobileNotificationHistoryState
               delegate: SliverChildBuilderDelegate(
                 (context, index) {
                   if (index == rows.length) {
-                    final padding = MediaQuery.viewPaddingOf(context);
-                    final metrics = MobileUiMetrics.of(context);
                     return _ColorOsNotificationReveal(
                       reveal: _revealOf(index),
                       index: index,
                       cachedGlass: cachedGlass,
                       child: Padding(
-                        padding: EdgeInsets.fromLTRB(
-                          padding.left +
-                              metrics.visual(
-                                MobileNotificationCard.horizontalMargin,
-                              ),
-                          0,
-                          padding.right +
-                              metrics.visual(
-                                MobileNotificationCard.horizontalMargin,
-                              ),
-                          metrics.visual(MobileNotificationMetrics.rowSpacing),
-                        ),
+                        padding: const EdgeInsets.only(top: 8, bottom: 16),
                         child: Builder(
                           builder: (context) => NotificationReveal.revealed(
                             context,
@@ -221,53 +223,71 @@ class _MobileNotificationHistoryState
                   }
                   final row = rows[index];
                   final key = ValueKey<Object>(row.key);
+                  // Neighbouring cards form one stack, as Android's do.
+                  bool card(int i) =>
+                      i >= 0 &&
+                      i < rows.length &&
+                      rows[i] is! NotificationGroupHeaderRow;
+                  final roundTop = !card(index - 1) || index == silentStart;
+                  final roundBottom =
+                      !card(index + 1) || index + 1 == silentStart;
+                  final Widget entry = switch (row) {
+                    NotificationGroupHeaderRow(:final group) =>
+                      _HistoryGroupHeader(
+                        key: key,
+                        group: group,
+                        onCollapse: () => ref
+                            .read(expandedNotificationGroupsProvider.notifier)
+                            .collapse(group.key),
+                      ),
+                    NotificationGroupRow(:final group) => _HistoryNotification(
+                      key: key,
+                      record: group.newest,
+                      group: group,
+                      roundTop: roundTop,
+                      roundBottom: roundBottom,
+                      preview: preview,
+                      interactive: !locked,
+                      onDismiss: () =>
+                          controller.dismissGroupFromHistory(group.key),
+                      onExpand: () => ref
+                          .read(expandedNotificationGroupsProvider.notifier)
+                          .expand(group.key),
+                    ),
+                    NotificationRow(:final record) => _HistoryNotification(
+                      key: key,
+                      record: record,
+                      roundTop: roundTop,
+                      roundBottom: roundBottom,
+                      preview: preview,
+                      interactive: !locked,
+                      onDismiss: () =>
+                          controller.dismissFromHistory(record.notification.id),
+                      onOpen: () {
+                        if (openNotification(ref, record.notification.id)) {
+                          ref
+                              .read(referenceShellProvider.notifier)
+                              .closeQuickSettings();
+                        }
+                      },
+                      onAction: (key) =>
+                          controller.invokeAction(record.notification.id, key),
+                    ),
+                  };
                   return _ColorOsNotificationReveal(
                     reveal: _revealOf(index),
                     index: index,
                     cachedGlass: cachedGlass,
-                    child: switch (row) {
-                      NotificationGroupHeaderRow(:final group) =>
-                        _HistoryGroupHeader(
-                          key: key,
-                          group: group,
-                          onCollapse: () => ref
-                              .read(expandedNotificationGroupsProvider.notifier)
-                              .collapse(group.key),
-                        ),
-                      NotificationGroupRow(:final group) =>
-                        _HistoryNotification(
-                          key: key,
-                          record: group.newest,
-                          group: group,
-                          preview: preview,
-                          interactive: !locked,
-                          onDismiss: () =>
-                              controller.dismissGroupFromHistory(group.key),
-                          onExpand: () => ref
-                              .read(expandedNotificationGroupsProvider.notifier)
-                              .expand(group.key),
-                        ),
-                      NotificationRow(:final record) => _HistoryNotification(
-                        key: key,
-                        record: record,
-                        preview: preview,
-                        interactive: !locked,
-                        onDismiss: () => controller.dismissFromHistory(
-                          record.notification.id,
-                        ),
-                        onOpen: () {
-                          if (openNotification(ref, record.notification.id)) {
-                            ref
-                                .read(referenceShellProvider.notifier)
-                                .closeQuickSettings();
-                          }
-                        },
-                        onAction: (key) => controller.invokeAction(
-                          record.notification.id,
-                          key,
-                        ),
-                      ),
-                    },
+                    child: index == silentStart
+                        ? Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: <Widget>[
+                              const _SilentSectionHeader(),
+                              entry,
+                            ],
+                          )
+                        : entry,
                   );
                 },
                 childCount: rows.length + (rows.isNotEmpty && !locked ? 1 : 0),
@@ -283,8 +303,12 @@ class _MobileNotificationHistoryState
     );
   }
 
-  /// Rows past the last stagger share one reveal.
-  Animation<double> _revealOf(int index) {
+  /// Android shows the rows with the shade itself (its stages fade them):
+  /// no ColorOS stagger.
+  Animation<double> _revealOf(int index) => kAlwaysCompleteAnimation;
+
+  // ignore: unused_element
+  Animation<double> _colorOsRevealOf(int index) {
     final stagger = index.clamp(0, Motion.notificationHistoryMaxStagger);
     return _reveals[stagger] ??= _entrance.drive(
       Animatable.fromCallback(
@@ -380,6 +404,8 @@ class _HistoryNotification extends StatelessWidget {
     required this.preview,
     required this.interactive,
     required this.onDismiss,
+    this.roundTop = true,
+    this.roundBottom = true,
     this.onOpen,
     this.onAction,
     this.group,
@@ -388,6 +414,8 @@ class _HistoryNotification extends StatelessWidget {
   });
 
   final DesktopNotificationRecord record;
+  final bool roundTop;
+  final bool roundBottom;
   final NotificationPreviewMode preview;
   final bool interactive;
   final bool Function() onDismiss;
@@ -401,16 +429,11 @@ class _HistoryNotification extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final notification = record.notification;
-    final padding = MediaQuery.viewPaddingOf(context);
-    final metrics = MobileUiMetrics.of(context);
     final clearable =
         interactive && (group?.clearable ?? notification.clearable);
     return Padding(
-      padding: EdgeInsets.fromLTRB(
-        padding.left + metrics.visual(MobileNotificationCard.horizontalMargin),
-        0,
-        padding.right + metrics.visual(MobileNotificationCard.horizontalMargin),
-        metrics.visual(MobileNotificationMetrics.rowSpacing),
+      padding: EdgeInsets.only(
+        bottom: roundBottom ? 8 : PixelNotificationMetrics.divider,
       ),
       child: Dismissible(
         key: ValueKey(notification.id),
@@ -430,25 +453,48 @@ class _HistoryNotification extends StatelessWidget {
                   onDismiss();
                 }
               : null,
-          child: MobileNotificationCard(
+          child: PixelNotificationCard(
             notification: notification,
             interactive: interactive,
-            groupedBackdrop: true,
-            cachedBackdrop: true,
             previewMode: preview,
+            roundTop: roundTop,
+            roundBottom: roundBottom,
             group: group,
             onExpandGroup: onExpand,
-            onDefaultAction: onOpen,
+            onOpen: onOpen,
             onAction: onAction,
-            surfaceBuilder: (context, card) {
-              final radius = BorderRadius.circular(
-                metrics.visual(ShellTheme.of(context).panelRadius),
-              );
-              return NotificationShadeSurface(
-                borderRadius: radius,
-                child: ShadeBackdropRegion(borderRadius: radius, child: card),
-              );
-            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Android's "Silent" heading over the low-importance stack (SystemUI's
+/// status_bar_notification_section_header.xml: 48 dp, 14 sp
+/// title-small-emphasized in onSurface; the label sits about 13 dp in, as
+/// on EvolutionX).
+class _SilentSectionHeader extends StatelessWidget {
+  const _SilentSectionHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = phoneSchemeOf(context);
+    // 48 dp, plus 6 dp so the gap from the stack above is EvolutionX's
+    // 62 dp.
+    return SizedBox(
+      height: 54,
+      child: Padding(
+        padding: const EdgeInsetsDirectional.only(start: 13, top: 6),
+        child: Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: Text(
+            context.l10n.notificationSectionSilent,
+            style: TextStyle(
+              color: scheme.onSurface,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ),
       ),
@@ -470,21 +516,10 @@ class _HistoryGroupHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final padding = MediaQuery.viewPaddingOf(context);
-    final metrics = MobileUiMetrics.of(context);
     final l10n = context.l10n;
     final appName = notificationAppName(group.newest.notification, l10n);
     return Padding(
-      padding: EdgeInsets.fromLTRB(
-        padding.left +
-            metrics.visual(
-              MobileNotificationCard.horizontalMargin +
-                  MobileNotificationMetrics.horizontalContentInset,
-            ),
-        0,
-        padding.right + metrics.visual(MobileNotificationCard.horizontalMargin),
-        0,
-      ),
+      padding: const EdgeInsetsDirectional.only(start: 16, top: 4),
       child: Builder(
         builder: (context) => NotificationReveal.revealed(
           context,
@@ -497,8 +532,8 @@ class _HistoryGroupHeader extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: ShellText.base.copyWith(
                     color: context.shellColors.textSecondary,
-                    fontSize: MobileNotificationMetrics.groupHeaderFontSize,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
                     height: 1.2,
                   ),
                 ),
@@ -529,7 +564,6 @@ class _HistoryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final metrics = MobileUiMetrics.of(context);
     return Semantics(
       button: true,
       label: label,
@@ -551,11 +585,11 @@ class _HistoryButton extends StatelessWidget {
           behavior: HitTestBehavior.opaque,
           onTap: onPressed,
           child: SizedBox.square(
-            dimension: metrics.visual(MobileNotificationMetrics.detailsExtent),
+            dimension: 48,
             child: Icon(
               icon,
               color: context.shellColors.textSecondary,
-              size: metrics.visual(MobileNotificationMetrics.detailsIcon),
+              size: 20,
             ),
           ),
         ),

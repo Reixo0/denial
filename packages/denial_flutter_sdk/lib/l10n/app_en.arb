@@ -1889,6 +1889,41 @@
   "@quickSettingsAutoRotate": {
     "description": "Quick Settings toggle that is on while the screen follows the orientation sensor."
   },
+  "notificationSectionSilent": "Silent",
+  "@notificationSectionSilent": {
+    "description": "Heading above low-importance notifications in the phone shade, as on Android."
+  },
+  "notificationTimeNow": "now",
+  "@notificationTimeNow": {
+    "description": "Android-style notification age under a minute."
+  },
+  "notificationTimeMinutes": "{count}m",
+  "@notificationTimeMinutes": {
+    "description": "Android-style notification age in minutes (short).",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "notificationTimeHours": "{count}h",
+  "@notificationTimeHours": {
+    "description": "Android-style notification age in hours (short).",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "notificationTimeDays": "{count}d",
+  "@notificationTimeDays": {
+    "description": "Android-style notification age in days (short).",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "quickSettingsWifiHint": "Tap a network to connect",
   "@quickSettingsWifiHint": {
     "description": "Subtitle of the phone's Wi-Fi dialog opened from Quick Settings."

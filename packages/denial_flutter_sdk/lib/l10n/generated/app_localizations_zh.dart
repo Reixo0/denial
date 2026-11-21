@@ -1286,6 +1286,27 @@ class AppLocalizationsZh extends AppLocalizations {
   String get quickSettingsAutoRotate => '自动旋转';
 
   @override
+  String get notificationSectionSilent => '静音';
+
+  @override
+  String get notificationTimeNow => '刚刚';
+
+  @override
+  String notificationTimeMinutes(int count) {
+    return '$count分钟';
+  }
+
+  @override
+  String notificationTimeHours(int count) {
+    return '$count小时';
+  }
+
+  @override
+  String notificationTimeDays(int count) {
+    return '$count天';
+  }
+
+  @override
   String get quickSettingsWifiHint => '点按网络即可连接';
 
   @override

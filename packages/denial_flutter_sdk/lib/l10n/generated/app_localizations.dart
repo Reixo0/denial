@@ -2376,6 +2376,36 @@ abstract class AppLocalizations {
   /// **'Auto-rotate'**
   String get quickSettingsAutoRotate;
 
+  /// Heading above low-importance notifications in the phone shade, as on Android.
+  ///
+  /// In en, this message translates to:
+  /// **'Silent'**
+  String get notificationSectionSilent;
+
+  /// Android-style notification age under a minute.
+  ///
+  /// In en, this message translates to:
+  /// **'now'**
+  String get notificationTimeNow;
+
+  /// Android-style notification age in minutes (short).
+  ///
+  /// In en, this message translates to:
+  /// **'{count}m'**
+  String notificationTimeMinutes(int count);
+
+  /// Android-style notification age in hours (short).
+  ///
+  /// In en, this message translates to:
+  /// **'{count}h'**
+  String notificationTimeHours(int count);
+
+  /// Android-style notification age in days (short).
+  ///
+  /// In en, this message translates to:
+  /// **'{count}d'**
+  String notificationTimeDays(int count);
+
   /// Subtitle of the phone's Wi-Fi dialog opened from Quick Settings.
   ///
   /// In en, this message translates to:
