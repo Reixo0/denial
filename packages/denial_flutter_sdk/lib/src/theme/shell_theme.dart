@@ -108,6 +108,7 @@ class ShellThemeData {
     this.backdropBlurLevel = ShellBackdropBlurLevel.fast,
     this.backdropBlurOpacityThreshold = 0.2,
     this.glass = const ShellGlassConfiguration(),
+    this.blurStrength = 1,
     this.focusedWindowBorderEnabled = true,
     this.focusedWindowOpacity = 1,
     this.unfocusedWindowOpacity = 1,
@@ -129,6 +130,10 @@ class ShellThemeData {
   final ShellBackdropBlurLevel backdropBlurLevel;
   final double backdropBlurOpacityThreshold;
   final ShellGlassConfiguration glass;
+
+  /// How much of its blur everything has, 0 none, 1 all of it. Every blur is
+  /// to take its width from [backdropBlurSigma] or [glassBlurSigma].
+  final double blurStrength;
   final bool focusedWindowBorderEnabled;
   final double focusedWindowOpacity;
   final double unfocusedWindowOpacity;
@@ -139,7 +144,9 @@ class ShellThemeData {
   _ShellThemeResolution get _resolution =>
       _resolutionCache[this] ??= _ShellThemeResolution(this);
 
-  double get backdropBlurSigma => backdropBlurLevel.sigma;
+  double get backdropBlurSigma => backdropBlurLevel.sigma * blurStrength;
+
+  double get glassBlurSigma => glass.blurSigma * blurStrength;
 
   double get backdropBlurDownsampleScale => backdropBlurLevel.downsampleScale;
 
@@ -256,6 +263,7 @@ class ShellThemeData {
     ShellBackdropBlurLevel? backdropBlurLevel,
     double? backdropBlurOpacityThreshold,
     ShellGlassConfiguration? glass,
+    double? blurStrength,
     bool? focusedWindowBorderEnabled,
     double? focusedWindowOpacity,
     double? unfocusedWindowOpacity,
@@ -272,6 +280,7 @@ class ShellThemeData {
       backdropBlurOpacityThreshold:
           backdropBlurOpacityThreshold ?? this.backdropBlurOpacityThreshold,
       glass: glass ?? this.glass,
+      blurStrength: blurStrength ?? this.blurStrength,
       focusedWindowBorderEnabled:
           focusedWindowBorderEnabled ?? this.focusedWindowBorderEnabled,
       focusedWindowOpacity: focusedWindowOpacity ?? this.focusedWindowOpacity,
@@ -338,6 +347,7 @@ class ShellThemeData {
         second.backdropBlurOpacityThreshold,
       ),
       glass: ShellGlassConfiguration.lerp(first.glass, second.glass, t),
+      blurStrength: blend(first.blurStrength, second.blurStrength),
       focusedWindowBorderEnabled: t < 0.5
           ? first.focusedWindowBorderEnabled
           : second.focusedWindowBorderEnabled,
@@ -365,6 +375,7 @@ class ShellThemeData {
         other.backdropBlurLevel == backdropBlurLevel &&
         other.backdropBlurOpacityThreshold == backdropBlurOpacityThreshold &&
         other.glass == glass &&
+        other.blurStrength == blurStrength &&
         other.focusedWindowBorderEnabled == focusedWindowBorderEnabled &&
         other.focusedWindowOpacity == focusedWindowOpacity &&
         other.unfocusedWindowOpacity == unfocusedWindowOpacity;
@@ -382,6 +393,7 @@ class ShellThemeData {
     backdropBlurLevel,
     backdropBlurOpacityThreshold,
     glass,
+    blurStrength,
     focusedWindowBorderEnabled,
     focusedWindowOpacity,
     unfocusedWindowOpacity,
@@ -496,7 +508,7 @@ class _ShellThemeResolution {
 
   double edgelessBlurSigmaAt(double strength, {double scale = 1}) =>
       (theme.transparencyMode == ShellTransparencyMode.glass
-          ? theme.glass.blurSigma
+          ? theme.glassBlurSigma
           : theme.backdropBlurSigma) *
       scale *
       _edgelessStep(strength) /
@@ -541,7 +553,7 @@ class _ShellThemeResolution {
       if (theme.transparencyMode == ShellTransparencyMode.glass) {
         return _glassConfig(
           materialStrength,
-          sigma: theme.glass.blurSigma * materialStrength,
+          sigma: theme.glassBlurSigma * materialStrength,
           borderRadius: borderRadius,
           threshold: threshold,
           singleWindowSurface: singleWindowSurface,
@@ -561,8 +573,8 @@ class _ShellThemeResolution {
   late final ImageFilterConfig windowFrostConfig =
       theme.transparencyMode == ShellTransparencyMode.glass
       ? ImageFilterConfig.blur(
-          sigmaX: theme.glass.blurSigma,
-          sigmaY: theme.glass.blurSigma,
+          sigmaX: theme.glassBlurSigma,
+          sigmaY: theme.glassBlurSigma,
           tileMode: ui.TileMode.clamp,
           downsampleScale: theme.glass.quality,
         )

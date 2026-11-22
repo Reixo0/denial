@@ -85,6 +85,7 @@ class ShellBackdropBlur extends StatelessWidget {
         theme.backdropBlurEnabled &&
         (theme.transparencyMode == ShellTransparencyMode.glass ||
             theme.backdropBlurSigma > 0) &&
+        (!edgeless || theme.blurStrength > 0) &&
         (!useWindowAlphaThreshold || theme.backdropBlurOpacityThreshold < 1.0);
     final enabled = available && resolvedStrength > 0;
     Widget fade(Widget value) => opacity == null
@@ -206,10 +207,10 @@ class _ZoomedBackdrop extends StatelessWidget {
     final centre = target.center(Offset.zero);
     final theme = ShellTheme.of(context);
     var config = theme.edgelessBlurConfigAt(strength, scale: scale * ratio);
-    // The blur fills the border that the zoom leaves as far as it reaches,
-    // 1.73 sigma, or less when it is wide.
+    // The blur fills the border that the zoom leaves, as far as it hides that
+    // the picture's edge is drawn out there. (SurfaceFlinger mirrors it.)
     final reach =
-        1.2 * theme.edgelessBlurSigmaAt(strength, scale: scale * ratio);
+        0.8 * theme.edgelessBlurSigmaAt(strength, scale: scale * ratio);
     final zoom = math.max(this.zoom, 1 - 2 * reach / target.longestSide);
     if (zoom != 1) {
       config = ImageFilterConfig.compose(

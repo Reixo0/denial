@@ -149,6 +149,9 @@ class _DenialSettingsStandaloneContentState
       cardOpacity: appearance.cardOpacity,
       transparencyMode: appearance.transparencyMode,
       glass: appearance.glass,
+      blurStrength: ref.watch(
+        shellSettingsProvider.select((settings) => settings.home.blurStrength),
+      ),
       focusedWindowBorderEnabled: appearance.focusedWindowBorderEnabled,
       focusedWindowOpacity: appearance.focusedWindowOpacity,
       unfocusedWindowOpacity: appearance.unfocusedWindowOpacity,

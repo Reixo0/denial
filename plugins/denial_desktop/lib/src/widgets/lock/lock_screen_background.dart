@@ -48,8 +48,8 @@ class _LockBackdropState extends ConsumerState<_LockBackdrop> {
                       : 'lock-wallpaper-blur-${output.monitorId}',
                 ),
                 imageFilter: ImageFilter.blur(
-                  sigmaX: settings.blurRadius,
-                  sigmaY: settings.blurRadius,
+                  sigmaX: settings.blurRadius * context.shellTheme.blurStrength,
+                  sigmaY: settings.blurRadius * context.shellTheme.blurStrength,
                   // The lock wallpaper fills the output. Clamping keeps the
                   // blur kernel from sampling transparent pixels beyond that
                   // boundary and exposing a bright halo around the display.
@@ -779,7 +779,10 @@ class _LockDepthForegroundState extends ConsumerState<_LockDepthForeground> {
             (outputName == null
                 ? assignment.zoom
                 : assignment.zoomForOutput(outputName));
-        final sigma = (settings.blurRadius + widget.spread) / cover;
+        final sigma =
+            (settings.blurRadius * context.shellTheme.blurStrength +
+                widget.spread) /
+            cover;
         if (sigma > 0.0 && _maskKey != (sigma, size)) {
           _bake(source, sigma, size);
         }

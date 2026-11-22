@@ -505,6 +505,26 @@ class ShellOverlaySettings {
       Object.hash(launcher, dashboard, notifications, systemHud);
 }
 
+/// The phone's home.
+@immutable
+class ShellHomeSettings {
+  const ShellHomeSettings({this.blurStrength = 1});
+
+  /// How much of its blur everything in the shell has, 0 none, 1 all of it
+  /// ([ShellThemeData.blurStrength]).
+  final double blurStrength;
+
+  ShellHomeSettings copyWith({double? blurStrength}) =>
+      ShellHomeSettings(blurStrength: blurStrength ?? this.blurStrength);
+
+  @override
+  bool operator ==(Object other) =>
+      other is ShellHomeSettings && other.blurStrength == blurStrength;
+
+  @override
+  int get hashCode => blurStrength.hashCode;
+}
+
 @immutable
 class ShellLockScreenSettings {
   const ShellLockScreenSettings({
@@ -1094,6 +1114,7 @@ class ShellSettings {
     this.layout = const ShellLayoutSettings(),
     this.overlays = const ShellOverlaySettings(),
     this.animations = const ShellAnimationSettings(),
+    this.home = const ShellHomeSettings(),
     this.lockScreen = const ShellLockScreenSettings(),
     this.power = const ShellPowerSettings(),
     this.notifications = const ShellNotificationSettings(),
@@ -1112,6 +1133,7 @@ class ShellSettings {
   final ShellLayoutSettings layout;
   final ShellOverlaySettings overlays;
   final ShellAnimationSettings animations;
+  final ShellHomeSettings home;
   final ShellLockScreenSettings lockScreen;
   final ShellPowerSettings power;
   final ShellNotificationSettings notifications;
@@ -1126,6 +1148,7 @@ class ShellSettings {
     ShellLayoutSettings? layout,
     ShellOverlaySettings? overlays,
     ShellAnimationSettings? animations,
+    ShellHomeSettings? home,
     ShellLockScreenSettings? lockScreen,
     ShellPowerSettings? power,
     ShellNotificationSettings? notifications,
@@ -1140,6 +1163,7 @@ class ShellSettings {
       layout: layout ?? this.layout,
       overlays: overlays ?? this.overlays,
       animations: animations ?? this.animations,
+      home: home ?? this.home,
       lockScreen: lockScreen ?? this.lockScreen,
       power: power ?? this.power,
       notifications: notifications ?? this.notifications,
@@ -1347,6 +1371,10 @@ class ShellSettings {
       patch['animations'] = section;
     }
 
+    if (home != previous.home) {
+      patch['home'] = <String, Object?>{'blurStrength': home.blurStrength};
+    }
+
     if (lockScreen != previous.lockScreen) {
       final before = previous.lockScreen;
       final section = <String, Object?>{};
@@ -1490,6 +1518,7 @@ class ShellSettings {
         'panelTravel': animations.panelTravel,
         'animateLockScreen': animations.animateLockScreen,
       },
+      'home': <String, Object>{'blurStrength': home.blurStrength},
       'lockScreen': <String, Object>{
         'useSystemWallpaper': lockScreen.useSystemWallpaper,
         'dimAmount': lockScreen.dimAmount,
@@ -1525,6 +1554,7 @@ class ShellSettings {
     final layoutJson = _map(json['layout']);
     final overlaysJson = _map(json['overlays']);
     final animationsJson = _map(json['animations']);
+    final homeJson = _map(json['home']);
     final lockJson = _map(json['lockScreen']);
     final powerJson = _map(json['power']);
     final legacyHoverTriggersEnabled = overlaysJson['hoverTriggersEnabled'];
@@ -1834,6 +1864,14 @@ class ShellSettings {
             ? animationsJson['animateLockScreen'] as bool
             : defaults.animations.animateLockScreen,
       ),
+      home: ShellHomeSettings(
+        blurStrength: _number(
+          homeJson['blurStrength'],
+          defaults.home.blurStrength,
+          0,
+          1,
+        ),
+      ),
       lockScreen: ShellLockScreenSettings(
         useSystemWallpaper: lockJson['useSystemWallpaper'] is bool
             ? lockJson['useSystemWallpaper'] as bool
@@ -1917,6 +1955,7 @@ class ShellSettings {
         other.layout == layout &&
         other.overlays == overlays &&
         other.animations == animations &&
+        other.home == home &&
         other.lockScreen == lockScreen &&
         other.power == power &&
         other.notifications == notifications &&
@@ -1933,6 +1972,7 @@ class ShellSettings {
     layout,
     overlays,
     animations,
+    home,
     lockScreen,
     power,
     notifications,

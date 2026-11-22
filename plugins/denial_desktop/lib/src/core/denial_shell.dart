@@ -93,6 +93,7 @@ class DenialShell extends ConsumerWidget {
       shellSettingsProvider.select(
         (settings) => (
           appearance: settings.appearance,
+          blurStrength: settings.home.blurStrength,
           animationDurationScale: settings.animations.durationScale,
           locale: settings.localization.localeOverride,
           twentyFourHourClock: settings.localization.twentyFourHourClock,
@@ -128,6 +129,7 @@ class DenialShell extends ConsumerWidget {
       backdropBlurLevel: appearance.backdropBlurLevel,
       backdropBlurOpacityThreshold: appearance.backdropBlurOpacityThreshold,
       glass: appearance.glass,
+      blurStrength: presentation.blurStrength,
       focusedWindowBorderEnabled: appearance.focusedWindowBorderEnabled,
       focusedWindowOpacity: appearance.focusedWindowOpacity,
       unfocusedWindowOpacity: appearance.unfocusedWindowOpacity,
