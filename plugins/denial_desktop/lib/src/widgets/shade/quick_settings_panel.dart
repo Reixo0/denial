@@ -358,13 +358,22 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
   final ValueNotifier<bool> _qsCollapsed = ValueNotifier<bool>(true);
   final ValueNotifier<bool> _qsFull = ValueNotifier<bool>(false);
 
-  /// The first tile page's motion: its two quick-tile rows are squashed
-  /// (AOSP's QS squishiness) while the stack's top uncovers them, the other
-  /// rows fade in with the quick settings' content.
+  /// The stack's resting height in the first pull, from the layout.
+  double _stackHeight = 0;
+
+  /// The first tile page's motion: the wells of its two quick-tile rows are
+  /// squashed (AOSP's QS squishiness) while the stack's top uncovers them,
+  /// the other rows fade in with the quick settings' content.
   late final QsTileMotion _tileMotion = QsTileMotion(
     sharedRows: 2,
     squish: widget.expansion.panel.drive(
-      Animatable<double>.fromCallback(ShadeReveal.tileSquish),
+      Animatable<double>.fromCallback(
+        (panel) => ShadeReveal.tileSquish(
+          panel,
+          stackHeight: _stackHeight,
+          shelf: _listScroll.overflows,
+        ),
+      ),
     ),
     contentAlpha: widget.expansion.qs.drive(
       Animatable<double>.fromCallback(
@@ -746,6 +755,7 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
           quickTilesHeight: twoRows,
           mediaActive: mediaActive,
           onTravel: (travel) {
+            _stackHeight = ShadeReveal.stackHeight(travel);
             // The finger moves the notification stack 1:1 (AOSP's quick
             // settings expansion height).
             if (travel > 120) widget.expansion.qsTravel = travel * scale;

@@ -208,14 +208,13 @@ class _QuickTileState extends State<QuickTile> {
         ),
       ),
     );
-    // AOSP squishes the icon well on its own, after its background is drawn
-    // (LargeTileContent's verticalSquish): a shorter rounded shape, centred.
+    // AOSP squishes the icon well alone (LargeTileContent's verticalSquish):
+    // a shorter rounded shape, centred. The tile's own squish is inside its
+    // fixed height and draws nothing different.
     final squish = QsTileSquish.of(context);
     final Widget squishedWell = squish == null
         ? well
-        : _SquishedTile(
-            row: 0,
-            stacked: false,
+        : _SquishedWell(
             radius: active ? 16 : PixelQs.well / 2,
             squish: squish,
             child: well,
@@ -296,9 +295,10 @@ class _QuickTileState extends State<QuickTile> {
 /// rest one, in order, row by row.
 /// How the first page's tiles move between the quick tiles and the full
 /// quick settings (AOSP Compose QS): the rows shared with the quick tiles
-/// squish with the shade's first pull ([squish], 0.5 to 1:
-/// `verticalSquish`), the other rows fade with the quick settings' content
-/// ([contentAlpha]). Paint only: neither lays the grid out again.
+/// stay as they are, but for the wells of their wide tiles, which squish with
+/// the shade's first pull ([squish], up to 1: `verticalSquish`); the other
+/// rows fade with the quick settings' content ([contentAlpha]). Paint only:
+/// neither lays the grid out again.
 @immutable
 class QsTileMotion {
   const QsTileMotion({
@@ -322,14 +322,6 @@ class PixelTileGrid extends StatelessWidget {
     QsTileSize(:final wide) => wide,
     QuickTile(:final wide) => wide,
     _ => true,
-  };
-
-  /// The tile's corner radius, which its squished clip keeps
-  /// (common_tile_default_*: 24 dp active, round inactive).
-  static double _radius(Widget tile) => switch (tile) {
-    QuickTile(:final active) when active => 24,
-    QsTileSize(:final child) => _radius(child),
-    _ => PixelQs.tileHeight / 2,
   };
 
   @override
@@ -358,14 +350,7 @@ class PixelTileGrid extends StatelessWidget {
         if (motion == null) {
           shared.add(sized);
         } else if (row < motion.sharedRows) {
-          shared.add(
-            _SquishedTile(
-              row: row,
-              radius: _radius(tile),
-              squish: motion.squish,
-              child: QsTileSquish(squish: motion.squish, child: sized),
-            ),
-          );
+          shared.add(QsTileSquish(squish: motion.squish, child: sized));
         } else {
           rest.add(sized);
         }
@@ -963,12 +948,8 @@ class _PagerDotsPainter extends CustomPainter {
       old.inactive != inactive;
 }
 
-/// AOSP's `verticalSquish` on a quick tile, painted: the tile shows a band
-/// [squish] of its height around its centre, with its shape's corners, and
-/// its row moves up as the rows above it shrink. 1 draws it as laid out.
-/// The first pull's squish of the quick tiles, for parts of a tile that
-/// squish on their own (the icon well). It never rebuilds its dependents:
-/// the animation repaints them.
+/// The first pull's squish, for the icon wells of the quick tiles. It never
+/// rebuilds its dependents: the animation repaints them.
 class QsTileSquish extends InheritedWidget {
   const QsTileSquish({required this.squish, required super.child, super.key});
 
@@ -982,65 +963,41 @@ class QsTileSquish extends InheritedWidget {
       !identical(squish, oldWidget.squish);
 }
 
-class _SquishedTile extends SingleChildRenderObjectWidget {
-  const _SquishedTile({
-    required this.row,
+/// AOSP's `verticalSquish` on an icon well, painted: it shows a band [squish]
+/// of its height around its centre, with its shape's corners. 1 draws it as
+/// laid out.
+class _SquishedWell extends SingleChildRenderObjectWidget {
+  const _SquishedWell({
     required this.radius,
     required this.squish,
     required super.child,
-    this.stacked = true,
   });
 
-  final int row;
-
-  /// Moves up as Compose stacks squished rows; false squishes in place.
-  final bool stacked;
   final double radius;
   final Animation<double> squish;
 
   @override
   RenderObject createRenderObject(BuildContext context) =>
-      _RenderSquishedTile(row, radius, squish, stacked: stacked);
+      _RenderSquishedWell(radius, squish);
 
   @override
   void updateRenderObject(
     BuildContext context,
-    _RenderSquishedTile renderObject,
+    _RenderSquishedWell renderObject,
   ) {
     renderObject
-      ..row = row
-      ..stacked = stacked
       ..radius = radius
       ..squish = squish;
   }
 }
 
-class _RenderSquishedTile extends RenderProxyBox {
-  _RenderSquishedTile(
-    this._row,
-    this._radius,
-    this._squish, {
-    required this._stacked,
-  });
-
-  bool _stacked;
-  set stacked(bool value) {
-    if (value == _stacked) return;
-    _stacked = value;
-    markNeedsPaint();
-  }
+class _RenderSquishedWell extends RenderProxyBox {
+  _RenderSquishedWell(this._radius, this._squish);
 
   double _radius;
   set radius(double value) {
     if (value == _radius) return;
     _radius = value;
-    markNeedsPaint();
-  }
-
-  int _row;
-  set row(int value) {
-    if (value == _row) return;
-    _row = value;
     markNeedsPaint();
   }
 
@@ -1073,18 +1030,11 @@ class _RenderSquishedTile extends RenderProxyBox {
     super.dispose();
   }
 
-  double get _value => _squish.value.clamp(0.0, 1.0);
-
-  /// Compose lays the squished rows out one under the other: a row moves
-  /// up by what the rows above and its own half lost.
-  double get _shift =>
-      _stacked ? -(_row + 0.5) * size.height * (1 - _value) : 0;
-
   @override
   void paint(PaintingContext context, Offset offset) {
     final child = this.child;
     if (child == null) return;
-    final s = _value;
+    final s = _squish.value.clamp(0.0, 1.0);
     if (s >= 1) {
       _clip.layer = null;
       context.paintChild(child, offset);
@@ -1092,10 +1042,9 @@ class _RenderSquishedTile extends RenderProxyBox {
     }
     final h = size.height;
     final shown = h * s;
-    final at = offset + Offset(0, _shift);
     _clip.layer = context.pushClipRRect(
       needsCompositing,
-      at,
+      offset,
       Offset.zero & size,
       RRect.fromLTRBR(
         0,
@@ -1107,16 +1056,5 @@ class _RenderSquishedTile extends RenderProxyBox {
       (context, offset) => context.paintChild(child, offset),
       oldLayer: _clip.layer,
     );
-  }
-
-  @override
-  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) {
-    if (_value < 1) return false;
-    return super.hitTestChildren(result, position: position);
-  }
-
-  @override
-  void applyPaintTransform(RenderBox child, Matrix4 transform) {
-    transform.translateByDouble(0, _value >= 1 ? 0 : _shift, 0, 1);
   }
 }

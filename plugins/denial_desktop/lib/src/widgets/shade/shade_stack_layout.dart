@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
 import 'notification_shade_list.dart' show AndroidStackExpansion;
+import 'notification_shelf.dart' show NotificationShelfGeometry;
 
 /// The parts of the shade, each moved on its own.
 enum ShadePart {
@@ -85,7 +86,8 @@ class ShadeStackSlot extends ParentDataWidget<_ShadeStackParentData> {
 /// First pull (EvolutionX's slow-pull recording): the stack's top comes
 /// down from the screen's top with the panel (AOSP's stackY) and cuts the
 /// quick tiles and an active media player, which stay in place and opaque,
-/// squashed by AOSP's QS squishiness (QsTileMotion). The notifications come
+/// only the wells of the wide tiles squashed by AOSP's QS squishiness
+/// (QsTileMotion). The notifications come
 /// down with that top, squashed, and fade in (getContentAlpha); the header
 /// fades in as the top passes the first row ([ShadeReveal]).
 ///
@@ -110,6 +112,14 @@ class ShadeListScroll extends ChangeNotifier {
     if (controller == null || !controller.hasClients) return 0;
     final position = controller.positions.first;
     return position.hasPixels ? math.max(0, position.pixels) : 0;
+  }
+
+  /// Whether there is more than fits, which the shelf shows.
+  bool get overflows {
+    final controller = _controller;
+    if (controller == null || !controller.hasClients) return false;
+    final position = controller.positions.first;
+    return position.hasContentDimensions && position.maxScrollExtent > 0;
   }
 }
 
@@ -205,9 +215,28 @@ class _ShadeStackParentData extends ContainerBoxParentData<RenderBox> {
 /// The first pull, as EvolutionX's slow-pull recording shows it.
 abstract final class ShadeReveal {
   /// AOSP's QS squishiness: constrainSquishiness (0.1 + 0.9 ×) of the
-  /// stack's squishiness fraction.
-  static double tileSquish(double panel) =>
-      0.1 + 0.9 * AndroidStackExpansion.squish(panel);
+  /// stack's squishiness fraction (getExpansionFractionWithoutShelf), in
+  /// which the stack's resting height, [stackHeight], counts without the
+  /// panel's padding and the [shelf].
+  static double tileSquish(
+    double panel, {
+    required double stackHeight,
+    required bool shelf,
+  }) {
+    final apart =
+        _Places.panelPadding + (shelf ? NotificationShelfGeometry.height : 0);
+    final counted = math.max(1.0, stackHeight - apart);
+    final missing = stackHeight * (1 - AndroidStackExpansion.squish(panel));
+    return (0.1 + 0.9 * (1 - missing / counted)).clamp(0.1, 1.0);
+  }
+
+  /// The stack's resting height, from the top of its panel, of the way the
+  /// full quick settings push it down ([ShadeStackLayout.onTravel]).
+  static double stackHeight(double travel) =>
+      travel -
+      _Places.stackPastBottom +
+      _Places.panelPadding -
+      NotificationShelfGeometry.bottomMargin;
 
   /// The header fades in quickly as the stack's top passes the first tile
   /// row (about 90 ms on the recording, as the notifications appear).
