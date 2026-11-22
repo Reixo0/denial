@@ -55,3 +55,12 @@ Color phoneShadePanel(ColorScheme scheme) => Color.alphaBlend(
   scheme.onPrimary.withValues(alpha: 0.32),
   scheme.surfaceContainerLowest.withValues(alpha: 0.32),
 );
+
+/// The tint of the panel behind the notifications (SystemUI's notifications
+/// scrim), measured on EvolutionX's recording: a near-black of the accent at
+/// a quarter.
+Color phoneNotificationPanel(ColorScheme scheme) => Color.lerp(
+  scheme.onPrimaryFixed,
+  const Color(0xFF000000),
+  0.25,
+)!.withValues(alpha: 0.25);

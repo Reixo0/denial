@@ -94,7 +94,7 @@ class NotificationShelfGeometry {
     required this.rows,
     required this.count,
     required this.progress,
-    required this.scale,
+    required this.topPadding,
   });
 
   /// notification_shelf_height.
@@ -114,8 +114,8 @@ class NotificationShelfGeometry {
 
   final Animation<double> progress;
 
-  /// The shade's dp-to-pixel scale.
-  final double Function() scale;
+  /// The stack's resting top in the list.
+  final double Function() topPadding;
 
   NotificationShelfFrame? _frame;
   bool _cached = false;
@@ -143,9 +143,7 @@ class NotificationShelfGeometry {
     if (list == null || !list.hasSize || count == 0) return null;
     final open = progress.value.clamp(0.0, 1.0);
     final squish = AndroidStackExpansion.squish(open);
-    final shift = open >= 1
-        ? 0.0
-        : list.localToGlobal(Offset.zero).dy / scale() * (1 - open);
+    final shift = topPadding() * (squish - open);
     final stackBottom = list.size.height - bottomMargin;
     final shelfStart = stackBottom - height - PixelNotificationMetrics.divider;
     final starts = <int, double>{};

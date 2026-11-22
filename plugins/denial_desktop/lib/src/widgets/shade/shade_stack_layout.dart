@@ -90,12 +90,38 @@ class ShadeStackSlot extends ParentDataWidget<_ShadeStackParentData> {
 /// fades in as the top passes the first row ([ShadeReveal]).
 ///
 /// Units are the shade's dp, from the top of the screen.
+/// How far the notifications have scrolled up.
+class ShadeListScroll extends ChangeNotifier {
+  ScrollController? _controller;
+
+  void attach(ScrollController controller) {
+    _controller?.removeListener(notifyListeners);
+    _controller = controller..addListener(notifyListeners);
+  }
+
+  void detach(ScrollController controller) {
+    if (!identical(_controller, controller)) return;
+    controller.removeListener(notifyListeners);
+    _controller = null;
+  }
+
+  double get offset {
+    final controller = _controller;
+    if (controller == null || !controller.hasClients) return 0;
+    final position = controller.positions.first;
+    return position.hasPixels ? math.max(0, position.pixels) : 0;
+  }
+}
+
 class ShadeStackLayout extends MultiChildRenderObjectWidget {
   const ShadeStackLayout({
     super.key,
     required this.panel,
     required this.qs,
     required this.pullsBoth,
+    required this.listScroll,
+    required this.panelColor,
+    required this.sideMargin,
     required this.quickTilesHeight,
     required this.mediaActive,
     required this.onTravel,
@@ -108,6 +134,13 @@ class ShadeStackLayout extends MultiChildRenderObjectWidget {
   /// A two-finger pull: the panel uncovers the full quick settings, without
   /// the notifications.
   final ValueListenable<bool> pullsBoth;
+
+  final ShadeListScroll listScroll;
+
+  /// The tint of the panel behind the notifications (AOSP's notifications
+  /// scrim), which reaches over [sideMargin] to the screen's sides.
+  final Color panelColor;
+  final double sideMargin;
 
   /// The quick tiles' grid height (two rows), unsquished.
   final double quickTilesHeight;
@@ -125,6 +158,9 @@ class ShadeStackLayout extends MultiChildRenderObjectWidget {
     panel: panel,
     qs: qs,
     pullsBoth: pullsBoth,
+    listScroll: listScroll,
+    panelColor: panelColor,
+    sideMargin: sideMargin,
     quickTilesHeight: quickTilesHeight,
     mediaActive: mediaActive,
     onTravel: onTravel,
@@ -136,11 +172,17 @@ class ShadeStackLayout extends MultiChildRenderObjectWidget {
       ..panel = panel
       ..qs = qs
       ..pullsBoth = pullsBoth
+      ..listScroll = listScroll
+      ..panelColor = panelColor
+      ..sideMargin = sideMargin
       ..quickTilesHeight = quickTilesHeight
       ..mediaActive = mediaActive
       ..onTravel = onTravel;
   }
 }
+
+/// Which side of the notification panel's edge a part shows on.
+enum _ShadeClip { none, abovePanel, inPanel }
 
 class _ShadeStackParentData extends ContainerBoxParentData<RenderBox> {
   ShadePart? part;
@@ -148,11 +190,13 @@ class _ShadeStackParentData extends ContainerBoxParentData<RenderBox> {
   /// How the part is drawn for the current fractions.
   Offset place = Offset.zero;
   double scale = 1;
-  Rect? clip;
+  _ShadeClip clip = _ShadeClip.none;
   double alpha = 1;
   bool hittable = false;
 
-  final clipLayer = LayerHandle<ClipRectLayer>();
+  final clipLayer = LayerHandle<ClipRRectLayer>();
+  final outsideLayer = LayerHandle<ClipPathLayer>();
+  final aboveLayer = LayerHandle<ClipRectLayer>();
   final opacityLayer = LayerHandle<OpacityLayer>();
   final transformLayer = LayerHandle<TransformLayer>();
 }
@@ -186,6 +230,11 @@ abstract final class _Places {
 
   /// From the quick tiles' bottom to the notification stack.
   static const double stackGap = 40;
+
+  /// The panel behind the notifications starts this far above them and has
+  /// these corners (notification_scrim_corner_radius).
+  static const double panelPadding = 16;
+  static const double panelRadius = 32;
 
   /// The stack's top in the full quick settings, past the screen's bottom.
   static const double stackPastBottom = 18;
@@ -230,6 +279,9 @@ class RenderShadeStack extends RenderBox
     required this._panel,
     required this._qs,
     required this._pullsBoth,
+    required this._listScroll,
+    required this._panelColor,
+    required this._sideMargin,
     required this._quickTilesHeight,
     required this._mediaActive,
     required this.onTravel,
@@ -267,6 +319,32 @@ class RenderShadeStack extends RenderBox
     markNeedsPaint();
   }
 
+  ShadeListScroll _listScroll;
+  ShadeListScroll get listScroll => _listScroll;
+  set listScroll(ShadeListScroll value) {
+    if (identical(value, _listScroll)) return;
+    if (attached) _listScroll.removeListener(markNeedsPaint);
+    _listScroll = value;
+    if (attached) _listScroll.addListener(markNeedsPaint);
+    markNeedsPaint();
+  }
+
+  Color _panelColor;
+  Color get panelColor => _panelColor;
+  set panelColor(Color value) {
+    if (value == _panelColor) return;
+    _panelColor = value;
+    markNeedsPaint();
+  }
+
+  double _sideMargin;
+  double get sideMargin => _sideMargin;
+  set sideMargin(double value) {
+    if (value == _sideMargin) return;
+    _sideMargin = value;
+    markNeedsPaint();
+  }
+
   double _quickTilesHeight;
   double get quickTilesHeight => _quickTilesHeight;
   set quickTilesHeight(double value) {
@@ -288,6 +366,11 @@ class RenderShadeStack extends RenderBox
   double _quickBottom = 0;
   double _stackTop = 0;
 
+  /// The panel behind the notifications, for the current fractions.
+  RRect _edge = RRect.zero;
+  double _panelAlpha = 0;
+  bool _quickTilesClear = false;
+
   @override
   void setupParentData(RenderBox child) {
     if (child.parentData is! _ShadeStackParentData) {
@@ -301,6 +384,7 @@ class RenderShadeStack extends RenderBox
     _panel.addListener(markNeedsPaint);
     _qs.addListener(markNeedsPaint);
     _pullsBoth.addListener(markNeedsPaint);
+    _listScroll.addListener(markNeedsPaint);
   }
 
   @override
@@ -308,6 +392,7 @@ class RenderShadeStack extends RenderBox
     _panel.removeListener(markNeedsPaint);
     _qs.removeListener(markNeedsPaint);
     _pullsBoth.removeListener(markNeedsPaint);
+    _listScroll.removeListener(markNeedsPaint);
     super.detach();
   }
 
@@ -374,9 +459,13 @@ class RenderShadeStack extends RenderBox
         (mediaActive ? _height(ShadePart.media) : 0);
     _stackTop = _quickBottom + _Places.stackGap;
     _child(ShadePart.list)?.layout(
-      BoxConstraints.tightFor(
-        width: width,
-        height: math.max(0, size.height - _stackTop),
+      // The list starts at the screen's top and its rows at the stack's: it
+      // is told where by the smallest height it may have.
+      BoxConstraints(
+        minWidth: width,
+        maxWidth: width,
+        minHeight: math.max(0, size.height - _stackTop),
+        maxHeight: size.height,
       ),
       parentUsesSize: true,
     );
@@ -401,12 +490,31 @@ class RenderShadeStack extends RenderBox
     )!;
     final both = _pullsBoth.value;
     final stackTop = both
-        ? restTop * p
+        ? (restTop - _Places.panelPadding) * p
         : e > 0
-        ? restTop
-        : _stackTop * p;
+        ? restTop - _Places.panelPadding
+        : (_stackTop - _Places.panelPadding) * p;
+    // AOSP's getEdgePosition: the panel of the notifications scrolls up over
+    // the quick tiles, to the header.
+    final edge = math.max(
+      _Places.quickGridTop * p,
+      stackTop - _listScroll.offset,
+    );
+    final radius =
+        _Places.panelRadius * math.min(edge / _Places.panelRadius, 1);
+    _edge = RRect.fromRectAndCorners(
+      Rect.fromLTRB(
+        -_sideMargin,
+        edge,
+        width + _sideMargin,
+        math.max(edge, size.height + _Places.panelRadius),
+      ),
+      topLeft: Radius.circular(math.max(0, radius)),
+      topRight: Radius.circular(math.max(0, radius)),
+    );
+    _panelAlpha = p;
+    _quickTilesClear = e <= 0 && edge >= _quickBottom;
     final headerAlpha = ShadeReveal.headerAlpha(p);
-    final qsClip = Rect.fromLTRB(-width, -size.height, width * 2, stackTop);
     final gridHeight = _height(ShadePart.grid);
     final fullMediaTop =
         _Places.fullGridTop +
@@ -424,7 +532,7 @@ class RenderShadeStack extends RenderBox
       var y = 0.0;
       var scale = 1.0;
       var alpha = 1.0;
-      Rect? clip = qsClip;
+      _ShadeClip clip = _ShadeClip.abovePanel;
       var hittable = true;
       switch (data.part) {
         case ShadePart.clock:
@@ -436,7 +544,7 @@ class RenderShadeStack extends RenderBox
           )!;
           scale = lerpDouble(1, _Places.clockScale, e)!;
           y = centre - h * scale / 2;
-          clip = null;
+          clip = _ShadeClip.none;
           hittable = false;
         case ShadePart.date:
           final fromX = _width(ShadePart.clock) + _Places.dateAfterClock;
@@ -448,7 +556,7 @@ class RenderShadeStack extends RenderBox
           )!;
           y = centre - h / 2;
           alpha = _keyframed(e, _hiddenAlpha);
-          clip = null;
+          clip = _ShadeClip.none;
           hittable = false;
         case ShadePart.icons:
           x = width - w;
@@ -459,7 +567,7 @@ class RenderShadeStack extends RenderBox
           )!;
           y = centre - h / 2;
           alpha = _keyframed(e, _hiddenAlpha);
-          clip = null;
+          clip = _ShadeClip.none;
           hittable = false;
         case ShadePart.carrier:
           x = width - w;
@@ -470,7 +578,7 @@ class RenderShadeStack extends RenderBox
           )!;
           y = centre - h / 2;
           alpha = _keyframed(e, _carrierAlpha);
-          clip = null;
+          clip = _ShadeClip.none;
           hittable = false;
         case ShadePart.slider:
           y = anchor - _Places.sliderAboveGrid;
@@ -496,14 +604,14 @@ class RenderShadeStack extends RenderBox
         case ShadePart.footer:
           y = size.height - _Places.footerBottom - h;
           alpha = footerAlpha;
-          clip = null;
+          clip = _ShadeClip.none;
           hittable = e >= 0.99;
         case ShadePart.list:
-          // The list rises to stackTop by itself (NotificationShadeList).
-          y = restTop;
+          // The list rises to its place by itself (NotificationShadeList).
+          y = restTop - _stackTop;
           // AOSP hides the stack until a two-finger pull is fully open.
           alpha = both ? 0 : AndroidStackExpansion.alpha(p);
-          clip = Rect.fromLTRB(-width, stackTop, width * 2, size.height);
+          clip = _ShadeClip.inPanel;
           hittable = e <= 0.01;
         case null:
           alpha = 0;
@@ -530,9 +638,18 @@ class RenderShadeStack extends RenderBox
     for (var child = firstChild; child != null; child = childAfter(child)) {
       final data = child.parentData! as _ShadeStackParentData;
       final alpha = (data.alpha * 255).round();
-      final clip = data.clip;
-      if (alpha <= 0 || (clip != null && clip.height <= 0)) {
+      final bounds = data.place & (child.size * data.scale);
+      // Wholly on the wrong side of the edge, or on the right one.
+      final hidden =
+          data.clip == _ShadeClip.abovePanel && _edge.top <= bounds.top;
+      final whole =
+          data.clip == _ShadeClip.none ||
+          (data.clip == _ShadeClip.abovePanel && bounds.bottom <= _edge.top);
+      if (data.part == ShadePart.list) _paintPanel(context, offset);
+      if (alpha <= 0 || hidden) {
         data.clipLayer.layer = null;
+        data.outsideLayer.layer = null;
+        data.aboveLayer.layer = null;
         data.opacityLayer.layer = null;
         data.transformLayer.layer = null;
         continue;
@@ -569,19 +686,61 @@ class RenderShadeStack extends RenderBox
         );
       }
 
-      if (clip == null) {
+      if (whole) {
         data.clipLayer.layer = null;
+        data.outsideLayer.layer = null;
+        data.aboveLayer.layer = null;
         placed(context, offset);
-      } else {
-        data.clipLayer.layer = context.pushClipRect(
+      } else if (data.clip == _ShadeClip.inPanel) {
+        data.outsideLayer.layer = null;
+        data.clipLayer.layer = context.pushClipRRect(
           needsCompositing,
           offset,
-          clip,
+          _edge.outerRect,
+          _edge,
           placed,
           oldLayer: data.clipLayer.layer,
         );
+      } else if (_quickTilesClear) {
+        // The edge's corners are below everything that shows.
+        data.outsideLayer.layer = null;
+        data.aboveLayer.layer = context.pushClipRect(
+          needsCompositing,
+          offset,
+          Rect.fromLTRB(-size.width, -size.height, size.width * 2, _edge.top),
+          placed,
+          oldLayer: data.aboveLayer.layer,
+        );
+      } else {
+        data.aboveLayer.layer = null;
+        final far = Rect.fromLTRB(
+          -size.width,
+          -size.height,
+          size.width * 2,
+          _edge.bottom,
+        );
+        data.outsideLayer.layer = context.pushClipPath(
+          needsCompositing,
+          offset,
+          far,
+          Path()
+            ..fillType = PathFillType.evenOdd
+            ..addRect(far)
+            ..addRRect(_edge),
+          placed,
+          oldLayer: data.outsideLayer.layer,
+        );
       }
     }
+  }
+
+  void _paintPanel(PaintingContext context, Offset offset) {
+    if (_panelAlpha <= 0 || _edge.top >= size.height) return;
+    context.canvas.drawRRect(
+      _edge.shift(offset),
+      Paint()
+        ..color = _panelColor.withValues(alpha: _panelColor.a * _panelAlpha),
+    );
   }
 
   @override
@@ -590,8 +749,10 @@ class RenderShadeStack extends RenderBox
     for (var child = lastChild; child != null; child = childBefore(child)) {
       final data = child.parentData! as _ShadeStackParentData;
       if (!data.hittable) continue;
-      final clip = data.clip;
-      if (clip != null && !clip.contains(position)) continue;
+      if (data.clip == _ShadeClip.abovePanel && position.dy >= _edge.top) {
+        continue;
+      }
+      if (data.clip == _ShadeClip.inPanel && position.dy < _edge.top) continue;
       final hit = result.addWithPaintOffset(
         offset: data.place,
         position: position,

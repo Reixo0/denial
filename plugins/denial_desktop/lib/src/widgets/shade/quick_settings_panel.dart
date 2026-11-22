@@ -354,6 +354,7 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
   /// Thresholds of the quick settings' fraction that change what the parts
   /// do (the list takes touches only on the quick tiles, the pages scroll
   /// only in the full quick settings): rebuilt only when crossed.
+  final ShadeListScroll _listScroll = ShadeListScroll();
   final ValueNotifier<bool> _qsCollapsed = ValueNotifier<bool>(true);
   final ValueNotifier<bool> _qsFull = ValueNotifier<bool>(false);
 
@@ -426,6 +427,7 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
   void dispose() {
     widget.progress.removeListener(_trackOpen);
     _expansion.removeListener(_trackQs);
+    _listScroll.dispose();
     _qsCollapsed.dispose();
     _qsFull.dispose();
     _pages.dispose();
@@ -738,6 +740,9 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
           panel: widget.progress,
           qs: _expansion,
           pullsBoth: widget.expansion.pullsBoth,
+          listScroll: _listScroll,
+          panelColor: phoneNotificationPanel(phoneSchemeOf(context)),
+          sideMargin: PixelQs.margin,
           quickTilesHeight: twoRows,
           mediaActive: mediaActive,
           onTravel: (travel) {
@@ -847,6 +852,7 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
                       closed: widget.closed,
                       active: widget.active && collapsed,
                       expansion: widget.expansion,
+                      scroll: _listScroll,
                     ),
                   ),
                 ),
@@ -991,24 +997,41 @@ class _Notifications extends ConsumerWidget {
     required this.closed,
     required this.active,
     required this.expansion,
+    required this.scroll,
   });
 
   final Animation<double> progress;
   final bool closed;
   final bool active;
   final ShadeExpansion expansion;
+  final ShadeListScroll scroll;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final empty = ref.watch(
       desktopNotificationsProvider.select((state) => state.history.isEmpty),
     );
-    if (empty) return const _EmptyNotifications();
-    return MobileNotificationHistory(
-      progress: progress,
-      closed: closed,
-      active: active,
-      expansion: expansion,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // ShadeStackLayout: the list's place below the screen's top.
+        final top = constraints.maxHeight - constraints.minHeight;
+        return SizedBox(
+          height: constraints.maxHeight,
+          child: empty
+              ? Padding(
+                  padding: EdgeInsets.only(top: top),
+                  child: const _EmptyNotifications(),
+                )
+              : MobileNotificationHistory(
+                  progress: progress,
+                  closed: closed,
+                  active: active,
+                  expansion: expansion,
+                  topPadding: top,
+                  scroll: scroll,
+                ),
+        );
+      },
     );
   }
 }

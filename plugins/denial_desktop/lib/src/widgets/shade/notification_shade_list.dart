@@ -41,6 +41,7 @@ class NotificationShadeList extends SliverList {
     required super.delegate,
     required this.progress,
     required this.entrance,
+    this.topPadding = 0,
     this.opaqueRows = false,
     this.onRowsMoved,
     super.key,
@@ -48,6 +49,10 @@ class NotificationShadeList extends SliverList {
 
   final Animation<double> progress;
   final Animation<double> entrance;
+
+  /// The padding above this sliver: the stack's resting top on the screen,
+  /// where the list starts.
+  final double topPadding;
 
   /// The rows paint opaque material. Once [entrance] has revealed them they
   /// hide one another by paint order alone, without per-row clips.
@@ -90,6 +95,7 @@ class NotificationShadeList extends SliverList {
           entrance,
           childManager: context as SliverMultiBoxAdaptorElement,
         )
+        ..topPadding = topPadding
         ..opaqueRows = opaqueRows
         ..onRowsMoved = onRowsMoved;
 
@@ -101,6 +107,7 @@ class NotificationShadeList extends SliverList {
     (renderObject as _RenderNotificationShadeList)
       ..progress = progress
       ..entrance = entrance
+      ..topPadding = topPadding
       ..opaqueRows = opaqueRows
       ..onRowsMoved = onRowsMoved;
   }
@@ -186,15 +193,19 @@ class _RenderNotificationShadeList extends RenderSliverList {
 
   double get _open => _progress.value.clamp(0.0, 1.0);
 
-  /// The list's distance below the top of the screen: Android's stack
-  /// starts there (`stackY` = expansion × its resting top).
-  double get _stackTop {
-    final toScreen = Matrix4.tryInvert(getTransformTo(null));
-    final screenTop = toScreen == null
-        ? 0.0
-        : MatrixUtils.transformPoint(toScreen, Offset.zero).dy;
-    return math.max(0.0, -screenTop);
+  double _topPadding = 0;
+  set topPadding(double value) {
+    if (value == _topPadding) return;
+    _topPadding = value;
+    markNeedsPaint();
   }
+
+  /// How far this sliver starts below the list's top: the part of the
+  /// padding above it that is not scrolled away.
+  double get _sliverTop => math.max(
+    0,
+    constraints.viewportMainAxisExtent - constraints.remainingPaintExtent,
+  );
 
   @override
   void attach(PipelineOwner owner) {
@@ -229,14 +240,20 @@ class _RenderNotificationShadeList extends RenderSliverList {
     markNeedsSemanticsUpdate();
   }
 
-  double _restingTop(RenderBox child) => super.childMainAxisPosition(child);
+  double _restingTop(RenderBox child) =>
+      _sliverTop + super.childMainAxisPosition(child);
 
   @override
   double childMainAxisPosition(RenderBox child) {
     final open = _open;
     final base = super.childMainAxisPosition(child);
     if (open >= 1) return base;
-    return base * AndroidStackExpansion.squish(open) - _stackTop * (1 - open);
+    // From the list's top, which is the screen's: the stack starts at
+    // expansion x its resting top (AOSP's stackY).
+    final top = _sliverTop;
+    return _topPadding * open +
+        (top + base - _topPadding) * AndroidStackExpansion.squish(open) -
+        top;
   }
 
   @override

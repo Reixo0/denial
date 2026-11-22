@@ -26,9 +26,9 @@ import '../phone_scheme.dart';
 import 'notification_footer.dart';
 import 'notification_shade_list.dart';
 import 'notification_shelf.dart';
-import 'quick_settings_panel.dart' show PixelShadeViewport;
 import 'shade_dismiss_gesture.dart';
 import 'shade_expansion.dart';
+import 'shade_stack_layout.dart' show ShadeListScroll;
 
 /// A separate scrollable notification stack for the notification page.
 /// Only a completed close rearms the staggered entrance, never a drag reversal.
@@ -38,8 +38,17 @@ class MobileNotificationHistory extends ConsumerStatefulWidget {
     required this.closed,
     this.active = true,
     required this.expansion,
+    this.topPadding = 0,
+    this.scroll,
     super.key,
   });
+
+  /// Where the notifications rest below the top of the list, which is the
+  /// screen's: they scroll up from there over the quick tiles.
+  final double topPadding;
+
+  /// Told how far they have.
+  final ShadeListScroll? scroll;
 
   final Animation<double> progress;
 
@@ -65,7 +74,6 @@ class _MobileNotificationHistoryState
   late final NotificationClearAll _clearAll;
   final GlobalKey _listKey = GlobalKey();
   int _rowCount = 0;
-  double _scale = 1;
   NotificationShelfGeometry? _shelfGeometry;
 
   /// The same one while the shade's progress is.
@@ -79,7 +87,7 @@ class _MobileNotificationHistoryState
       rows: () => _clearAll.boxes,
       count: () => _rowCount,
       progress: widget.progress,
-      scale: () => _scale,
+      topPadding: () => widget.topPadding,
     );
   }
 
@@ -104,6 +112,7 @@ class _MobileNotificationHistoryState
               Motion.notificationHistoryMaxStagger,
     );
     _clearAll = NotificationClearAll(this);
+    widget.scroll?.attach(_scroll);
     widget.progress.addListener(_observeProgress);
   }
 
@@ -126,6 +135,10 @@ class _MobileNotificationHistoryState
   @override
   void didUpdateWidget(covariant MobileNotificationHistory oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.scroll, widget.scroll)) {
+      oldWidget.scroll?.detach(_scroll);
+      widget.scroll?.attach(_scroll);
+    }
     if (oldWidget.progress != widget.progress) {
       oldWidget.progress.removeListener(_observeProgress);
       widget.progress.addListener(_observeProgress);
@@ -274,7 +287,6 @@ class _MobileNotificationHistoryState
         .where(silent)
         .every((group) => group.clearable);
     _rowCount = rows.length;
-    _scale = PixelShadeViewport.scaleOf(context);
     final indices = <Object, int>{
       for (var i = 0; i < rows.length; i++) rows[i].key: i,
     };
@@ -309,180 +321,189 @@ class _MobileNotificationHistoryState
                   primary: false,
                   clipBehavior: Clip.none,
                   slivers: [
-                    NotificationShadeList(
-                      progress: widget.progress,
-                      entrance: _entrance,
-                      opaqueRows: cachedGlass,
-                      onRowsMoved: _rowMotion.moved,
-                      delegate: SliverChildBuilderDelegate(
-                        (context, index) {
-                          if (index == rows.length) {
+                    SliverPadding(
+                      padding: EdgeInsets.only(top: widget.topPadding),
+                      sliver: NotificationShadeList(
+                        topPadding: widget.topPadding,
+                        progress: widget.progress,
+                        entrance: _entrance,
+                        opaqueRows: cachedGlass,
+                        onRowsMoved: _rowMotion.moved,
+                        delegate: SliverChildBuilderDelegate(
+                          (context, index) {
+                            if (index == rows.length) {
+                              return _ColorOsNotificationReveal(
+                                reveal: _revealOf(index),
+                                index: index,
+                                cachedGlass: cachedGlass,
+                                child: Padding(
+                                  // EvolutionX: the pill starts 18 dp below the last
+                                  // row, whose own gap is 8 dp; 4 dp are the pill's.
+                                  padding: const EdgeInsets.only(
+                                    top: 6,
+                                    bottom: 16,
+                                  ),
+                                  child: Builder(
+                                    builder: (context) =>
+                                        NotificationReveal.revealed(
+                                          context,
+                                          NotificationFooterFade(
+                                            geometry: _shelf,
+                                            motion: _motionFor(widget.progress),
+                                            child: NotificationFooter(
+                                              clearAll: _clearAll,
+                                              onSettings: () {
+                                                ref
+                                                    .read(
+                                                      referenceShellProvider
+                                                          .notifier,
+                                                    )
+                                                    .closeQuickSettings();
+                                                ref
+                                                    .read(denialBridgeProvider)
+                                                    .launchApplication(
+                                                      const <String>[
+                                                        'denial-phone-settings',
+                                                        'notifications',
+                                                      ],
+                                                    );
+                                              },
+                                              onCleared: _closeAfterClear,
+                                            ),
+                                          ),
+                                        ),
+                                  ),
+                                ),
+                              );
+                            }
+                            final row = rows[index];
+                            final key = ValueKey<Object>((
+                              row.key,
+                              _generation,
+                            ));
+                            // Neighbouring cards form one stack, as Android's do.
+                            bool card(int i) =>
+                                i >= 0 &&
+                                i < rows.length &&
+                                rows[i] is! NotificationGroupHeaderRow;
+                            final roundTop =
+                                !card(index - 1) || index == silentStart;
+                            final roundBottom =
+                                !card(index + 1) || index + 1 == silentStart;
+                            final Widget entry = switch (row) {
+                              NotificationGroupHeaderRow(:final group) =>
+                                _HistoryGroupHeader(
+                                  key: key,
+                                  group: group,
+                                  onCollapse: () => ref
+                                      .read(
+                                        expandedNotificationGroupsProvider
+                                            .notifier,
+                                      )
+                                      .collapse(group.key),
+                                ),
+                              NotificationGroupRow(:final group) =>
+                                _HistoryNotification(
+                                  key: key,
+                                  expansion: widget.progress,
+                                  shelf: _shelf,
+                                  motion: _motionFor(widget.progress),
+                                  index: index,
+                                  record: group.newest,
+                                  group: group,
+                                  roundTop: roundTop,
+                                  roundBottom: roundBottom,
+                                  preview: preview,
+                                  interactive: !locked,
+                                  onDismiss: () => controller
+                                      .dismissGroupFromHistory(group.key),
+                                  expanded: expandedGroups.contains(group.key),
+                                  member: member,
+                                  onExpand: () => ref
+                                      .read(
+                                        expandedNotificationGroupsProvider
+                                            .notifier,
+                                      )
+                                      .expand(group.key),
+                                  onCollapse: () => ref
+                                      .read(
+                                        expandedNotificationGroupsProvider
+                                            .notifier,
+                                      )
+                                      .collapse(group.key),
+                                ),
+                              NotificationRow(:final record) =>
+                                _HistoryNotification(
+                                  key: key,
+                                  expansion: widget.progress,
+                                  shelf: _shelf,
+                                  motion: _motionFor(widget.progress),
+                                  index: index,
+                                  record: record,
+                                  roundTop: roundTop,
+                                  roundBottom: roundBottom,
+                                  preview: preview,
+                                  interactive: !locked,
+                                  onDismiss: () =>
+                                      controller.dismissFromHistory(
+                                        record.notification.id,
+                                      ),
+                                  onOpen: () => open(record),
+                                  onAction: (key) => controller.invokeAction(
+                                    record.notification.id,
+                                    key,
+                                  ),
+                                  onControl: (value) => control(record, value),
+                                ),
+                            };
+                            final clearable = switch (row) {
+                              NotificationGroupHeaderRow() => false,
+                              NotificationGroupRow(:final group) =>
+                                group.clearable,
+                              NotificationRow(:final record) =>
+                                record.notification.clearable,
+                            };
+                            final slide = NotificationClearSlide(
+                              key: ValueKey<Object>((
+                                'slide',
+                                row.key,
+                                _generation,
+                              )),
+                              clearAll: _clearAll,
+                              index: index,
+                              clearable: clearable && !locked,
+                              child: entry,
+                            );
                             return _ColorOsNotificationReveal(
                               reveal: _revealOf(index),
                               index: index,
                               cachedGlass: cachedGlass,
-                              child: Padding(
-                                // EvolutionX: the pill starts 18 dp below the last
-                                // row, whose own gap is 8 dp; 4 dp are the pill's.
-                                padding: const EdgeInsets.only(
-                                  top: 6,
-                                  bottom: 16,
-                                ),
-                                child: Builder(
-                                  builder: (context) =>
-                                      NotificationReveal.revealed(
-                                        context,
-                                        NotificationFooterFade(
-                                          geometry: _shelf,
-                                          motion: _motionFor(widget.progress),
-                                          child: NotificationFooter(
-                                            clearAll: _clearAll,
-                                            onSettings: () {
-                                              ref
-                                                  .read(
-                                                    referenceShellProvider
-                                                        .notifier,
-                                                  )
-                                                  .closeQuickSettings();
-                                              ref
-                                                  .read(denialBridgeProvider)
-                                                  .launchApplication(
-                                                    const <String>[
-                                                      'denial-phone-settings',
-                                                      'notifications',
-                                                    ],
-                                                  );
-                                            },
-                                            onCleared: _closeAfterClear,
-                                          ),
+                              child: index == silentStart
+                                  ? Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: <Widget>[
+                                        // Leaves with the section when all of it goes.
+                                        NotificationClearFade(
+                                          clearAll: _clearAll,
+                                          fades: silentAllClearable,
+                                          child: const _SilentSectionHeader(),
                                         ),
-                                      ),
-                                ),
-                              ),
+                                        slide,
+                                      ],
+                                    )
+                                  : slide,
                             );
-                          }
-                          final row = rows[index];
-                          final key = ValueKey<Object>((row.key, _generation));
-                          // Neighbouring cards form one stack, as Android's do.
-                          bool card(int i) =>
-                              i >= 0 &&
-                              i < rows.length &&
-                              rows[i] is! NotificationGroupHeaderRow;
-                          final roundTop =
-                              !card(index - 1) || index == silentStart;
-                          final roundBottom =
-                              !card(index + 1) || index + 1 == silentStart;
-                          final Widget entry = switch (row) {
-                            NotificationGroupHeaderRow(:final group) =>
-                              _HistoryGroupHeader(
-                                key: key,
-                                group: group,
-                                onCollapse: () => ref
-                                    .read(
-                                      expandedNotificationGroupsProvider
-                                          .notifier,
-                                    )
-                                    .collapse(group.key),
-                              ),
-                            NotificationGroupRow(:final group) =>
-                              _HistoryNotification(
-                                key: key,
-                                expansion: widget.progress,
-                                shelf: _shelf,
-                                motion: _motionFor(widget.progress),
-                                index: index,
-                                record: group.newest,
-                                group: group,
-                                roundTop: roundTop,
-                                roundBottom: roundBottom,
-                                preview: preview,
-                                interactive: !locked,
-                                onDismiss: () => controller
-                                    .dismissGroupFromHistory(group.key),
-                                expanded: expandedGroups.contains(group.key),
-                                member: member,
-                                onExpand: () => ref
-                                    .read(
-                                      expandedNotificationGroupsProvider
-                                          .notifier,
-                                    )
-                                    .expand(group.key),
-                                onCollapse: () => ref
-                                    .read(
-                                      expandedNotificationGroupsProvider
-                                          .notifier,
-                                    )
-                                    .collapse(group.key),
-                              ),
-                            NotificationRow(:final record) =>
-                              _HistoryNotification(
-                                key: key,
-                                expansion: widget.progress,
-                                shelf: _shelf,
-                                motion: _motionFor(widget.progress),
-                                index: index,
-                                record: record,
-                                roundTop: roundTop,
-                                roundBottom: roundBottom,
-                                preview: preview,
-                                interactive: !locked,
-                                onDismiss: () => controller.dismissFromHistory(
-                                  record.notification.id,
-                                ),
-                                onOpen: () => open(record),
-                                onAction: (key) => controller.invokeAction(
-                                  record.notification.id,
-                                  key,
-                                ),
-                                onControl: (value) => control(record, value),
-                              ),
-                          };
-                          final clearable = switch (row) {
-                            NotificationGroupHeaderRow() => false,
-                            NotificationGroupRow(:final group) =>
-                              group.clearable,
-                            NotificationRow(:final record) =>
-                              record.notification.clearable,
-                          };
-                          final slide = NotificationClearSlide(
-                            key: ValueKey<Object>((
-                              'slide',
-                              row.key,
-                              _generation,
-                            )),
-                            clearAll: _clearAll,
-                            index: index,
-                            clearable: clearable && !locked,
-                            child: entry,
-                          );
-                          return _ColorOsNotificationReveal(
-                            reveal: _revealOf(index),
-                            index: index,
-                            cachedGlass: cachedGlass,
-                            child: index == silentStart
-                                ? Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
-                                    children: <Widget>[
-                                      // Leaves with the section when all of it goes.
-                                      NotificationClearFade(
-                                        clearAll: _clearAll,
-                                        fades: silentAllClearable,
-                                        child: const _SilentSectionHeader(),
-                                      ),
-                                      slide,
-                                    ],
-                                  )
-                                : slide,
-                          );
-                        },
-                        childCount:
-                            rows.length + (rows.isNotEmpty && !locked ? 1 : 0),
-                        findChildIndexCallback: (key) =>
-                            key is ValueKey && indices.containsKey(key.value)
-                            ? indices[key.value]
-                            : null,
+                          },
+                          childCount:
+                              rows.length +
+                              (rows.isNotEmpty && !locked ? 1 : 0),
+                          findChildIndexCallback: (key) =>
+                              key is ValueKey && indices.containsKey(key.value)
+                              ? indices[key.value]
+                              : null,
+                        ),
                       ),
                     ),
                   ],
@@ -528,6 +549,7 @@ class _MobileNotificationHistoryState
   @override
   void dispose() {
     widget.progress.removeListener(_observeProgress);
+    widget.scroll?.detach(_scroll);
     _clearAll.dispose();
     _entrance.dispose();
     _scroll.dispose();
