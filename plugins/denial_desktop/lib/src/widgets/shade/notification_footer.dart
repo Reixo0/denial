@@ -28,6 +28,15 @@ class NotificationClearAll {
   ).animate(CurvedAnimation(parent: _time, curve: const Interval(0, 0.5)));
   bool _running = false;
 
+  /// The rows that are laid out, with their index.
+  Iterable<(int, RenderBox)> get boxes sync* {
+    for (final row in _rows) {
+      if (!row.mounted) continue;
+      final box = row.context.findRenderObject();
+      if (box is RenderBox) yield (row.widget.index, box);
+    }
+  }
+
   /// Slides the rows out, then calls [onCleared].
   Future<void> start(VoidCallback onCleared) async {
     if (_running) return;
@@ -117,8 +126,20 @@ class _NotificationClearSlideState extends State<NotificationClearSlide> {
   }
 
   @override
-  void dispose() {
+  void activate() {
+    super.activate();
+    widget.clearAll._rows.add(this);
+  }
+
+  /// Out of the tree, its place must not be read.
+  @override
+  void deactivate() {
     widget.clearAll._rows.remove(this);
+    super.deactivate();
+  }
+
+  @override
+  void dispose() {
     widget.clearAll._time.removeListener(_moved);
     super.dispose();
   }

@@ -67,6 +67,22 @@ class NotificationShadeList extends SliverList {
     list?.onRowsMoved?.call();
   }
 
+  /// How far below the list's top [box], somewhere inside a row, rests:
+  /// whatever the shade's expansion, on screen or not.
+  static double? restingTop(RenderBox box) {
+    RenderObject child = box;
+    while (true) {
+      final parent = child.parent;
+      if (parent == null) return null;
+      if (parent is _RenderNotificationShadeList) {
+        final row = child as RenderBox;
+        return parent._restingTop(row) +
+            box.localToGlobal(Offset.zero, ancestor: row).dy;
+      }
+      child = parent;
+    }
+  }
+
   @override
   RenderSliverList createRenderObject(BuildContext context) =>
       _RenderNotificationShadeList(
@@ -212,6 +228,8 @@ class _RenderNotificationShadeList extends RenderSliverList {
     markNeedsPaint();
     markNeedsSemanticsUpdate();
   }
+
+  double _restingTop(RenderBox child) => super.childMainAxisPosition(child);
 
   @override
   double childMainAxisPosition(RenderBox child) {
