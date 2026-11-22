@@ -20,7 +20,6 @@ import 'package:denial_flutter_sdk/shell_theme.dart';
 import 'package:denial_flutter_sdk/tokens.dart' show ShellText;
 
 import '../notification_banner.dart';
-import '../notification_pull_expand.dart';
 import '../notification_rows.dart';
 import '../phone_scheme.dart';
 import 'notification_footer.dart';
@@ -707,44 +706,36 @@ class _HistoryNotification extends StatelessWidget {
   Widget build(BuildContext context) {
     final notification = record.notification;
     final group = this.group;
-    Widget openGroup(BuildContext context) => PixelNotificationGroupCard(
-      group: group!,
-      interactive: interactive,
-      roundTop: roundTop,
-      roundBottom: roundBottom,
-      onCollapse: onCollapse,
-      children: <Widget>[for (final record in group.members) member!(record)],
-    );
-    final Widget card = PixelNotificationCard(
-      notification: notification,
-      interactive: interactive,
-      previewMode: preview,
-      roundTop: roundTop,
-      roundBottom: roundBottom,
-      group: group,
-      onExpandGroup: onExpand,
-      onOpen: onOpen,
-      onAction: onAction,
-      onDismiss: group == null && interactive && notification.clearable
-          ? onDismiss
-          : null,
-      onControl: group == null ? onControl : null,
-    );
-    final stackedGroup = group != null && group.stacked && member != null;
     // A pull on a folded group opens it with the finger (ExpandHelper on a
-    // group: its summary lines give way to its rows).
-    // A tap on the pill or header plays the same change (NotificationPullExpand
-    // follows [expanded]).
-    final Widget content = !stackedGroup
-        ? card
-        : NotificationPullExpand(
-            enabled: interactive && preview == NotificationPreviewMode.full,
+    // group: its lines turn into its rows); so does a tap.
+    final Widget content =
+        group != null &&
+            group.stacked &&
+            member != null &&
+            preview == NotificationPreviewMode.full
+        ? PixelNotificationGroupCard(
+            group: group,
+            row: member!,
             open: expanded,
-            expanded: openGroup,
-            onSettled: (open) {
-              if (open) onExpand?.call();
-            },
-            child: card,
+            onOpen: (open) => (open ? onExpand : onCollapse)?.call(),
+            interactive: interactive,
+            roundTop: roundTop,
+            roundBottom: roundBottom,
+          )
+        : PixelNotificationCard(
+            notification: notification,
+            interactive: interactive,
+            previewMode: preview,
+            roundTop: roundTop,
+            roundBottom: roundBottom,
+            group: group,
+            onExpandGroup: onExpand,
+            onOpen: onOpen,
+            onAction: onAction,
+            onDismiss: group == null && interactive && notification.clearable
+                ? onDismiss
+                : null,
+            onControl: group == null ? onControl : null,
           );
     final clearable =
         interactive && (group?.clearable ?? notification.clearable);

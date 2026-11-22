@@ -2,8 +2,11 @@ import 'package:denial_desktop/src/state/reference_shell_controller.dart';
 import 'package:denial_desktop/src/state/reference_shell_metrics.dart';
 
 import 'dart:async';
+import 'dart:math' as math;
+import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart' show Icons;
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -20,6 +23,7 @@ import 'package:denial_flutter_sdk/tokens.dart';
 
 import 'mobile_ui_metrics.dart';
 import 'notification_media.dart';
+import 'notification_morph.dart';
 import 'notification_open.dart';
 import 'notification_pull_expand.dart';
 import 'phone_scheme.dart';
@@ -32,6 +36,7 @@ import 'package:denial_flutter_sdk/rendering.dart'
 
 import 'shade/quick_settings_panel.dart' show PixelShadeViewport;
 import 'shade/shade_backdrop_scene.dart';
+import 'shade/shade_expansion_motion.dart' show androidDuration;
 import '../state/phone_desk.dart';
 
 part 'notification_card.dart';

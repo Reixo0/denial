@@ -23,6 +23,18 @@ abstract final class PixelNotificationMetrics {
   static const double actionsHeight = 40;
   static const double actionsBottom = 6;
 
+  /// The expanded template's list: 48 dp, its labels 30 dp above the card's
+  /// end (EvolutionX's recording of 2026-11-22).
+  static const double expandedActionsHeight = 48;
+  static const double expandedActionInset = 14.5;
+
+  /// The expanded template, on the same recording: from the app's line to
+  /// the title, on to the text (notification_2025_text_margin_top), and
+  /// above a sender's messages.
+  static const double titleGap = 6.5;
+  static const double textGap = 8;
+  static const double messageGap = 16;
+
   /// A text action's inset: its label starts at 65 dp, as on EvolutionX.
   static const double actionInset = 9;
 
@@ -100,13 +112,16 @@ class _PixelNotificationCardState extends State<PixelNotificationCard> {
   bool _expanded = false;
   bool _pressed = false;
 
-  /// A pull is growing the card (NotificationPullExpand) or settling it.
-  bool _pulling = false;
+  /// The settings are coming or going: the card's height follows.
+  bool _sizing = false;
 
   /// Showing the settings in place of the notification.
   bool _guts = false;
 
-  void _toggle() => setState(() => _expanded = !_expanded);
+  void _toggle() => setState(() {
+    _sizing = false;
+    _expanded = !_expanded;
+  });
 
   void _press(bool pressed) {
     if (pressed != _pressed) setState(() => _pressed = pressed);
@@ -128,18 +143,14 @@ class _PixelNotificationCardState extends State<PixelNotificationCard> {
         ? l10n.notificationGeneric
         : notification.summary;
     final messages = notification.messages;
-    // Android's conversation layout: the app and age on top, the sender or
-    // conversation under it, then the messages (named only when another
-    // person wrote them).
+    // A conversation shows its last message under the sender or its name,
+    // and expanded all of them (named only when another person wrote them).
     final conversation = full && group == null && messages.isNotEmpty;
-    final shownMessages = _expanded || messages.length <= 1
-        ? messages
-        : messages.sublist(messages.length - 1);
     final text = !full
         ? l10n.notificationNew
         : conversation
         ? [
-            for (final message in shownMessages)
+            for (final message in messages)
               message.sender.isEmpty || message.sender == title
                   ? message.text
                   : l10n.notificationMessage(message.sender, message.text),
@@ -156,117 +167,207 @@ class _PixelNotificationCardState extends State<PixelNotificationCard> {
         group == null &&
         widget.onOpen != null &&
         notification.opensApp;
-    // Every notification expands on Android: the expanded template
-    // (notification_2025_template_expanded_base.xml) adds a header with the
-    // app and age above the title and the full text.
-    // Expanded, a plain notification takes the conversation's arrangement:
-    // app and age on top, then the title.
-    // Collapsed, a heads-up conversation keeps the sender in the top line.
-    final headed =
-        (conversation && (!widget.headsUp || _expanded)) ||
-        (_expanded && full && group == null);
-    final showActions =
-        widget.interactive &&
-        widget.onAction != null &&
-        actions.isNotEmpty &&
-        (_expanded || widget.headsUp || notification.incomingCall);
     final image =
         full &&
         group == null &&
         (notification.imageData != null || notification.imagePath.isNotEmpty);
 
+    final age = pixelNotificationAge(context, notification);
     final info = TextStyle(
       color: scheme.onSurfaceVariant,
       fontSize: PixelNotificationMetrics.infoSize,
       height: 1.35,
     );
-    final titleText = Text(
-      title,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: TextStyle(
-        color: scheme.onSurface,
-        fontSize: PixelNotificationMetrics.titleSize,
-        fontWeight: FontWeight.w500,
-        height: 1.3,
-      ),
+    final strong = TextStyle(
+      color: scheme.onSurface,
+      fontSize: PixelNotificationMetrics.titleSize,
+      fontWeight: FontWeight.w500,
+      height: 1.3,
     );
-    final age = pixelNotificationAge(context, notification);
-    final topLine = headed
-        ? Text(
-            '$appName · $age',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: info,
-          )
-        : Row(
-            children: <Widget>[
-              Flexible(child: titleText),
-              Text(' · $age', style: info),
-              // alerted_icon: notification_2025_badge_size 14, margin 4.
-              if (widget.headsUp) ...[
-                const SizedBox(width: 4),
-                Icon(
+    final plain = TextStyle(
+      color: scheme.onSurfaceVariant,
+      fontSize: PixelNotificationMetrics.textSize,
+      height: 1.43,
+    );
+
+    // One of the two layouts. Everything it draws is a MorphPart: pulled or
+    // tapped, what both show moves from one to the other.
+    Widget layout({required bool expanded}) {
+      // Every notification expands on Android: the expanded template
+      // (notification_2025_template_expanded_base.xml) adds a header with
+      // the app and age above the title and the full text. Collapsed, the
+      // title is in the top line.
+      final headed = expanded && full && group == null;
+      final showActions =
+          widget.interactive &&
+          widget.onAction != null &&
+          actions.isNotEmpty &&
+          (expanded || widget.headsUp || notification.incomingCall);
+      final titlePart = MorphPart(
+        id: 'title',
+        same: title,
+        child: Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: strong,
+        ),
+      );
+      final topLine = Row(
+        children: <Widget>[
+          Flexible(
+            child: headed
+                ? MorphPart(
+                    id: 'app',
+                    child: Text(
+                      appName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: info,
+                    ),
+                  )
+                : titlePart,
+          ),
+          MorphPart(
+            id: 'age',
+            same: age,
+            child: Text(' · $age', style: info),
+          ),
+          // alerted_icon: notification_2025_badge_size 14, margin 4.
+          if (widget.headsUp && !headed)
+            MorphPart(
+              id: 'alerted',
+              child: Padding(
+                padding: const EdgeInsetsDirectional.only(start: 4),
+                child: Icon(
                   Icons.notifications_active,
                   size: 14,
                   color: scheme.onSurfaceVariant,
                 ),
-              ],
-            ],
-          );
-    final body = <Widget>[
-      if (headed) ...[const SizedBox(height: 4), titleText],
-      if (group != null)
-        for (final record in group.members.take(3))
-          _PixelGroupLine(notification: record.notification, full: full)
-      else if (text.isNotEmpty)
-        Text(
-          text,
-          maxLines: _expanded ? 12 : 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: scheme.onSurfaceVariant,
-            fontSize: PixelNotificationMetrics.textSize,
-            height: 1.43,
-          ),
-        ),
-      if (full && notification.hasProgress) ...[
-        const SizedBox(height: 8),
-        _PixelProgress(value: notification.progress),
-      ],
-    ];
-    final content = Padding(
-      // The action list follows the text directly (AOSP
-      // notification_2025_template_expanded_base.xml).
-      padding: EdgeInsetsDirectional.only(
-        start: PixelNotificationMetrics.contentStart,
-        top: PixelNotificationMetrics.reducedMargin + 4,
-        bottom: showActions ? 0 : PixelNotificationMetrics.reducedMargin + 4,
-        end: PixelNotificationMetrics.margin,
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Expanded(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Padding(
-                  padding: const EdgeInsetsDirectional.only(
-                    end:
-                        PixelNotificationMetrics.contentEnd -
-                        PixelNotificationMetrics.margin,
-                  ),
-                  child: topLine,
-                ),
-                ...body,
-              ],
+              ),
+            ),
+        ],
+      );
+      final body = <Widget>[
+        if (headed) ...[
+          const SizedBox(height: PixelNotificationMetrics.titleGap),
+          titlePart,
+        ],
+        if (group != null)
+          for (final record in group.members.take(3))
+            _PixelGroupLine(notification: record.notification, full: full)
+        else if (conversation && expanded)
+          ..._messages(messages, title, strong, plain)
+        else if (conversation)
+          _lastMessage(messages.last, title, strong, plain)
+        else if (text.isNotEmpty) ...[
+          if (headed) const SizedBox(height: PixelNotificationMetrics.textGap),
+          MorphPart(
+            id: 'text',
+            same: text,
+            child: Text(
+              text,
+              maxLines: expanded ? 12 : 1,
+              overflow: TextOverflow.ellipsis,
+              style: plain,
             ),
           ),
         ],
-      ),
-    );
+        if (full && notification.hasProgress)
+          MorphPart(
+            id: 'progress',
+            kind: MorphKind.similar,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: _PixelProgress(value: notification.progress),
+            ),
+          ),
+      ];
+      final content = Padding(
+        // The action list follows the text directly (AOSP
+        // notification_2025_template_expanded_base.xml).
+        padding: EdgeInsetsDirectional.only(
+          start: PixelNotificationMetrics.contentStart,
+          top: PixelNotificationMetrics.reducedMargin + 4,
+          bottom: showActions ? 0 : PixelNotificationMetrics.reducedMargin + 4,
+          end: PixelNotificationMetrics.margin,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsetsDirectional.only(
+                end:
+                    PixelNotificationMetrics.contentEnd -
+                    PixelNotificationMetrics.margin,
+              ),
+              child: topLine,
+            ),
+            ...body,
+          ],
+        ),
+      );
+      return ConstrainedBox(
+        constraints: const BoxConstraints(
+          minHeight: PixelNotificationMetrics.minHeight,
+        ),
+        child: Stack(
+          children: <Widget>[
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                content,
+                if (showActions)
+                  MorphPart(
+                    id: 'actions',
+                    kind: MorphKind.still,
+                    child: _PixelActions(
+                      actions: actions,
+                      onAction: widget.onAction!,
+                      expanded: expanded,
+                    ),
+                  ),
+              ],
+            ),
+            PositionedDirectional(
+              start: PixelNotificationMetrics.margin,
+              top: PixelNotificationMetrics.margin,
+              // A picture (a sender's avatar, say) takes the app
+              // icon's place: Android shows one icon, never two.
+              child: MorphPart(
+                id: 'icon',
+                same: 'icon',
+                kind: MorphKind.picture,
+                child: _PixelAppIcon(
+                  notification: notification,
+                  picture: image,
+                  badge: image && conversation,
+                ),
+              ),
+            ),
+            PositionedDirectional(
+              end: 0,
+              top: 0,
+              child: MorphPart(
+                id: 'expander',
+                kind: conversation ? MorphKind.similar : MorphKind.normal,
+                child: _PixelExpandPill(
+                  expanded: expanded,
+                  count: group?.members.length,
+                  onTap: !widget.interactive
+                      ? null
+                      : group != null
+                      ? widget.onExpandGroup
+                      : _toggle,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
 
     // Android 17 with row transparency paints surfaceEffect1 over the
     // shade's blur: on EvolutionX #8a111417, the surfaceContainerLow tone at
@@ -324,88 +425,161 @@ class _PixelNotificationCardState extends State<PixelNotificationCard> {
             ? () {
                 HapticFeedback.heavyImpact();
                 _press(false);
-                setState(() => _guts = true);
+                setState(() {
+                  _sizing = true;
+                  _guts = true;
+                });
               }
             : null,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 120),
-          constraints: const BoxConstraints(
-            minHeight: PixelNotificationMetrics.minHeight,
-          ),
           decoration: BoxDecoration(color: background, borderRadius: radius),
           child: AnimatedSize(
-            // A pull moves the height itself.
-            duration: _pulling
-                ? Duration.zero
-                : const Duration(milliseconds: 260),
-            curve: Motion.md3EmphasizedDecelerate,
+            // Opening and closing move the height themselves.
+            duration: _sizing ? androidDuration(360) : Duration.zero,
+            curve: Curves.fastOutSlowIn,
             alignment: Alignment.topCenter,
-            child: NotificationPullExpand(
-              enabled: pullable,
-              onStart: () {
-                _press(false);
-                setState(() {
-                  _pulling = true;
-                  _expanded = true;
-                });
-              },
-              onSettled: (open) => setState(() {
-                _pulling = false;
-                _expanded = open;
-              }),
-              child: _guts
-                  ? _PixelGuts(
-                      notification: notification,
-                      appName: appName,
-                      onDismiss: widget.onDismiss,
-                      onControl: widget.onControl,
-                      onClose: () => setState(() => _guts = false),
-                    )
-                  : Stack(
-                      children: <Widget>[
-                        Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: <Widget>[
-                            content,
-                            if (showActions)
-                              _PixelActions(
-                                actions: actions,
-                                onAction: widget.onAction!,
-                              ),
-                          ],
-                        ),
-                        PositionedDirectional(
-                          start: PixelNotificationMetrics.margin,
-                          top: PixelNotificationMetrics.margin,
-                          // A picture (a sender's avatar, say) takes the app
-                          // icon's place: Android shows one icon, never two.
-                          child: _PixelAppIcon(
-                            notification: notification,
-                            picture: image,
-                            badge: image && conversation,
-                          ),
-                        ),
-                        PositionedDirectional(
-                          end: 0,
-                          top: 0,
-                          child: _PixelExpandPill(
-                            expanded: group == null && _expanded,
-                            count: group?.members.length,
-                            onTap: !widget.interactive
-                                ? null
-                                : group != null
-                                ? widget.onExpandGroup
-                                : _toggle,
-                          ),
-                        ),
-                      ],
+            child: _guts
+                ? _PixelGuts(
+                    notification: notification,
+                    appName: appName,
+                    onDismiss: widget.onDismiss,
+                    onControl: widget.onControl,
+                    onClose: () => setState(() => _guts = false),
+                  )
+                : NotificationPullExpand(
+                    enabled: pullable,
+                    open: _expanded,
+                    onStart: () {
+                      _press(false);
+                      setState(() => _sizing = false);
+                    },
+                    onOpen: (open) => setState(() => _expanded = open),
+                    builder: (context, motion) => NotificationMorph(
+                      motion: motion,
+                      collapsed: motion.showsCollapsed
+                          ? layout(expanded: false)
+                          : null,
+                      expanded: motion.showsExpanded
+                          ? layout(expanded: true)
+                          : null,
                     ),
-            ),
+                  ),
           ),
         ),
       ),
     );
+  }
+
+  /// Collapsed, a conversation's last message, after its sender.
+  Widget _lastMessage(
+    DesktopNotificationMessage message,
+    String title,
+    TextStyle strong,
+    TextStyle plain,
+  ) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
+      children: <Widget>[
+        if (_named(message, title))
+          MorphPart(
+            id: 'sender0',
+            kind: MorphKind.similar,
+            linear: true,
+            child: Padding(
+              padding: const EdgeInsetsDirectional.only(end: 4),
+              child: Text(
+                '${message.sender}:',
+                maxLines: 1,
+                style: strong.copyWith(height: plain.height),
+              ),
+            ),
+          ),
+        Flexible(
+          child: MorphPart(
+            id: 'message0',
+            same: message.text,
+            linear: true,
+            child: Text(
+              message.text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: plain,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  static bool _named(DesktopNotificationMessage message, String title) =>
+      message.sender.isNotEmpty && message.sender != title;
+
+  /// Expanded, a conversation's messages, each sender's under their name
+  /// (notification_2025_messaging_group.xml). Counted from the last one, the
+  /// one the collapsed layout shows.
+  List<Widget> _messages(
+    List<DesktopNotificationMessage> messages,
+    String title,
+    TextStyle strong,
+    TextStyle plain,
+  ) {
+    final shown = messages.length > 7
+        ? messages.sublist(messages.length - 7)
+        : messages;
+    final rows = <Widget>[];
+    var senders = 0;
+    for (var i = 0; i < shown.length; i++) {
+      final message = shown[i];
+      final fromLast = shown.length - 1 - i;
+      final first = i == 0 || shown[i - 1].sender != message.sender;
+      if (first) {
+        senders++;
+        rows.add(
+          SizedBox(
+            height: _named(message, title)
+                ? PixelNotificationMetrics.messageGap
+                : PixelNotificationMetrics.textGap,
+          ),
+        );
+        if (_named(message, title)) {
+          // The last sender's name is the one of the collapsed layout.
+          final last = shown
+              .skip(i)
+              .every((other) => other.sender == message.sender);
+          rows.add(
+            MorphPart(
+              id: last ? 'sender0' : 'sender$fromLast',
+              kind: last ? MorphKind.similar : MorphKind.normal,
+              linear: true,
+              group: last ? null : senders,
+              child: Text(
+                message.sender,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: strong.copyWith(height: plain.height),
+              ),
+            ),
+          );
+        }
+      }
+      rows.add(
+        MorphPart(
+          id: 'message$fromLast',
+          same: message.text,
+          linear: true,
+          group: fromLast == 0 ? null : senders,
+          child: Text(
+            message.text,
+            maxLines: 8,
+            overflow: TextOverflow.ellipsis,
+            style: plain,
+          ),
+        ),
+      );
+    }
+    return rows;
   }
 }
 
@@ -546,14 +720,12 @@ class _PixelExpandPill extends StatelessWidget {
                   ),
                   const SizedBox(width: 2),
                 ],
-                AnimatedRotation(
-                  turns: expanded ? 0.5 : 0,
-                  duration: const Duration(milliseconds: 200),
-                  child: Icon(
-                    Icons.keyboard_arrow_down_rounded,
-                    size: 16,
-                    color: scheme.onSurface,
-                  ),
+                Icon(
+                  expanded
+                      ? Icons.keyboard_arrow_up_rounded
+                      : Icons.keyboard_arrow_down_rounded,
+                  size: 16,
+                  color: scheme.onSurface,
                 ),
               ],
             ),
@@ -564,7 +736,8 @@ class _PixelExpandPill extends StatelessWidget {
   }
 }
 
-/// One more member of a folded group: its title and text on one line.
+/// A member of a folded group: its title and text on one line
+/// (notification_2025_hybrid.xml).
 class _PixelGroupLine extends StatelessWidget {
   const _PixelGroupLine({required this.notification, required this.full});
 
@@ -580,26 +753,60 @@ class _PixelGroupLine extends StatelessWidget {
         : notification.summary.isEmpty
         ? l10n.notificationGeneric
         : notification.summary;
-    final text = full ? plainNotificationBody(notification.body) : '';
-    return Text.rich(
-      TextSpan(
-        children: <InlineSpan>[
-          TextSpan(
-            text: title,
-            style: TextStyle(
-              color: scheme.onSurface,
-              fontWeight: FontWeight.w600,
+    final messages = notification.messages;
+    final text = !full
+        ? ''
+        : messages.isNotEmpty
+        ? messages.last.text
+        : plainNotificationBody(notification.body);
+    return Padding(
+      padding: const EdgeInsetsDirectional.only(
+        start: PixelNotificationMetrics.contentStart,
+        end: PixelNotificationMetrics.margin,
+      ),
+      child: Row(
+        children: <Widget>[
+          Flexible(
+            // The title keeps its width as far as it goes.
+            flex: text.isEmpty ? 1 : 0,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 220),
+              child: MorphPart(
+                id: 'title',
+                same: title,
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: scheme.onSurface,
+                    fontSize: PixelNotificationMetrics.titleSize,
+                    fontWeight: FontWeight.w500,
+                    height: 1.3,
+                  ),
+                ),
+              ),
             ),
           ),
-          if (text.isNotEmpty) TextSpan(text: '  ${text.split('\n').first}'),
+          if (text.isNotEmpty) ...[
+            const SizedBox(width: 6),
+            Expanded(
+              child: MorphPart(
+                id: 'text',
+                child: Text(
+                  text.split('\n').first,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: scheme.onSurfaceVariant,
+                    fontSize: PixelNotificationMetrics.textSize,
+                    height: 1.3,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
-      ),
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: TextStyle(
-        color: scheme.onSurfaceVariant,
-        fontSize: PixelNotificationMetrics.textSize,
-        height: 1.43,
       ),
     );
   }
@@ -607,27 +814,42 @@ class _PixelGroupLine extends StatelessWidget {
 
 /// The expanded notification's actions: Android's row of text buttons.
 class _PixelActions extends StatelessWidget {
-  const _PixelActions({required this.actions, required this.onAction});
+  const _PixelActions({
+    required this.actions,
+    required this.onAction,
+    this.expanded = false,
+  });
 
   final List<DesktopNotificationAction> actions;
   final ValueChanged<String> onAction;
 
+  /// In the expanded template, whose labels start with the text.
+  final bool expanded;
+
   @override
   Widget build(BuildContext context) {
     final scheme = phoneSchemeOf(context);
+    final height = expanded
+        ? PixelNotificationMetrics.expandedActionsHeight
+        : PixelNotificationMetrics.actionsHeight;
+    final inset = expanded
+        ? PixelNotificationMetrics.expandedActionInset
+        : PixelNotificationMetrics.actionInset;
     return Padding(
-      padding: const EdgeInsetsDirectional.only(
-        start: PixelNotificationMetrics.actionsStart,
+      padding: EdgeInsetsDirectional.only(
+        start: expanded
+            ? PixelNotificationMetrics.contentStart - inset
+            : PixelNotificationMetrics.actionsStart,
         end: PixelNotificationMetrics.margin,
         bottom: PixelNotificationMetrics.actionsBottom,
       ),
       child: SizedBox(
-        height: PixelNotificationMetrics.actionsHeight,
+        height: height,
         child: ListView.separated(
           scrollDirection: Axis.horizontal,
           itemCount: actions.length,
-          // Labels about 26 dp apart, as on EvolutionX.
-          separatorBuilder: (_, _) => const SizedBox(width: 8),
+          // Labels about 26 dp apart (29 expanded), as on EvolutionX.
+          separatorBuilder: (_, _) => SizedBox(width: expanded ? 0 : 8),
           itemBuilder: (context, index) {
             final action = actions[index];
             return Center(
@@ -638,10 +860,8 @@ class _PixelActions extends StatelessWidget {
                   onTap: () => onAction(action.key),
                   // Android's actions are coloured text, without a fill.
                   child: Container(
-                    height: PixelNotificationMetrics.actionsHeight,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: PixelNotificationMetrics.actionInset,
-                    ),
+                    height: height,
+                    padding: EdgeInsets.symmetric(horizontal: inset),
                     alignment: Alignment.center,
                     child: Text(
                       action.label,
@@ -1026,30 +1246,40 @@ class _GutsButton extends StatelessWidget {
   }
 }
 
-/// An open group as Android 17 draws it (NotificationChildrenContainer):
-/// one card, the app's header row (its icon, the app line and the count
-/// pill turned up) over the group's notifications, each a row of its own
-/// (built by the list, [PixelNotificationCard] with `embedded`). Every row
-/// is 72 dp collapsed, measured on EvolutionX.
+/// A group as Android 17 draws it (NotificationChildrenContainer): one card,
+/// the app's header row (its icon, the app line and the count pill) over its
+/// notifications. Folded, the first two are one line each; open, every one is
+/// a row of its own ([row], a [PixelNotificationCard] with `embedded`).
+///
+/// A pull grows it with the finger and a tap on the header plays the same
+/// change: the lines turn into their rows, the header's line goes to the
+/// middle of its row and the other notifications follow. Sizes measured on
+/// EvolutionX.
 class PixelNotificationGroupCard extends StatelessWidget {
   const PixelNotificationGroupCard({
     required this.group,
-    required this.children,
+    required this.row,
+    required this.open,
+    required this.onOpen,
     this.interactive = true,
     this.roundTop = true,
     this.roundBottom = true,
-    this.onCollapse,
     super.key,
   });
 
   final DesktopNotificationGroup group;
-  final List<Widget> children;
+  final Widget Function(DesktopNotificationRecord record) row;
+  final bool open;
+
+  /// It was opened or folded: by a pull, the header or a tap when folded.
+  final ValueChanged<bool> onOpen;
   final bool interactive;
   final bool roundTop;
   final bool roundBottom;
 
-  /// A tap on the header or its pill folds the group again.
-  final VoidCallback? onCollapse;
+  /// AOSP's NUMBER_OF_CHILDREN_WHEN_COLLAPSED and _WHEN_CHILDREN_EXPANDED.
+  static const int folded = 2;
+  static const int most = 8;
 
   @override
   Widget build(BuildContext context) {
@@ -1058,64 +1288,12 @@ class PixelNotificationGroupCard extends StatelessWidget {
     final notification = group.newest.notification;
     final appName = notificationAppName(notification, l10n);
     final age = pixelNotificationAge(context, notification);
-    final collapse = interactive ? onCollapse : null;
     const big = Radius.circular(PixelNotificationMetrics.radius);
     const small = Radius.circular(PixelNotificationMetrics.innerRadius);
-    // The header's line and pill sit on the icon's centre line.
-    const centre =
-        PixelNotificationMetrics.margin +
-        PixelNotificationMetrics.iconCircle / 2;
-    final header = Semantics(
-      button: collapse != null,
-      expanded: true,
-      label: l10n.notificationGroupHeader(appName, group.members.length),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: collapse,
-        child: SizedBox(
-          height: PixelNotificationMetrics.minHeight,
-          child: Stack(
-            children: <Widget>[
-              PositionedDirectional(
-                start: PixelNotificationMetrics.margin,
-                top: PixelNotificationMetrics.margin,
-                child: _PixelAppIcon(notification: notification),
-              ),
-              PositionedDirectional(
-                start: PixelNotificationMetrics.contentStart,
-                end: PixelNotificationMetrics.contentEnd,
-                top: 0,
-                bottom: 0,
-                child: Align(
-                  alignment: AlignmentDirectional.centerStart,
-                  child: Text(
-                    '$appName · $age',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: scheme.onSurfaceVariant,
-                      fontSize: PixelNotificationMetrics.infoSize,
-                      height: 1.35,
-                    ),
-                  ),
-                ),
-              ),
-              PositionedDirectional(
-                end: 0,
-                top:
-                    centre -
-                    PixelNotificationMetrics.margin -
-                    PixelNotificationMetrics.pillHeight / 2,
-                child: _PixelExpandPill(
-                  expanded: true,
-                  count: group.members.length,
-                  onTap: collapse,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    final info = TextStyle(
+      color: scheme.onSurfaceVariant,
+      fontSize: PixelNotificationMetrics.infoSize,
+      height: 1.35,
     );
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -1125,11 +1303,375 @@ class PixelNotificationGroupCard extends StatelessWidget {
           bottom: roundBottom ? big : small,
         ),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[header, ...children],
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: interactive && !open ? () => onOpen(true) : null,
+        child: NotificationPullExpand(
+          enabled: interactive,
+          open: open,
+          onOpen: (value) {
+            if (value != open) onOpen(value);
+          },
+          builder: (context, motion) {
+            final toggle = interactive ? () => onOpen(!motion.open) : null;
+            final members = group.members
+                .take(motion.showsExpanded ? most : folded)
+                .toList();
+            return _PixelGroupBody(
+              motion: motion,
+              children: <Widget>[
+                Semantics(
+                  button: toggle != null,
+                  expanded: motion.open,
+                  label: l10n.notificationGroupHeader(
+                    appName,
+                    group.members.length,
+                  ),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: toggle,
+                    child: const SizedBox.expand(),
+                  ),
+                ),
+                IgnorePointer(child: _PixelAppIcon(notification: notification)),
+                IgnorePointer(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Flexible(
+                        child: Text(
+                          appName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: info,
+                        ),
+                      ),
+                      Text(' · $age', style: info),
+                    ],
+                  ),
+                ),
+                _PixelExpandPill(
+                  expanded: motion.open,
+                  count: group.members.length,
+                  onTap: toggle,
+                ),
+                for (final (index, record) in members.indexed)
+                  NotificationMorph(
+                    key: ValueKey<Object>(record.notification.id),
+                    fromLine: true,
+                    collapsed: index < folded && motion.showsCollapsed
+                        ? _PixelGroupLine(
+                            notification: record.notification,
+                            full: true,
+                          )
+                        : null,
+                    expanded: motion.showsExpanded ? row(record) : null,
+                  ),
+              ],
+            );
+          },
+        ),
       ),
     );
+  }
+}
+
+/// Lays out a [PixelNotificationGroupCard]: its header's touch area, icon,
+/// line and pill, then its notifications.
+class _PixelGroupBody extends MultiChildRenderObjectWidget {
+  const _PixelGroupBody({required this.motion, required super.children});
+
+  final NotificationExpandMotion motion;
+
+  @override
+  _RenderPixelGroup createRenderObject(BuildContext context) =>
+      _RenderPixelGroup(motion, Directionality.of(context));
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderPixelGroup group) {
+    group
+      ..motion = motion
+      ..direction = Directionality.of(context);
+  }
+}
+
+class _PixelGroupParentData extends ContainerBoxParentData<RenderBox> {
+  double shown = 0;
+  double alpha = 1;
+  final clip = LayerHandle<ClipRectLayer>();
+  final opacity = LayerHandle<OpacityLayer>();
+}
+
+class _RenderPixelGroup extends RenderBox
+    with
+        ContainerRenderObjectMixin<RenderBox, _PixelGroupParentData>,
+        RenderBoxContainerDefaultsMixin<RenderBox, _PixelGroupParentData> {
+  _RenderPixelGroup(this._motion, this._direction);
+
+  NotificationExpandMotion _motion;
+  set motion(NotificationExpandMotion value) {
+    if (identical(value, _motion)) return;
+    if (attached) _motion.removeListener(markNeedsLayout);
+    _motion = value;
+    if (attached) _motion.addListener(markNeedsLayout);
+    markNeedsLayout();
+  }
+
+  TextDirection _direction;
+  set direction(TextDirection value) {
+    if (value == _direction) return;
+    _direction = value;
+    markNeedsLayout();
+  }
+
+  /// Folded, the first line's top (getContentMarginTop: 16 + 10 + 12), the
+  /// space between lines (notification_children_padding) and under the last
+  /// (notification_children_collapsed_bottom_padding).
+  static const double _linesTop = 38;
+  static const double _linesGap = 8;
+  static const double _linesBottom = 16;
+
+  /// Open: the header's height and the hairline over each row.
+  static const double _header = 72;
+  static const double _divider = 0.5;
+
+  /// The header's line and pill: their centres folded and open.
+  static const double _lineFolded = 24.3;
+  static const double _pillFolded = 25;
+
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! _PixelGroupParentData) {
+      child.parentData = _PixelGroupParentData();
+    }
+  }
+
+  @override
+  void attach(PipelineOwner owner) {
+    super.attach(owner);
+    _motion.addListener(markNeedsLayout);
+  }
+
+  @override
+  void detach() {
+    _motion.removeListener(markNeedsLayout);
+    super.detach();
+  }
+
+  @override
+  void dispose() {
+    for (var child = firstChild; child != null; child = childAfter(child)) {
+      final data = child.parentData! as _PixelGroupParentData;
+      data.clip.layer = null;
+      data.opacity.layer = null;
+    }
+    super.dispose();
+  }
+
+  void _put(RenderBox child, Offset offset) =>
+      (child.parentData! as _PixelGroupParentData).offset =
+          _direction == TextDirection.rtl
+          ? Offset(size.width - offset.dx - child.size.width, offset.dy)
+          : offset;
+
+  @override
+  void performLayout() {
+    final width = constraints.maxWidth;
+    final touch = firstChild!;
+    final icon = childAfter(touch)!;
+    final line = childAfter(icon)!;
+    final pill = childAfter(line)!;
+    touch.layout(
+      BoxConstraints.tightFor(width: width, height: _header),
+      parentUsesSize: true,
+    );
+    icon.layout(const BoxConstraints(), parentUsesSize: true);
+    pill.layout(const BoxConstraints(), parentUsesSize: true);
+    line.layout(
+      BoxConstraints(
+        maxWidth: math.max(
+          0,
+          width -
+              PixelNotificationMetrics.contentStart -
+              PixelNotificationMetrics.contentEnd,
+        ),
+      ),
+      parentUsesSize: true,
+    );
+    final rows = <RenderNotificationMorph>[];
+    for (
+      var child = childAfter(pill);
+      child != null;
+      child = childAfter(child)
+    ) {
+      child.layout(BoxConstraints.tightFor(width: width), parentUsesSize: true);
+      rows.add(child as RenderNotificationMorph);
+    }
+
+    const folded = PixelNotificationGroupCard.folded;
+    final lines = math.min(folded, rows.length);
+    var foldedHeight = _linesTop;
+    var openHeight = _header;
+    var rowsOfLines = 0.0;
+    for (var i = 0; i < rows.length; i++) {
+      if (i < lines) {
+        foldedHeight += rows[i].collapsedHeight + (i > 0 ? _linesGap : 0);
+        rowsOfLines += rows[i].expandedHeight;
+      }
+      openHeight += rows[i].expandedHeight + _divider;
+    }
+    foldedHeight = math.max(_header, foldedHeight + _linesBottom);
+
+    final moving = _motion.active;
+    final byHand = _motion.byHand;
+    var progress = _motion.open ? 1.0 : 0.0;
+    var height = _motion.open ? openHeight : foldedHeight;
+    if (moving) {
+      _motion.range = math.max(0, openHeight - foldedHeight);
+      height = foldedHeight + _motion.grown;
+      if (byHand) {
+        // getGroupExpandFraction: 1 once the lines are full rows.
+        final lined = _header + _divider + rowsOfLines;
+        progress = lined <= foldedHeight
+            ? 1
+            : ((height - foldedHeight) / (lined - foldedHeight)).clamp(
+                0.0,
+                1.0,
+              );
+      } else {
+        progress = _motion.progress;
+      }
+    }
+    size = constraints.constrain(Size(width, height));
+
+    _put(touch, Offset.zero);
+    _put(
+      icon,
+      const Offset(
+        PixelNotificationMetrics.margin,
+        PixelNotificationMetrics.margin,
+      ),
+    );
+    _put(
+      line,
+      Offset(
+        PixelNotificationMetrics.contentStart,
+        lerpDouble(_lineFolded, _header / 2, progress)! - line.size.height / 2,
+      ),
+    );
+    _put(
+      pill,
+      Offset(
+        width - pill.size.width,
+        lerpDouble(_pillFolded, _header / 2, progress)! - pill.size.height / 2,
+      ),
+    );
+
+    // Where each row is while folded, open, and on the way.
+    var foldedY = _linesTop;
+    var openY = _header + _divider;
+    var pulledY = _linesTop;
+    for (var i = 0; i < rows.length; i++) {
+      final row = rows[i];
+      final data = row.parentData! as _PixelGroupParentData;
+      final isLine = i < lines;
+      final full = row.expandedHeight;
+      double y;
+      double shown;
+      var alpha = 1.0;
+      if (!moving) {
+        y = _motion.open ? openY : foldedY;
+        shown = row.size.height;
+      } else if (byHand) {
+        pulledY += i == 0
+            ? (_header - _linesTop + _divider) * progress
+            : lerpDouble(_linesGap, _divider, progress)!;
+        shown = isLine
+            ? lerpDouble(row.collapsedHeight, full, progress)!
+            : full;
+        y = pulledY;
+        // The rest show by how much of them the card has reached.
+        if (!isLine) {
+          alpha = progress < 1 || full <= 0
+              ? 0
+              : ((height - y) / full).clamp(0.0, 1.0);
+        }
+        pulledY += shown;
+      } else {
+        y = lerpDouble(foldedY, openY, progress)!;
+        shown = isLine
+            ? lerpDouble(row.collapsedHeight, full, progress)!
+            : full;
+        if (!isLine) alpha = progress;
+      }
+      if (row.morphing) {
+        row.drive(
+          amount: byHand ? progress : _motion.amount,
+          toExpanded: _motion.toExpanded,
+          byHand: byHand,
+          extent: shown,
+        );
+      }
+      data
+        ..shown = shown
+        ..alpha = alpha;
+      _put(row, Offset(0, y));
+      final lineHeight = isLine || rows.isEmpty
+          ? row.collapsedHeight
+          : rows.first.collapsedHeight;
+      foldedY += lineHeight + _linesGap;
+      openY += full + _divider;
+    }
+    if (moving) markNeedsPaint();
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    if (!_motion.active) {
+      defaultPaint(context, offset);
+      return;
+    }
+    for (var child = firstChild; child != null; child = childAfter(child)) {
+      final data = child.parentData! as _PixelGroupParentData;
+      if (child is! RenderNotificationMorph) {
+        context.paintChild(child, offset + data.offset);
+        continue;
+      }
+      final alpha = (data.alpha * 255).round();
+      final left = math.min(data.shown, size.height - data.offset.dy);
+      if (alpha <= 0 || left <= 0) {
+        data.clip.layer = null;
+        data.opacity.layer = null;
+        continue;
+      }
+      data.clip.layer = context.pushClipRect(
+        child.needsCompositing || alpha < 255,
+        offset + data.offset,
+        Offset.zero & Size(size.width, left),
+        (context, offset) {
+          if (alpha >= 255) {
+            data.opacity.layer = null;
+            context.paintChild(child!, offset);
+            return;
+          }
+          data.opacity.layer = context.pushOpacity(
+            offset,
+            alpha,
+            (context, offset) => context.paintChild(child!, offset),
+            oldLayer: data.opacity.layer,
+          );
+        },
+        oldLayer: data.clip.layer,
+      );
+    }
+  }
+
+  @override
+  bool get alwaysNeedsCompositing => true;
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) {
+    if (_motion.active) return false;
+    return defaultHitTestChildren(result, position: position);
   }
 }

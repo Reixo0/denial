@@ -1,48 +1,87 @@
-import 'dart:math' as math;
-
 import 'package:flutter/gestures.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
-import 'shade/shade_expansion_motion.dart' show AospFling, aospFling;
+import 'shade/shade_expansion_motion.dart'
+    show AospFling, androidDuration, aospFling;
 
-/// Android's ExpandHelper on one notification row: a downward pull grows
-/// the row with the finger, 1:1, from its collapsed height to its natural
-/// expanded one; let go, it settles open when it grew and the finger was
-/// not moving up (`finishExpanding`), on FlingAnimationUtils' curve (0.3 s
-/// at most), else closes again.
+/// How far a notification (or a group) has opened, for what lays it out.
 ///
-/// Two ways to grow:
-///  * [expanded] null: the row grows into itself. [onStart] switches the
-///    row to its expanded layout; the box shows it cut to the pulled height.
-///  * [expanded] set: it builds what the row becomes (an open group), drawn
-///    over the [child] and cross-faded in as the row grows, as a group's
-///    children replace its summary lines.
-///
-/// [onSettled] says how it ended: true open, false closed.
-///
-/// With [expanded], [open] says which of the two the row shows at rest; a
-/// change from outside (a tap on the group's pill or header) plays the same
-/// cross-fade and height change, on the stack's standard animation (AOSP
-/// StackStateAnimator: 360 ms, fast-out-slow-in).
+/// By hand it is a height the finger moves ([ExpandHelper]); a tap plays it
+/// over AOSP's ANIMATION_DURATION_STANDARD, the height fast-out-slow-in and
+/// the contents' own change linear (StackStateAnimator,
+/// ViewTransformationHelper).
+class NotificationExpandMotion extends ChangeNotifier {
+  NotificationExpandMotion({required this._open});
+
+  bool _open;
+  bool _active = false;
+  bool _byHand = false;
+  bool _opening = false;
+  double _pulled = 0;
+  double _time = 0;
+
+  /// What it shows at rest, or goes to.
+  bool get open => _byHand ? _open : (_active ? _opening : _open);
+
+  /// On the way: both layouts are needed.
+  bool get active => _active;
+  bool get showsCollapsed => _active || !_open;
+  bool get showsExpanded => _active || _open;
+
+  /// The finger moves it, or it settles after the finger.
+  bool get byHand => _byHand;
+
+  /// How much taller the expanded layout is, from the last layout.
+  double range = 0;
+
+  /// The contents turn into the expanded layout, else back to the collapsed.
+  bool get toExpanded => _byHand || _opening;
+
+  /// How far the contents have turned.
+  double get amount =>
+      !_byHand ? _time : (range <= 0 ? 1 : (_pulled / range).clamp(0.0, 1.0));
+
+  /// 0 collapsed, 1 expanded: the height.
+  double get progress {
+    if (_byHand) return amount;
+    final eased = Curves.fastOutSlowIn.transform(_time);
+    return _opening ? eased : 1 - eased;
+  }
+
+  double get grown =>
+      _byHand ? _pulled.clamp(0.0, range).toDouble() : progress * range;
+
+  void _set(VoidCallback change) {
+    change();
+    notifyListeners();
+  }
+}
+
+/// Opens and closes a notification: Android's ExpandHelper (a downward pull
+/// grows it with the finger, 1:1; let go, it settles open when it grew and
+/// the finger was not moving up, else closes again, on FlingAnimationUtils'
+/// curve, 0.3 s at most), and taps, through [open].
 class NotificationPullExpand extends StatefulWidget {
   const NotificationPullExpand({
     required this.enabled,
-    required this.onSettled,
-    required this.child,
-    this.expanded,
-    this.open = false,
+    required this.open,
+    required this.onOpen,
+    required this.builder,
     this.onStart,
     super.key,
   });
 
+  /// Whether it can be pulled.
   final bool enabled;
-  final WidgetBuilder? expanded;
+
+  /// What it is to be; a change plays the animation.
   final bool open;
+
+  /// A pull ended: open or closed.
+  final ValueChanged<bool> onOpen;
   final VoidCallback? onStart;
-  final ValueChanged<bool> onSettled;
-  final Widget child;
+  final Widget Function(BuildContext, NotificationExpandMotion) builder;
 
   @override
   State<NotificationPullExpand> createState() => _NotificationPullExpandState();
@@ -50,365 +89,164 @@ class NotificationPullExpand extends StatefulWidget {
 
 class _NotificationPullExpandState extends State<NotificationPullExpand>
     with SingleTickerProviderStateMixin {
-  final _key = GlobalKey();
+  late final NotificationExpandMotion _motion = NotificationExpandMotion(
+    open: widget.open,
+  );
+  late final AnimationController _run = AnimationController(vsync: this)
+    ..addListener(_onTick);
 
-  /// How far the row has been pulled past its collapsed height.
-  final _pulled = ValueNotifier<double>(0);
-  late final AnimationController _settle = AnimationController(vsync: this);
-  bool _active = false;
-  double? _from;
+  /// What the running animation moves.
+  void Function(double value)? _follow;
 
-  /// What the row shows at rest: the [NotificationPullExpand.expanded] one.
-  late bool _shownOpen = widget.expanded != null && widget.open;
-
-  static const _toggleDuration = Duration(milliseconds: 360);
-
-  _RenderPullExpand? get _box =>
-      _key.currentContext?.findRenderObject() as _RenderPullExpand?;
+  void _onTick() => _follow?.call(_run.value);
 
   @override
   void didUpdateWidget(NotificationPullExpand oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.expanded == null) {
-      _shownOpen = false;
-    } else if (widget.open != _shownOpen && !_active) {
-      _toggle(widget.open);
-    }
+    if (_motion._byHand) return;
+    if (widget.open != _motion.open) _toggle(widget.open);
   }
 
-  /// Plays the change to [open] that a tap asked for.
   void _toggle(bool open) {
-    _settle.stop();
-    // Closing starts grown to the full height; the box clamps it.
-    _pulled.value = open ? 0 : double.infinity;
-    _active = true;
-    _from = null;
-    // The heights are known once both are laid out.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_active) return;
-      final range = _box?.range ?? 0;
-      if (range <= 0) {
-        _rest(open);
-        return;
-      }
-      final start = open ? 0.0 : range;
-      final end = open ? range : 0.0;
-      void follow() => _pulled.value =
-          start + (end - start) * Curves.fastOutSlowIn.transform(_settle.value);
-      _settle
-        ..duration = _toggleDuration
-        ..value = 0
-        ..addListener(follow);
-      _settle.forward().whenCompleteOrCancel(() {
-        _settle.removeListener(follow);
-        if (mounted) _rest(open);
-      });
+    // Taken back on its way: the rest of the time, the other way.
+    final from = _motion._active ? 1 - _motion._time : 0.0;
+    _run.stop();
+    _follow = null;
+    _motion._set(() {
+      _motion
+        .._active = true
+        .._byHand = false
+        .._opening = open
+        .._time = from;
+    });
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _rest(open);
+      return;
+    }
+    _follow = (value) => _motion._set(() => _motion._time = value);
+    _run
+      ..duration = androidDuration(360)
+      ..value = from;
+    _run.forward().whenComplete(() {
+      if (mounted) setState(() => _rest(open));
     });
   }
 
   void _rest(bool open) {
-    setState(() {
-      _active = false;
-      _from = null;
-      _shownOpen = widget.expanded != null && open;
+    _follow = null;
+    _motion._set(() {
+      _motion
+        .._active = false
+        .._byHand = false
+        .._open = open
+        .._pulled = 0
+        .._time = 0;
     });
-    _pulled.value = 0;
   }
 
   @override
   void dispose() {
-    _settle.dispose();
-    _pulled.dispose();
+    _run.dispose();
+    _motion.dispose();
     super.dispose();
   }
 
   void _start(DragStartDetails details) {
-    if (_active || _shownOpen) return;
-    final box = _box;
-    _from = box != null && box.hasSize ? box.size.height : null;
+    if (_motion._active || _motion._open) return;
     HapticFeedback.lightImpact();
-    _settle.stop();
-    _pulled.value = 0;
-    setState(() => _active = true);
+    _run.stop();
+    _follow = null;
+    setState(() {
+      _motion._set(() {
+        _motion
+          .._active = true
+          .._byHand = true
+          .._pulled = 0
+          ..range = 0;
+      });
+    });
     widget.onStart?.call();
   }
 
+  bool get _held => _motion._active && _motion._byHand && _follow == null;
+
   void _update(DragUpdateDetails details) {
-    if (!_active || _settle.isAnimating) return;
-    final range = _box?.range ?? double.infinity;
-    _pulled.value = (_pulled.value + details.delta.dy).clamp(0.0, range);
+    if (!_held) return;
+    final limit = _motion.range > 0 ? _motion.range : double.infinity;
+    _motion._set(
+      () => _motion._pulled = (_motion._pulled + details.delta.dy).clamp(
+        0.0,
+        limit,
+      ),
+    );
   }
 
   void _end(double velocity) {
-    if (!_active || _settle.isAnimating) return;
-    final range = _box?.range ?? 0;
-    final current = math.min(_pulled.value, range);
+    if (!_held) return;
+    final range = _motion.range;
+    final current = _motion._pulled.clamp(0.0, range);
     final open = range <= 0 || (current > 0 && velocity >= 0);
     final target = open ? range : 0.0;
-    if (range <= 0 || target == current) {
+    if (target == current) {
       _finish(open);
       return;
     }
     final fling = aospFling(
       AospFling.expand,
       distance: target - current,
-      velocity: velocity,
+      velocity: open == velocity >= 0 ? velocity : 0,
       dp: 1,
     );
-    void follow() => _pulled.value =
-        current + (target - current) * fling.curve.transform(_settle.value);
-    _settle
+    _follow = (value) => _motion._set(
+      () => _motion._pulled =
+          current + (target - current) * fling.curve.transform(value),
+    );
+    _run
       ..duration = fling.duration
-      ..value = 0
-      ..addListener(follow);
-    _settle.forward().whenCompleteOrCancel(() {
-      _settle.removeListener(follow);
+      ..value = 0;
+    _run.forward().whenComplete(() {
       if (mounted) _finish(open);
     });
   }
 
   void _finish(bool open) {
-    _rest(open);
-    widget.onSettled(open);
+    setState(() => _rest(open));
+    widget.onOpen(open);
   }
 
   @override
   Widget build(BuildContext context) {
-    final expanded = widget.expanded;
-    final target = expanded != null && (_active || _shownOpen)
-        ? expanded(context)
-        : null;
-    final box = _PullExpandBox(
-      key: _key,
-      pulled: _pulled,
-      active: _active,
-      from: _from,
-      showTarget: _shownOpen,
-      children: <Widget>[widget.child, ?target],
-    );
-    if ((!widget.enabled || _shownOpen) && !_active) return box;
+    final pulls = _motion._active || (widget.enabled && !_motion._open);
+    // Always there, so that the content keeps its place in the tree.
     return RawGestureDetector(
+      // Anywhere on the row, not only on its text.
+      behavior: HitTestBehavior.opaque,
       gestures: <Type, GestureRecognizerFactory>{
-        _PullDownRecognizer:
-            GestureRecognizerFactoryWithHandlers<_PullDownRecognizer>(
-              _PullDownRecognizer.new,
-              (recognizer) => recognizer
-                ..onStart = _start
-                ..onUpdate = _update
-                ..onEnd = ((details) => _end(details.primaryVelocity ?? 0))
-                ..onCancel = (() => _end(0)),
-            ),
+        if (pulls)
+          _PullDownRecognizer:
+              GestureRecognizerFactoryWithHandlers<_PullDownRecognizer>(
+                _PullDownRecognizer.new,
+                (recognizer) => recognizer
+                  ..onStart = _start
+                  ..onUpdate = _update
+                  ..onEnd = ((details) => _end(details.primaryVelocity ?? 0))
+                  ..onCancel = (() => _end(0)),
+              ),
       },
-      child: box,
+      child: widget.builder(context, _motion),
     );
   }
 }
 
 /// A vertical drag that only starts downward, so the list still scrolls up
-/// from a row.
+/// from a row. It starts a pixel before the drags around it, so that a row
+/// always takes its pull before the shade does.
 class _PullDownRecognizer extends VerticalDragGestureRecognizer {
   @override
   bool hasSufficientGlobalDistanceToAccept(
     PointerDeviceKind pointerDeviceKind,
     double? deviceTouchSlop,
-  ) => globalDistanceMoved > computeHitSlop(pointerDeviceKind, gestureSettings);
-}
-
-class _PullExpandBox extends MultiChildRenderObjectWidget {
-  const _PullExpandBox({
-    required this.pulled,
-    required this.active,
-    required this.from,
-    required this.showTarget,
-    required super.children,
-    super.key,
-  });
-
-  final ValueNotifier<double> pulled;
-  final bool active;
-  final double? from;
-
-  /// At rest, show the second child (the open row) instead of the first.
-  final bool showTarget;
-
-  @override
-  RenderObject createRenderObject(BuildContext context) => _RenderPullExpand(
-    pulled,
-    active: active,
-    from: from,
-    showTarget: showTarget,
-  );
-
-  @override
-  void updateRenderObject(BuildContext context, _RenderPullExpand box) {
-    box
-      ..pulled = pulled
-      ..active = active
-      ..from = from
-      ..showTarget = showTarget;
-  }
-}
-
-class _PullExpandParentData extends ContainerBoxParentData<RenderBox> {}
-
-class _RenderPullExpand extends RenderBox
-    with
-        ContainerRenderObjectMixin<RenderBox, _PullExpandParentData>,
-        RenderBoxContainerDefaultsMixin<RenderBox, _PullExpandParentData> {
-  _RenderPullExpand(
-    this._pulled, {
-    required this._active,
-    required this._from,
-    required this._showTarget,
-  });
-
-  bool _showTarget;
-  set showTarget(bool value) {
-    if (value == _showTarget) return;
-    _showTarget = value;
-    markNeedsLayout();
-  }
-
-  /// The child shown at rest.
-  RenderBox get _resting {
-    final target = _target;
-    return _showTarget && target != null ? target : firstChild!;
-  }
-
-  ValueNotifier<double> _pulled;
-  set pulled(ValueNotifier<double> value) {
-    if (identical(value, _pulled)) return;
-    if (attached) _pulled.removeListener(markNeedsLayout);
-    _pulled = value;
-    if (attached) _pulled.addListener(markNeedsLayout);
-    markNeedsLayout();
-  }
-
-  bool _active;
-  set active(bool value) {
-    if (value == _active) return;
-    _active = value;
-    markNeedsLayout();
-  }
-
-  double? _from;
-  set from(double? value) {
-    if (value == _from) return;
-    _from = value;
-    markNeedsLayout();
-  }
-
-  /// How far the row can grow, from the last layout.
-  double range = 0;
-
-  /// 0 collapsed, 1 grown to the expanded height.
-  double _fraction = 0;
-
-  final _clip = LayerHandle<ClipRectLayer>();
-  final _fadeOut = LayerHandle<OpacityLayer>();
-  final _fadeIn = LayerHandle<OpacityLayer>();
-
-  @override
-  void setupParentData(RenderBox child) {
-    if (child.parentData is! _PullExpandParentData) {
-      child.parentData = _PullExpandParentData();
-    }
-  }
-
-  @override
-  void attach(PipelineOwner owner) {
-    super.attach(owner);
-    _pulled.addListener(markNeedsLayout);
-  }
-
-  @override
-  void detach() {
-    _pulled.removeListener(markNeedsLayout);
-    super.detach();
-  }
-
-  @override
-  void dispose() {
-    _clip.layer = null;
-    _fadeOut.layer = null;
-    _fadeIn.layer = null;
-    super.dispose();
-  }
-
-  RenderBox? get _target => childCount > 1 ? lastChild : null;
-
-  @override
-  void performLayout() {
-    final loose = BoxConstraints(
-      minWidth: constraints.minWidth,
-      maxWidth: constraints.maxWidth,
-    );
-    final child = firstChild!;
-    child.layout(loose, parentUsesSize: true);
-    final target = _target;
-    target?.layout(loose, parentUsesSize: true);
-    if (!_active) {
-      range = 0;
-      _fraction = 0;
-      size = constraints.constrain(_resting.size);
-      return;
-    }
-    final start = target != null
-        ? child.size.height
-        : _from ?? child.size.height;
-    final end = (target ?? child).size.height;
-    range = math.max(0, end - start);
-    final grown = math.min(_pulled.value, range);
-    _fraction = range <= 0 ? 1 : grown / range;
-    size = constraints.constrain(Size(child.size.width, start + grown));
-  }
-
-  @override
-  void paint(PaintingContext context, Offset offset) {
-    final child = firstChild!;
-    final target = _target;
-    if (!_active) {
-      _clip.layer = null;
-      _fadeOut.layer = null;
-      _fadeIn.layer = null;
-      context.paintChild(_resting, offset);
-      return;
-    }
-    _clip.layer = context.pushClipRect(
-      needsCompositing,
-      offset,
-      Offset.zero & size,
-      (context, offset) {
-        if (target == null) {
-          context.paintChild(child, offset);
-          return;
-        }
-        final out = ((1 - _fraction) * 255).round();
-        final into = (_fraction * 255).round();
-        _fadeOut.layer = out <= 0
-            ? null
-            : context.pushOpacity(
-                offset,
-                out,
-                (context, offset) => context.paintChild(child, offset),
-                oldLayer: _fadeOut.layer,
-              );
-        _fadeIn.layer = into <= 0
-            ? null
-            : context.pushOpacity(
-                offset,
-                into,
-                (context, offset) => context.paintChild(target, offset),
-                oldLayer: _fadeIn.layer,
-              );
-      },
-      oldLayer: _clip.layer,
-    );
-  }
-
-  @override
-  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) {
-    if (_active) return false;
-    return _resting.hitTest(result, position: position);
-  }
+  ) =>
+      globalDistanceMoved >
+      computeHitSlop(pointerDeviceKind, gestureSettings) - 1;
 }
