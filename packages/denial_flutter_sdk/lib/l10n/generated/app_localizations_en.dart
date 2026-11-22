@@ -1382,6 +1382,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get quickSettingsAutoRotate => 'Auto-rotate';
 
   @override
+  String get notificationsClearAllButton => 'Clear all';
+
+  @override
+  String get notificationSettingsButton => 'Notification settings';
+
+  @override
   String get notificationSectionSilent => 'Silent';
 
   @override

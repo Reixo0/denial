@@ -1337,6 +1337,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get quickSettingsAutoRotate => '自动旋转';
 
   @override
+  String get notificationsClearAllButton => '全部清除';
+
+  @override
+  String get notificationSettingsButton => '通知设置';
+
+  @override
   String get notificationSectionSilent => '静音';
 
   @override

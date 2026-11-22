@@ -1957,6 +1957,14 @@
   "@quickSettingsAutoRotate": {
     "description": "Quick Settings toggle that is on while the screen follows the orientation sensor."
   },
+  "notificationsClearAllButton": "Clear all",
+  "@notificationsClearAllButton": {
+    "description": "Button under the phone shade's notifications that dismisses them all, as on Android."
+  },
+  "notificationSettingsButton": "Notification settings",
+  "@notificationSettingsButton": {
+    "description": "Accessibility label of the button under the phone shade's notifications that opens the notification settings."
+  },
   "notificationSectionSilent": "Silent",
   "@notificationSectionSilent": {
     "description": "Heading above low-importance notifications in the phone shade, as on Android."

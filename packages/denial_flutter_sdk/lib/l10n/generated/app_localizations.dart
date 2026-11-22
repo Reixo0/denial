@@ -2478,6 +2478,18 @@ abstract class AppLocalizations {
   /// **'Auto-rotate'**
   String get quickSettingsAutoRotate;
 
+  /// Button under the phone shade's notifications that dismisses them all, as on Android.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear all'**
+  String get notificationsClearAllButton;
+
+  /// Accessibility label of the button under the phone shade's notifications that opens the notification settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Notification settings'**
+  String get notificationSettingsButton;
+
   /// Heading above low-importance notifications in the phone shade, as on Android.
   ///
   /// In en, this message translates to:

@@ -396,6 +396,8 @@
   "powerWatts": "{watts} W",
   "powerWattsDecimal": "{watts} W",
   "quickSettingsAutoRotate": "自动旋转",
+  "notificationsClearAllButton": "全部清除",
+  "notificationSettingsButton": "通知设置",
   "notificationSectionSilent": "静音",
   "notificationTimeNow": "刚刚",
   "notificationTimeMinutes": "{count}分钟",

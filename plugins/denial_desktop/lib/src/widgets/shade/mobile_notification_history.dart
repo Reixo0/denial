@@ -20,6 +20,7 @@ import '../notification_banner.dart';
 import '../notification_pull_expand.dart';
 import '../notification_rows.dart';
 import '../phone_scheme.dart';
+import 'notification_footer.dart';
 import 'notification_shade_list.dart';
 import 'shade_dismiss_gesture.dart';
 import 'shade_expansion.dart';
@@ -52,10 +53,11 @@ class MobileNotificationHistory extends ConsumerStatefulWidget {
 
 class _MobileNotificationHistoryState
     extends ConsumerState<MobileNotificationHistory>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late final AnimationController _entrance;
   final ScrollController _scroll = ScrollController();
   final _rowMotion = _RowMotion();
+  late final NotificationClearAll _clearAll;
   Animation<double>? _motionProgress;
   Listenable? _motion;
   bool _armed = true;
@@ -76,7 +78,16 @@ class _MobileNotificationHistoryState
           Motion.notificationHistoryStagger *
               Motion.notificationHistoryMaxStagger,
     );
+    _clearAll = NotificationClearAll(this);
     widget.progress.addListener(_observeProgress);
+  }
+
+  /// Android closes the shade 200 ms after the rows have left.
+  void _closeAfterClear() {
+    Future<void>.delayed(const Duration(milliseconds: 200), () {
+      if (!mounted) return;
+      ref.read(referenceShellProvider.notifier).closeQuickSettings();
+    });
   }
 
   @override
@@ -234,6 +245,9 @@ class _MobileNotificationHistoryState
 
     final rows = <NotificationHistoryRow>[...alertingRows, ...silentRows];
     final silentStart = silentRows.isEmpty ? -1 : alertingRows.length;
+    final silentAllClearable = groups
+        .where(silent)
+        .every((group) => group.clearable);
     final indices = <Object, int>{
       for (var i = 0; i < rows.length; i++) rows[i].key: i,
     };
@@ -268,13 +282,26 @@ class _MobileNotificationHistoryState
                       index: index,
                       cachedGlass: cachedGlass,
                       child: Padding(
-                        padding: const EdgeInsets.only(top: 8, bottom: 16),
+                        // EvolutionX: the pill starts 18 dp below the last
+                        // row, whose own gap is 8 dp; 4 dp are the pill's.
+                        padding: const EdgeInsets.only(top: 6, bottom: 16),
                         child: Builder(
                           builder: (context) => NotificationReveal.revealed(
                             context,
-                            const Align(
-                              alignment: Alignment.centerRight,
-                              child: ClearNotificationHistoryButton(),
+                            NotificationFooter(
+                              clearAll: _clearAll,
+                              onSettings: () {
+                                ref
+                                    .read(referenceShellProvider.notifier)
+                                    .closeQuickSettings();
+                                ref
+                                    .read(denialBridgeProvider)
+                                    .launchApplication(const <String>[
+                                      'denial-phone-settings',
+                                      'notifications',
+                                    ]);
+                              },
+                              onCleared: _closeAfterClear,
                             ),
                           ),
                         ),
@@ -336,6 +363,19 @@ class _MobileNotificationHistoryState
                       onControl: (value) => control(record, value),
                     ),
                   };
+                  final clearable = switch (row) {
+                    NotificationGroupHeaderRow() => false,
+                    NotificationGroupRow(:final group) => group.clearable,
+                    NotificationRow(:final record) =>
+                      record.notification.clearable,
+                  };
+                  final slide = NotificationClearSlide(
+                    key: ValueKey<Object>(('slide', row.key, _generation)),
+                    clearAll: _clearAll,
+                    index: index,
+                    clearable: clearable && !locked,
+                    child: entry,
+                  );
                   return _ColorOsNotificationReveal(
                     reveal: _revealOf(index),
                     index: index,
@@ -345,11 +385,16 @@ class _MobileNotificationHistoryState
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: <Widget>[
-                              const _SilentSectionHeader(),
-                              entry,
+                              // Leaves with the section when all of it goes.
+                              NotificationClearFade(
+                                clearAll: _clearAll,
+                                fades: silentAllClearable,
+                                child: const _SilentSectionHeader(),
+                              ),
+                              slide,
                             ],
                           )
-                        : entry,
+                        : slide,
                   );
                 },
                 childCount: rows.length + (rows.isNotEmpty && !locked ? 1 : 0),
@@ -384,6 +429,7 @@ class _MobileNotificationHistoryState
   @override
   void dispose() {
     widget.progress.removeListener(_observeProgress);
+    _clearAll.dispose();
     _entrance.dispose();
     _scroll.dispose();
     _rowMotion.dispose();
@@ -736,27 +782,6 @@ class _HistoryButton extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-class ClearNotificationHistoryButton extends ConsumerWidget {
-  const ClearNotificationHistoryButton({super.key});
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final canClear = ref.watch(
-      desktopNotificationsProvider.select(
-        (s) => s.history.any((record) => record.notification.clearable),
-      ),
-    );
-    final locked = ref.watch(
-      referenceShellProvider.select((s) => s.lockLayerVisible),
-    );
-    if (!canClear || locked) return const SizedBox.shrink();
-    return _HistoryButton(
-      label: context.l10n.notificationsClearAll,
-      icon: Icons.clear_all_rounded,
-      onPressed: ref.read(desktopNotificationsProvider.notifier).clearAll,
     );
   }
 }
