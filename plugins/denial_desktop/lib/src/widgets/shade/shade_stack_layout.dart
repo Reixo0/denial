@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui' show lerpDouble;
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 
@@ -94,6 +95,7 @@ class ShadeStackLayout extends MultiChildRenderObjectWidget {
     super.key,
     required this.panel,
     required this.qs,
+    required this.pullsBoth,
     required this.quickTilesHeight,
     required this.mediaActive,
     required this.onTravel,
@@ -102,6 +104,10 @@ class ShadeStackLayout extends MultiChildRenderObjectWidget {
 
   final Animation<double> panel;
   final Animation<double> qs;
+
+  /// A two-finger pull: the panel uncovers the full quick settings, without
+  /// the notifications.
+  final ValueListenable<bool> pullsBoth;
 
   /// The quick tiles' grid height (two rows), unsquished.
   final double quickTilesHeight;
@@ -118,6 +124,7 @@ class ShadeStackLayout extends MultiChildRenderObjectWidget {
   RenderShadeStack createRenderObject(BuildContext context) => RenderShadeStack(
     panel: panel,
     qs: qs,
+    pullsBoth: pullsBoth,
     quickTilesHeight: quickTilesHeight,
     mediaActive: mediaActive,
     onTravel: onTravel,
@@ -128,6 +135,7 @@ class ShadeStackLayout extends MultiChildRenderObjectWidget {
     renderObject
       ..panel = panel
       ..qs = qs
+      ..pullsBoth = pullsBoth
       ..quickTilesHeight = quickTilesHeight
       ..mediaActive = mediaActive
       ..onTravel = onTravel;
@@ -221,6 +229,7 @@ class RenderShadeStack extends RenderBox
   RenderShadeStack({
     required this._panel,
     required this._qs,
+    required this._pullsBoth,
     required this._quickTilesHeight,
     required this._mediaActive,
     required this.onTravel,
@@ -245,6 +254,16 @@ class RenderShadeStack extends RenderBox
     if (attached) _qs.removeListener(markNeedsPaint);
     _qs = value;
     if (attached) _qs.addListener(markNeedsPaint);
+    markNeedsPaint();
+  }
+
+  ValueListenable<bool> _pullsBoth;
+  ValueListenable<bool> get pullsBoth => _pullsBoth;
+  set pullsBoth(ValueListenable<bool> value) {
+    if (identical(value, _pullsBoth)) return;
+    if (attached) _pullsBoth.removeListener(markNeedsPaint);
+    _pullsBoth = value;
+    if (attached) _pullsBoth.addListener(markNeedsPaint);
     markNeedsPaint();
   }
 
@@ -281,12 +300,14 @@ class RenderShadeStack extends RenderBox
     super.attach(owner);
     _panel.addListener(markNeedsPaint);
     _qs.addListener(markNeedsPaint);
+    _pullsBoth.addListener(markNeedsPaint);
   }
 
   @override
   void detach() {
     _panel.removeListener(markNeedsPaint);
     _qs.removeListener(markNeedsPaint);
+    _pullsBoth.removeListener(markNeedsPaint);
     super.detach();
   }
 
@@ -378,7 +399,12 @@ class RenderShadeStack extends RenderBox
       size.height + _Places.stackPastBottom,
       e,
     )!;
-    final stackTop = e > 0 ? restTop : _stackTop * p;
+    final both = _pullsBoth.value;
+    final stackTop = both
+        ? restTop * p
+        : e > 0
+        ? restTop
+        : _stackTop * p;
     final headerAlpha = ShadeReveal.headerAlpha(p);
     final qsClip = Rect.fromLTRB(-width, -size.height, width * 2, stackTop);
     final gridHeight = _height(ShadePart.grid);
@@ -475,7 +501,8 @@ class RenderShadeStack extends RenderBox
         case ShadePart.list:
           // The list rises to stackTop by itself (NotificationShadeList).
           y = restTop;
-          alpha = AndroidStackExpansion.alpha(p);
+          // AOSP hides the stack until a two-finger pull is fully open.
+          alpha = both ? 0 : AndroidStackExpansion.alpha(p);
           clip = Rect.fromLTRB(-width, stackTop, width * 2, size.height);
           hittable = e <= 0.01;
         case null:

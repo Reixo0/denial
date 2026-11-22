@@ -25,9 +25,12 @@ class ShadeExpansion {
   }) : panel = AnimationController(vsync: vsync),
        qs = AnimationController(vsync: vsync),
        engaged = AnimationController(vsync: vsync, duration: _engageDuration) {
+    _catchUp = AnimationController(vsync: vsync, duration: _catchUpDuration)
+      ..addListener(_followPanel);
     panel
       ..addListener(_collapseWhenClosed)
-      ..addListener(_engage);
+      ..addListener(_engage)
+      ..addListener(_followPanel);
   }
 
   /// Android's timed reaction to the shade leaving closed, apart from the
@@ -65,6 +68,42 @@ class ShadeExpansion {
   /// 0 the quick tiles over the notifications, 1 the full quick settings.
   final AnimationController qs;
 
+  /// Android's two-finger pull (`isExpandImmediate`): the quick settings
+  /// open with the panel, straight to the full ones, the notifications
+  /// hidden. From the second finger until the panel rests open or closed.
+  final ValueNotifier<bool> pullsBoth = ValueNotifier<bool>(false);
+
+  /// How far the quick settings have caught up with a panel that was already
+  /// on its way when the second finger landed.
+  late final AnimationController _catchUp;
+  static const _catchUpDuration = Duration(milliseconds: 150);
+
+  void _pullBoth() {
+    if (pullsBoth.value) return;
+    qs.stop();
+    pullsBoth.value = true;
+    if (panel.value < 0.02 || reduceMotion) {
+      _catchUp.value = 1;
+    } else {
+      _catchUp.forward(from: 0);
+    }
+    _followPanel();
+  }
+
+  void _followPanel() {
+    if (!pullsBoth.value) return;
+    qs.value = panel.value * Curves.fastOutSlowIn.transform(_catchUp.value);
+    _finishPullBoth();
+  }
+
+  /// Over once the panel rests at an end.
+  void _finishPullBoth() {
+    if (_dragging || (panel.value > 0 && panel.value < 1)) return;
+    _catchUp.stop();
+    qs.value = panel.value;
+    pullsBoth.value = false;
+  }
+
   /// The shell's flags follow the panel: a drag took it, it moved, it was
   /// let go towards open or closed at a velocity (logical px/s). The shell
   /// then settles the panel ([settlePanel]).
@@ -82,7 +121,6 @@ class ShadeExpansion {
   bool _dragging = false;
   _Moving? _moving;
   bool _fromStatusBar = false;
-  bool _twoFinger = false;
   bool _qsAllowed = true;
 
   /// This drag has moved the panel (the shell was told).
@@ -92,7 +130,7 @@ class ShadeExpansion {
 
   /// Android resets the quick settings each time the shade closes.
   void _collapseWhenClosed() {
-    if (panel.value <= 0 && qs.value != 0 && !_twoFinger) {
+    if (panel.value <= 0 && qs.value != 0 && !pullsBoth.value) {
       qs.stop();
       qs.value = 0;
     }
@@ -100,37 +138,47 @@ class ShadeExpansion {
 
   /// A finger took the shade; false when another drag already holds it (a
   /// second finger's gesture), which then leaves it alone. From the status
-  /// bar it pulls the panel; with two fingers, at the start or when a second
-  /// one lands anywhere during the pull, the quick settings open with it
-  /// (Android's two-finger pull, `isOpenQsEvent` on a pointer down).
+  /// bar it pulls the panel; a second finger on the bar opens the quick
+  /// settings with it. [fingers] are on the bar already (the drag starts
+  /// with the first one's touch) and [barHeight] is how far down it reaches.
   /// [qsAllowed] lets a downward drag on the open shade expand the quick
   /// settings.
   bool beginDrag({
     bool fromStatusBar = false,
-    bool twoFinger = false,
+    Set<int> fingers = const <int>{},
+    double barHeight = 0,
     bool qsAllowed = true,
   }) {
     if (_dragging) return false;
     panel.stop();
-    qs.stop();
+    if (!pullsBoth.value) qs.stop();
     _dragging = true;
     _moving = null;
     _fromStatusBar = fromStatusBar;
-    _twoFinger = twoFinger;
     _qsAllowed = qsAllowed;
-    // Each pull from the status bar starts on the quick tiles.
-    if (fromStatusBar && panel.value <= 0) qs.value = 0;
-    if (fromStatusBar) _watchFingers();
+    if (fromStatusBar) {
+      // Each pull from the status bar starts on the quick tiles.
+      if (panel.value <= 0) {
+        pullsBoth.value = false;
+        qs.value = 0;
+      }
+      _watchFingers(fingers, barHeight);
+    }
     return true;
   }
 
   final Set<int> _fingers = <int>{};
+  double _barHeight = 0;
   bool _watching = false;
 
-  void _watchFingers() {
+  void _watchFingers(Set<int> fingers, double barHeight) {
+    _fingers
+      ..clear()
+      ..addAll(fingers);
+    _barHeight = barHeight;
+    if (_fingers.length >= 2) _pullBoth();
     if (_watching) return;
     _watching = true;
-    _fingers.clear();
     GestureBinding.instance.pointerRouter.addGlobalRoute(_onPointer);
   }
 
@@ -142,20 +190,9 @@ class ShadeExpansion {
 
   void _onPointer(PointerEvent event) {
     if (event is PointerDownEvent) {
+      if (event.position.dy > _barHeight) return;
       _fingers.add(event.pointer);
-      // A second finger during a pull from the status bar: the full quick
-      // settings come with the panel from here.
-      if (_dragging && _fromStatusBar && !_twoFinger && _fingers.length >= 2) {
-        _twoFinger = true;
-        qs.stop();
-        qs.animateTo(
-          panel.value,
-          duration: reduceMotion
-              ? Duration.zero
-              : const Duration(milliseconds: 150),
-          curve: Curves.fastOutSlowIn,
-        );
-      }
+      if (_dragging && _fromStatusBar && _fingers.length >= 2) _pullBoth();
     } else if (event is PointerUpEvent || event is PointerCancelEvent) {
       _fingers.remove(event.pointer);
     }
@@ -175,7 +212,6 @@ class ShadeExpansion {
           onDragStart?.call();
         }
         panel.value = next;
-        if (_twoFinger && !qs.isAnimating) qs.value = next;
         onDragMove?.call(next > 0);
       case _Moving.quickSettings:
         final next = qs.value + dy / qsTravel;
@@ -193,7 +229,7 @@ class ShadeExpansion {
   }
 
   _Moving? _choose(double dy) {
-    if (_fromStatusBar) return _Moving.panel;
+    if (_fromStatusBar || pullsBoth.value) return _Moving.panel;
     if (dy > 0) {
       if (panel.value < 1) return _Moving.panel;
       return _qsAllowed && qs.value < 1 ? _Moving.quickSettings : null;
@@ -218,14 +254,11 @@ class ShadeExpansion {
         );
       case _Moving.panel:
         final open = _expands(panel.value, velocity, panelTravel);
-        if (_twoFinger) {
-          flingQs(open ? 1 : 0, velocity: velocity * qsTravel / panelTravel);
-        }
         if (started) onDragEnd?.call(open, velocity);
       case null:
         break;
     }
-    _twoFinger = false;
+    if (pullsBoth.value) _finishPullBoth();
   }
 
   /// PanelViewController.flingExpands: past Android's minimum fling speed
@@ -266,5 +299,7 @@ class ShadeExpansion {
     panel.dispose();
     qs.dispose();
     engaged.dispose();
+    _catchUp.dispose();
+    pullsBoth.dispose();
   }
 }

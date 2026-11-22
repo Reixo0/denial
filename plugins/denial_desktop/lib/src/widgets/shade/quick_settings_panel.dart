@@ -737,6 +737,7 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
         child: ShadeStackLayout(
           panel: widget.progress,
           qs: _expansion,
+          pullsBoth: widget.expansion.pullsBoth,
           quickTilesHeight: twoRows,
           mediaActive: mediaActive,
           onTravel: (travel) {

@@ -207,7 +207,8 @@ class _ShadeStatusBarState extends ConsumerState<ShadeStatusBar> {
             behavior: HitTestBehavior.opaque,
             onVerticalDragStart: (_) => _owns = expansion.beginDrag(
               fromStatusBar: true,
-              twoFinger: _pointers.length >= 2,
+              fingers: _pointers,
+              barHeight: geometry.hitHeight,
             ),
             onVerticalDragUpdate: (details) {
               if (_owns) expansion.dragBy(details.delta.dy);
