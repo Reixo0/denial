@@ -24,6 +24,7 @@ class ShellBackdropBlur extends StatelessWidget {
     this.opacity,
     this.clipUnfiltered = true,
     this.edgeless = false,
+    this.edgelessScale = 1,
     super.key,
   }) : assert(strength >= 0 && strength <= 1),
        assert(!separateChild || !useWindowAlphaThreshold),
@@ -56,6 +57,9 @@ class ShellBackdropBlur extends StatelessWidget {
   /// screen (see [ShellThemeData.edgelessBlurConfigAt]).
   final bool edgeless;
 
+  /// Widens an [edgeless] blur.
+  final double edgelessScale;
+
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
@@ -77,7 +81,7 @@ class ShellBackdropBlur extends StatelessWidget {
     final Widget filtered;
     if (available) {
       final filterConfig = edgeless
-          ? theme.edgelessBlurConfigAt(resolvedStrength)
+          ? theme.edgelessBlurConfigAt(resolvedStrength, scale: edgelessScale)
           : theme.backdropFilterConfigAt(
               resolvedStrength,
               borderRadius: radius ?? BorderRadius.zero,

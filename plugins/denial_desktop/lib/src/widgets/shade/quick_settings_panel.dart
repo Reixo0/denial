@@ -142,6 +142,10 @@ class _FullScreenShade extends StatelessWidget {
   final Animation<double> progress;
   final Widget child;
 
+  /// How much wider EvolutionX's shade blurs than the glass setting's frost,
+  /// as drawn on the phone: 70 px to 50 at the default frost of 30.
+  static const double _blurScale = 1.4;
+
   @override
   Widget build(BuildContext context) {
     final theme = ShellTheme.of(context);
@@ -220,6 +224,7 @@ class _FullScreenShade extends StatelessWidget {
               separateChild: true,
               borderRadius: BorderRadius.zero,
               edgeless: true,
+              edgelessScale: _blurScale,
               child: composedShade!,
             );
           },
