@@ -120,7 +120,7 @@ class ShadeExpansion {
     );
   }
 
-  static const _engageDuration = Duration(milliseconds: 160);
+  static final _engageDuration = androidDuration(160);
 
   void _engage() {
     if (panel.value > 0) {
@@ -198,11 +198,12 @@ class ShadeExpansion {
   /// How far the quick settings have caught up with a panel that was already
   /// on its way when the second finger landed.
   late final AnimationController _catchUp;
-  static const _catchUpDuration = Duration(milliseconds: 150);
+  static final _catchUpDuration = androidDuration(150);
 
   void _pullBoth() {
     if (pullsBoth.value) return;
     qs.stop();
+    _bothScale = 1;
     pullsBoth.value = true;
     if (panel.value < 0.02 || reduceMotion) {
       _catchUp.value = 1;
@@ -212,10 +213,37 @@ class ShadeExpansion {
     _followPanel();
   }
 
+  /// The quick settings' share of what the panel gives them while they close
+  /// together, 1 from the full ones.
+  double _bothScale = 1;
+
+  /// How far the panel leaves the quick settings open while the two move
+  /// together (NotificationPanelViewController.onHeightUpdated): the quick
+  /// tiles first, the rest from where the notifications' top is, with the
+  /// shelf's height.
+  double get _bothQs {
+    final tiles = quickTilesTravel / screenTravel;
+    if (tiles <= 0 || tiles >= 1) return panel.value;
+    return ((panel.value - tiles) / (1 - tiles)).clamp(0.0, 1.0);
+  }
+
   void _followPanel() {
     if (!pullsBoth.value) return;
-    qs.value = panel.value * Curves.fastOutSlowIn.transform(_catchUp.value);
+    qs.value =
+        _bothQs * _bothScale * Curves.fastOutSlowIn.transform(_catchUp.value);
     _finishPullBoth();
+  }
+
+  /// Android closes a shade with open quick settings with both
+  /// (`collapse`: isExpandImmediate).
+  void _closeBoth() {
+    if (pullsBoth.value || qs.value <= 0 || panel.value <= 0) return;
+    qs.stop();
+    final given = _bothQs;
+    if (given <= 0) return;
+    _bothScale = (qs.value / given).clamp(0.0, 1.0);
+    _catchUp.value = 1;
+    pullsBoth.value = true;
   }
 
   /// Over once the panel rests at an end.
@@ -223,6 +251,7 @@ class ShadeExpansion {
     if (_dragging || (panel.value > 0 && panel.value < 1)) return;
     _catchUp.stop();
     qs.value = panel.value;
+    _bothScale = 1;
     pullsBoth.value = false;
   }
 
@@ -246,6 +275,12 @@ class ShadeExpansion {
   }
 
   double qsTravel = 520;
+
+  /// How far the panel has come when a shade that opens with the full quick
+  /// settings starts on them, past the quick tiles.
+  double quickTilesTravel = 0;
+
+  double _qsTarget = 0;
 
   /// Logical pixels per dp, for Android's speeds.
   double dp = 1;
@@ -407,6 +442,7 @@ class ShadeExpansion {
   /// Settles the panel to [open], continuing [velocity] (logical px/s).
   TickerFuture settlePanel(bool open, {double velocity = 0}) {
     final target = open ? 1.0 : 0.0;
+    if (!open) _closeBoth();
     // A fling open aims past the end by its overshoot.
     final overshoots =
         open &&
@@ -460,9 +496,18 @@ class ShadeExpansion {
 
   bool _springingBack = false;
 
+  /// Back, or a close, of the full quick settings to the quick tiles
+  /// (animateCloseQs); false when they are not open.
+  bool collapseQs() {
+    if (qs.value <= 0 || pullsBoth.value || _dragging) return false;
+    if (!qs.isAnimating || _qsTarget > 0) flingQs(0);
+    return true;
+  }
+
   /// Settles the quick settings to [target] (0 or 1). A finger going the
   /// other way leaves no speed and takes 350 ms.
   TickerFuture flingQs(double target, {double velocity = 0}) {
+    _qsTarget = target;
     final distance = (target - qs.value) * qsTravel;
     final opposite = velocity * distance < 0;
     final fling = aospFling(
@@ -476,7 +521,7 @@ class ShadeExpansion {
       duration: reduceMotion
           ? Duration.zero
           : opposite
-          ? const Duration(milliseconds: 350)
+          ? androidDuration(350)
           : fling.duration,
       curve: fling.curve,
     );

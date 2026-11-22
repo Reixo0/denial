@@ -16,6 +16,7 @@ import '../../state/flashlight.dart';
 import '../../state/quick_settings.dart';
 import '../../state/reference_shell_presentation.dart';
 import '../../state/reference_shell_profile.dart';
+import '../../state/shade_back.dart';
 
 import 'package:denial_flutter_sdk/rendering.dart'
     show WindowBackdropCache, WindowBackdropSlice;
@@ -119,7 +120,9 @@ class QuickSettingsShade extends ConsumerWidget {
                         onKeyEvent: (_, event) {
                           if (event is KeyDownEvent &&
                               event.logicalKey == LogicalKeyboardKey.escape) {
-                            controller.closeQuickSettings();
+                            if (!ref.read(shadeBackProvider)()) {
+                              controller.closeQuickSettings();
+                            }
                             return KeyEventResult.handled;
                           }
                           return KeyEventResult.ignored;
@@ -381,6 +384,32 @@ class _PixelShade extends ConsumerStatefulWidget {
 
 class _PixelShadeState extends ConsumerState<_PixelShade>
     with SingleTickerProviderStateMixin {
+  /// Into the tile editor and back (EDIT_MODE_TIME_MILLIS, a tween): the
+  /// quick settings fade over its first half, the editor over the second
+  /// (AOSP's toEditMode), the header on its own clock.
+  late final AnimationController _edit = AnimationController(
+    vsync: this,
+    duration: androidDuration(500),
+  );
+  late final Animation<double> _editEased = CurvedAnimation(
+    parent: _edit,
+    curve: Curves.fastOutSlowIn,
+    reverseCurve: Curves.fastOutSlowIn.flipped,
+  );
+  late final Animation<double> _contentFade = _editEased.drive(
+    Animatable<double>.fromCallback((t) => 1 - (t / 0.5).clamp(0.0, 1.0)),
+  );
+  late final Animation<double> _editorFade = _editEased.drive(
+    Animatable<double>.fromCallback((t) => ((t - 0.5) / 0.5).clamp(0.0, 1.0)),
+  );
+
+  /// ShadeHeaderController.startCustomizingAnimation.
+  late final Animation<double> _headerFade = CurvedAnimation(
+    parent: ReverseAnimation(_edit),
+    curve: const Cubic(0.4, 0, 1, 1),
+    reverseCurve: const Cubic(0.2, 0, 1, 1),
+  );
+
   /// The full quick settings' footer actions, a 48 dp row at the bottom of
   /// the screen (AOSP's footer actions), with 8 dp above it.
   static const double _footerHeight = 56;
@@ -410,11 +439,13 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
     sharedRows: 2,
     squish: widget.expansion.panel.drive(
       Animatable<double>.fromCallback(
-        (panel) => ShadeReveal.tileSquish(
-          panel,
-          stackHeight: _stackHeight,
-          shelf: _listScroll.overflows,
-        ),
+        (panel) => widget.expansion.pullsBoth.value
+            ? 1
+            : ShadeReveal.tileSquish(
+                panel,
+                stackHeight: _stackHeight,
+                shelf: _listScroll.overflows,
+              ),
       ),
     ),
     contentAlpha: widget.expansion.qs.drive(
@@ -428,6 +459,14 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
     final e = _expansion.value;
     _qsCollapsed.value = e < 0.01;
     _qsFull.value = e >= 1;
+    // AOSP stops editing as soon as the quick settings start to collapse.
+    if (e < 1 && ref.read(qsEditingProvider)) {
+      Future.microtask(() {
+        if (mounted && _expansion.value < 1) {
+          ref.read(qsEditingProvider.notifier).stop();
+        }
+      });
+    }
   }
 
   @override
@@ -470,6 +509,8 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
         if (mounted && ref.read(qsEditingProvider)) {
           ref.read(qsEditingProvider.notifier).stop();
         }
+        // Not left half-way for the next pull.
+        if (mounted && !widget.active) _edit.value = 0;
       });
     }
   }
@@ -478,6 +519,7 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
   void dispose() {
     widget.progress.removeListener(_trackOpen);
     _expansion.removeListener(_trackQs);
+    _edit.dispose();
     _listScroll.dispose();
     _qsCollapsed.dispose();
     _qsFull.dispose();
@@ -776,11 +818,19 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
           sideMargin: PixelQs.margin,
           quickTilesHeight: twoRows,
           mediaActive: mediaActive,
+          headerFade: _headerFade,
+          contentFade: _contentFade,
           onTravel: (travel) {
             _stackHeight = ShadeReveal.stackHeight(travel);
             // The finger moves the notification stack 1:1 (AOSP's quick
             // settings expansion height).
-            if (travel > 120) widget.expansion.qsTravel = travel * scale;
+            if (travel > 120) {
+              widget.expansion
+                ..qsTravel = travel * scale
+                ..quickTilesTravel =
+                    widget.expansion.screenTravel +
+                    ShadeReveal.tilesPastBottom(travel) * scale;
+            }
           },
           children: <Widget>[
             for (final part in _HeaderPart.values)
@@ -908,24 +958,30 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
     );
     // AOSP's edit mode takes the shade's place, over the same background.
     final editing = ref.watch(qsEditingProvider);
+    ref.listen(qsEditingProvider, (_, editing) {
+      if (MediaQuery.disableAnimationsOf(context)) {
+        _edit.value = editing ? 1 : 0;
+      } else if (editing) {
+        _edit.forward();
+      } else {
+        _edit.reverse();
+      }
+    });
     return Stack(
       fit: StackFit.expand,
       children: <Widget>[
-        IgnorePointer(
-          ignoring: editing,
-          child: AnimatedOpacity(
-            opacity: editing ? 0 : 1,
-            duration: const Duration(milliseconds: 200),
-            child: shade,
-          ),
-        ),
-        if (editing)
-          TweenAnimationBuilder<double>(
-            tween: Tween<double>(begin: 0, end: 1),
-            duration: const Duration(milliseconds: 200),
-            builder: (context, t, child) => Opacity(opacity: t, child: child),
+        IgnorePointer(ignoring: editing, child: shade),
+        // It stays while it fades out.
+        AnimatedBuilder(
+          animation: _edit,
+          child: IgnorePointer(
+            ignoring: !editing,
             child: QsTileEditor(catalog: catalog),
           ),
+          builder: (context, editor) => editing || !_edit.isDismissed
+              ? FadeTransition(opacity: _editorFade, child: editor)
+              : const SizedBox.shrink(),
+        ),
       ],
     );
   }

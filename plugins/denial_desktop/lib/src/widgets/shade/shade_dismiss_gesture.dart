@@ -1,17 +1,15 @@
-import 'package:denial_desktop/src/state/reference_shell_controller.dart';
-
 import 'package:flutter/widgets.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'quick_settings_panel.dart' show PixelShadeViewport;
 import 'shade_expansion.dart';
 
-/// The shade's empty space and its notification list: a tap closes the
-/// shade, a vertical drag moves it through its [ShadeExpansion] (down opens
-/// the full quick settings, up collapses them and then closes the shade).
+/// The shade's empty space and its notification list: a vertical drag moves
+/// the shade through its [ShadeExpansion] (down opens the full quick
+/// settings, up collapses them and then closes the shade). A tap does
+/// nothing (EvolutionX: onMiddleClicked has no case for the open shade).
 /// A scrollable child wins the vertical gesture arena; [canDrag] also keeps
 /// a scrollable list from moving the shade.
-class ShadeDismissGesture extends ConsumerStatefulWidget {
+class ShadeDismissGesture extends StatefulWidget {
   const ShadeDismissGesture({
     required this.expansion,
     required this.child,
@@ -24,11 +22,10 @@ class ShadeDismissGesture extends ConsumerStatefulWidget {
   final bool Function()? canDrag;
 
   @override
-  ConsumerState<ShadeDismissGesture> createState() =>
-      _ShadeDismissGestureState();
+  State<ShadeDismissGesture> createState() => _ShadeDismissGestureState();
 }
 
-class _ShadeDismissGestureState extends ConsumerState<ShadeDismissGesture> {
+class _ShadeDismissGestureState extends State<ShadeDismissGesture> {
   /// Kept in the state: the shade rebuilds this during the drag.
   bool _dragging = false;
 
@@ -39,7 +36,6 @@ class _ShadeDismissGestureState extends ConsumerState<ShadeDismissGesture> {
     final scale = PixelShadeViewport.scaleOf(context);
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: ref.read(referenceShellProvider.notifier).closeQuickSettings,
       onVerticalDragStart: (_) {
         _dragging = (widget.canDrag?.call() ?? true) && expansion.beginDrag();
       },

@@ -136,6 +136,8 @@ class ShadeStackLayout extends MultiChildRenderObjectWidget {
     required this.sideMargin,
     required this.quickTilesHeight,
     required this.mediaActive,
+    required this.headerFade,
+    required this.contentFade,
     required this.onTravel,
     super.children,
   });
@@ -168,6 +170,11 @@ class ShadeStackLayout extends MultiChildRenderObjectWidget {
   /// showsOnlyActiveMedia): it moves between the two places, opaque.
   final bool mediaActive;
 
+  /// How much of the header and of everything else shows: they leave for
+  /// the tile editor.
+  final Animation<double> headerFade;
+  final Animation<double> contentFade;
+
   /// The finger's travel from the quick tiles to the full quick settings:
   /// the notification stack's, which follows it.
   final ValueChanged<double> onTravel;
@@ -184,6 +191,8 @@ class ShadeStackLayout extends MultiChildRenderObjectWidget {
     sideMargin: sideMargin,
     quickTilesHeight: quickTilesHeight,
     mediaActive: mediaActive,
+    headerFade: headerFade,
+    contentFade: contentFade,
     onTravel: onTravel,
   );
 
@@ -200,6 +209,8 @@ class ShadeStackLayout extends MultiChildRenderObjectWidget {
       ..sideMargin = sideMargin
       ..quickTilesHeight = quickTilesHeight
       ..mediaActive = mediaActive
+      ..headerFade = headerFade
+      ..contentFade = contentFade
       ..onTravel = onTravel;
   }
 }
@@ -250,6 +261,11 @@ abstract final class ShadeReveal {
       _Places.stackPastBottom +
       _Places.panelPadding -
       NotificationShelfGeometry.bottomMargin;
+
+  /// Where the full quick settings start under a panel that opens both, from
+  /// the screen's bottom: the notifications' top and the shelf.
+  static double tilesPastBottom(double travel) =>
+      _Places.stackPastBottom + NotificationShelfGeometry.height - travel;
 
   /// The header fades in quickly as the stack's top passes the first tile
   /// row (about 90 ms on the recording, as the notifications appear).
@@ -328,6 +344,8 @@ class RenderShadeStack extends RenderBox
     required this._sideMargin,
     required this._quickTilesHeight,
     required this._mediaActive,
+    required this._headerFade,
+    required this._contentFade,
     required this.onTravel,
   });
 
@@ -425,6 +443,24 @@ class RenderShadeStack extends RenderBox
     markNeedsLayout();
   }
 
+  Animation<double> _headerFade;
+  set headerFade(Animation<double> value) {
+    if (identical(value, _headerFade)) return;
+    if (attached) _headerFade.removeListener(markNeedsPaint);
+    _headerFade = value;
+    if (attached) _headerFade.addListener(markNeedsPaint);
+    markNeedsPaint();
+  }
+
+  Animation<double> _contentFade;
+  set contentFade(Animation<double> value) {
+    if (identical(value, _contentFade)) return;
+    if (attached) _contentFade.removeListener(markNeedsPaint);
+    _contentFade = value;
+    if (attached) _contentFade.addListener(markNeedsPaint);
+    markNeedsPaint();
+  }
+
   /// The quick tiles' bottom (with an active media player) and the stack's
   /// top under them, from the last layout.
   double _quickBottom = 0;
@@ -451,6 +487,8 @@ class RenderShadeStack extends RenderBox
     _overscroll.addListener(markNeedsPaint);
     _pullsBoth.addListener(markNeedsPaint);
     _listScroll.addListener(markNeedsPaint);
+    _headerFade.addListener(markNeedsPaint);
+    _contentFade.addListener(markNeedsPaint);
   }
 
   @override
@@ -461,6 +499,8 @@ class RenderShadeStack extends RenderBox
     _overscroll.removeListener(markNeedsPaint);
     _pullsBoth.removeListener(markNeedsPaint);
     _listScroll.removeListener(markNeedsPaint);
+    _headerFade.removeListener(markNeedsPaint);
+    _contentFade.removeListener(markNeedsPaint);
     super.detach();
   }
 
@@ -693,7 +733,9 @@ class RenderShadeStack extends RenderBox
               ShadePart.date ||
               ShadePart.icons ||
               ShadePart.carrier) {
-        alpha *= headerAlpha;
+        alpha *= headerAlpha * _headerFade.value;
+      } else {
+        alpha *= _contentFade.value;
       }
       data
         ..place = Offset(x, y)

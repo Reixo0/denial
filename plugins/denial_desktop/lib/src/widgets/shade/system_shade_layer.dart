@@ -1,5 +1,7 @@
+import 'package:denial_desktop/src/state/qs_tile_layout.dart';
 import 'package:denial_desktop/src/state/reference_shell_controller.dart';
 import 'package:denial_desktop/src/state/reference_shell_metrics.dart';
+import 'package:denial_desktop/src/state/shade_back.dart';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -55,6 +57,19 @@ class _SystemShadeLayerState extends ConsumerState<SystemShadeLayer>
     _active = _mountedPanel;
     _sharedProgress = ref.read(shadeProgressProvider)..parent = _panel;
     ref.read(shadeExpansionProvider).current = _expansion;
+    _back = ref.read(shadeBackProvider)..handler = _onBack;
+  }
+
+  late final ShadeBack _back;
+
+  /// Closes what is open over the quick tiles; false when nothing is.
+  bool _onBack() {
+    if (_panel.value <= 0) return false;
+    if (ref.read(qsEditingProvider)) {
+      ref.read(qsEditingProvider.notifier).stop();
+      return true;
+    }
+    return _expansion.collapseQs();
   }
 
   void _updateVisibility() {
@@ -74,6 +89,7 @@ class _SystemShadeLayerState extends ConsumerState<SystemShadeLayer>
     if (identical(_sharedProgress.parent, _panel)) {
       _sharedProgress.parent = const AlwaysStoppedAnimation(0.0);
     }
+    if (_back.handler == _onBack) _back.handler = null;
     final handle = ref.read(shadeExpansionProvider);
     if (identical(handle.current, _expansion)) handle.current = null;
     _expansion.dispose();

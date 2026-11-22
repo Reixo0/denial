@@ -9,6 +9,7 @@ import 'package:denial_flutter_sdk/state.dart';
 
 import '../phone_scheme.dart';
 import 'notification_shade_list.dart';
+import 'shade_expansion_motion.dart' show androidDuration;
 
 /// Android's "Clear all" (NotificationStackScrollLayout.clearNotifications):
 /// the visible rows slide out one after another from the last to the first,
@@ -56,7 +57,7 @@ class NotificationClearAll {
       delay += gap;
     }
     final total = rows.last._delay! + _slideMs;
-    _time.duration = Duration(milliseconds: total);
+    _time.duration = androidDuration(total);
     _running = true;
     try {
       await _time.forward(from: 0).orCancel;

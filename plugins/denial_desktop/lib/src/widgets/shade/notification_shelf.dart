@@ -10,6 +10,7 @@ import '../notification_media.dart'
     show NotificationAppIcon, NotificationSmallIcon;
 import '../phone_scheme.dart';
 import '../notification_banner.dart' show PixelNotificationMetrics;
+import 'shade_expansion_motion.dart' show androidDuration;
 import 'notification_shade_list.dart'
     show AndroidStackExpansion, NotificationShadeList;
 
@@ -418,7 +419,7 @@ class _NotificationFooterFadeState extends State<NotificationFooterFade> {
         opacity: fits ?? false ? 1 : 0,
         duration: fits == null || MediaQuery.disableAnimationsOf(context)
             ? Duration.zero
-            : const Duration(milliseconds: 260),
+            : androidDuration(260),
         child: widget.child,
       ),
     );

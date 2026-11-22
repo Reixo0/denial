@@ -4,6 +4,16 @@ import 'package:flutter/widgets.dart';
 
 import 'package:denial_flutter_sdk/motion.dart';
 
+/// The owner's EvolutionX plays every animation in three quarters of the time
+/// its code says (Android's animator duration scale): measured on its shade's
+/// flings, their spring back and the quick settings' closing.
+const double androidAnimatorScale = 0.75;
+
+/// [milliseconds] of Android's code, as the owner's phone plays them.
+Duration androidDuration(int milliseconds) => Duration(
+  microseconds: (milliseconds * 1000 * androidAnimatorScale).round(),
+);
+
 /// AOSP's ShadeInterpolation: how the shade's scrim, blur and content follow
 /// its expansion fraction, the same opening and closing.
 abstract final class AospShadeInterpolation {
@@ -92,7 +102,9 @@ enum AospFling {
         : Curves.fastOutSlowIn;
   }
   return (
-    duration: Duration(microseconds: (seconds * 1e6).round()),
+    duration: Duration(
+      microseconds: (seconds * androidAnimatorScale * 1e6).round(),
+    ),
     curve: curve,
   );
 }
@@ -121,15 +133,15 @@ class _FlingCurve extends Curve {
 /// (panel_overshoot_amount) by the finger's speed, and spring back.
 abstract final class AospOvershoot {
   static const double amount = 16;
-  static const Duration springBack = Duration(milliseconds: 400);
+  static final Duration springBack = androidDuration(400);
 
   /// The list past its end: 6 dp of Android's pixels, in seconds of its
   /// speed, and the way back (ANIMATION_DURATION_STANDARD).
   static const double overfling = 6 * _androidPixelsPerDp / 1000;
-  static const Duration listSpringBack = Duration(milliseconds: 360);
+  static final Duration listSpringBack = androidDuration(360);
 
   /// Opened without a finger's speed (SHADE_OPEN_SPRING_OUT_DURATION).
-  static const Duration springOut = Duration(milliseconds: 350);
+  static final Duration springOut = androidDuration(350);
 
   /// In dp, for a release at [speed] dp per second.
   static double of(double speed) =>
@@ -165,10 +177,11 @@ class ShadeBlurAnimation extends CompoundAnimation<double> {
 /// NotificationShadeDepthController's shadeAnimation: the spring of the part
 /// of the blur that does not follow the finger.
 abstract final class AospDepthSpring {
-  /// SpringForce.STIFFNESS_LOW, DAMPING_RATIO_NO_BOUNCY.
+  /// SpringForce.STIFFNESS_LOW, DAMPING_RATIO_NO_BOUNCY, as fast as the
+  /// animator scale makes it (DynamicAnimation divides the time by it).
   static final SpringDescription spring = SpringDescription.withDampingRatio(
     mass: 1,
-    stiffness: 200,
+    stiffness: 200 / (androidAnimatorScale * androidAnimatorScale),
   );
 
   /// max_shade_window_blur_radius, 34 dp, in EvolutionX's pixels.
@@ -185,5 +198,6 @@ abstract final class AospDepthSpring {
   /// [seconds] (VELOCITY_SCALE, MAX_VELOCITY), in blurs per second.
   static double speed(double change, double seconds) =>
       (100 * change / seconds.clamp(0.00001, 1.0)).clamp(-3000.0, 3000.0) /
-      radius;
+      radius /
+      androidAnimatorScale;
 }

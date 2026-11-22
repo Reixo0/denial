@@ -19,6 +19,7 @@ import 'phone_desk.dart';
 import 'phone_desk_input.dart';
 import 'reference_shell_metrics.dart';
 import 'reference_shell_profile.dart';
+import 'shade_back.dart';
 import 'reference_input_layout_coordinator.dart';
 
 final referenceShellProvider =
@@ -818,7 +819,7 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
         }
         closeEdgePanel();
       case MobileBackTarget.shade:
-        closeQuickSettings();
+        if (!ref.read(shadeBackProvider)()) closeQuickSettings();
       case MobileBackTarget.overview:
         closeOverview();
       case MobileBackTarget.app:
