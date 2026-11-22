@@ -747,11 +747,10 @@ class _MediaButton extends StatelessWidget {
   }
 }
 
-/// AOSP's media touch ripple (MultiRippleController with a circle
-/// RippleShader, 1.5 s, at most 10 at once): a soft disc of the button
-/// colour at 100/255 opacity grows from the tapped button over the whole
-/// card. Timing measured on EvolutionX: the front crosses the card in about
-/// 0.12 s, holds about 0.1 s, fades out by 0.45 s with a faint tail to 1.5 s.
+/// Android's media touch ripple: a circle growing from the tapped button to
+/// the card's width, 1.5 s, at most 10 at once. It is a fill that fades over
+/// the first 60 % and a soft ring at its edge that lasts, in the button
+/// colour at 100/255. Checked against EvolutionX's recording.
 class _CardRipples extends StatefulWidget {
   const _CardRipples({super.key, required this.color});
 
@@ -815,35 +814,55 @@ class _RipplePainter extends CustomPainter {
   final List<({Offset centre, AnimationController time})> ripples;
   final Color color;
 
-  /// Opacity over the ripple's 1.5 s, in seconds since the tap.
-  static double _opacity(double seconds) {
-    const peak = 100 / 255;
-    if (seconds < 0.12) return peak;
-    if (seconds < 0.45) {
-      return peak +
-          (peak * 0.15 - peak) *
-              Curves.easeOut.transform((seconds - 0.12) / 0.33);
-    }
-    return peak * 0.15 * (1 - (seconds - 0.45) / 1.05).clamp(0.0, 1.0);
+  static const double _opacity = 100 / 255;
+
+  /// The gradient's samples: the edges are wide and smooth.
+  static const int _stops = 32;
+
+  /// 0 to 1 as [value] goes from [start] to [end].
+  static double _part(double start, double end, double value) =>
+      ((value - start) / (end - start)).clamp(0.0, 1.0);
+
+  /// 1 inside a soft edge of width 2 x [half] around 0, 0 outside.
+  static double _inside(double distance, double half) {
+    final t = _part(-half, half, distance);
+    return 1 - t * t * (3 - 2 * t);
   }
 
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint();
     for (final ripple in ripples) {
-      final seconds = ripple.time.value * 1.5;
-      final radius =
-          size.width *
-          1.3 *
-          Curves.easeOutCubic.transform((seconds / 0.2).clamp(0.0, 1.0));
-      final alpha = _opacity(seconds);
-      if (radius <= 0 || alpha <= 0) continue;
-      final c = color.withValues(alpha: alpha);
+      // Android runs the animator's accelerate-decelerate first, then its
+      // standard curve for the size; the fades follow the first alone.
+      final raw = _accelerateDecelerate(ripple.time.value);
+      final grown = const Cubic(0.2, 0, 0, 1).transform(raw);
+      final radius = size.width * grown;
+      if (radius < 0.5) continue;
+      final half = ui.lerpDouble(1.25, 0.5, grown)! / 2;
+      final fill = 1 - _part(0, 0.6, raw);
+      final ring = math.min(_part(0, 0.1, raw), 1 - _part(0.3, 1, raw));
+      if (fill <= 0 && ring <= 0) continue;
+      final outer = radius * 1.25;
+      final reach = outer * (1 + half);
+      final colors = <Color>[];
+      final stops = <double>[];
+      for (var i = 0; i <= _stops; i++) {
+        final at = i / _stops;
+        final toOuter = (at * reach - outer) / outer;
+        final toInner = (at * reach - radius) / radius;
+        final alpha = math.max(
+          _inside(toOuter, half) * fill,
+          _inside(math.max(toOuter, -toInner), half) * ring,
+        );
+        colors.add(color.withValues(alpha: alpha * _opacity));
+        stops.add(at);
+      }
       paint.shader = RadialGradient(
-        colors: <Color>[c, c, c.withValues(alpha: 0)],
-        stops: const <double>[0, 0.7, 1],
-      ).createShader(Rect.fromCircle(center: ripple.centre, radius: radius));
-      canvas.drawCircle(ripple.centre, radius, paint);
+        colors: colors,
+        stops: stops,
+      ).createShader(Rect.fromCircle(center: ripple.centre, radius: reach));
+      canvas.drawCircle(ripple.centre, reach, paint);
     }
   }
 
