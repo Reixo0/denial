@@ -17,6 +17,7 @@ import 'package:denial_flutter_sdk/tokens.dart';
 
 import '../notification_media.dart'
     show NotificationAppIcon, NotificationSmallIcon;
+import 'shade_drag_detector.dart';
 import 'shade_expansion.dart';
 import 'shade_expansion_motion.dart';
 import 'shade_reference_geometry.dart';
@@ -203,21 +204,21 @@ class _ShadeStatusBarState extends ConsumerState<ShadeStatusBar> {
           onPointerDown: (event) => _pointers.add(event.pointer),
           onPointerUp: (event) => _pointers.remove(event.pointer),
           onPointerCancel: (event) => _pointers.remove(event.pointer),
-          child: GestureDetector(
+          child: ShadeDragDetector(
             behavior: HitTestBehavior.opaque,
-            onVerticalDragStart: (_) => _owns = expansion.beginDrag(
+            onStart: (_) => _owns = expansion.beginDrag(
               fromStatusBar: true,
               fingers: _pointers,
               barHeight: geometry.hitHeight,
             ),
-            onVerticalDragUpdate: (details) {
+            onUpdate: (details) {
               if (_owns) expansion.dragBy(details.delta.dy);
             },
-            onVerticalDragEnd: (details) {
+            onEnd: (details) {
               if (_owns) expansion.endDrag(details.primaryVelocity ?? 0.0);
               _owns = false;
             },
-            onVerticalDragCancel: () {
+            onCancel: () {
               if (_owns) expansion.endDrag(0.0);
               _owns = false;
             },

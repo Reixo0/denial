@@ -15,6 +15,7 @@ import '../state/home_back.dart';
 import '../state/reference_shell_controller.dart';
 import '../state/reference_shell_presentation.dart';
 import '../state/reference_shell_profile.dart';
+import '../widgets/shade/shade_drag_detector.dart';
 import '../widgets/shade/shade_progress.dart';
 import 'home_drag_controller.dart';
 import 'home_grid_geometry.dart';
@@ -590,7 +591,10 @@ class _HomeSurfaceState extends ConsumerState<HomeSurface>
       return;
     }
     if (!_drawerShown) return;
-    _releaseDrawer(details.primaryVelocity ?? 0, opening: true);
+    _releaseDrawer(
+      (details.primaryVelocity ?? 0).clamp(-8000.0, 8000.0),
+      opening: true,
+    );
   }
 
   void _drawerDragCancel() =>
@@ -881,12 +885,12 @@ class _HomeSurfaceState extends ConsumerState<HomeSurface>
               children: [
                 CustomPaint(painter: HomeBackdropPainter(opacity: opacity)),
                 // A swipe up anywhere on home pulls up the app drawer.
-                GestureDetector(
+                ShadeDragDetector(
                   behavior: HitTestBehavior.translucent,
-                  onVerticalDragStart: _drawerDragStart,
-                  onVerticalDragUpdate: _drawerDragUpdate,
-                  onVerticalDragEnd: _drawerDragEnd,
-                  onVerticalDragCancel: _drawerDragCancel,
+                  onStart: _drawerDragStart,
+                  onUpdate: _drawerDragUpdate,
+                  onEnd: _drawerDragEnd,
+                  onCancel: _drawerDragCancel,
                   child: opacity == null
                       ? content
                       : FadeSnapshot(opacity: opacity, child: content),

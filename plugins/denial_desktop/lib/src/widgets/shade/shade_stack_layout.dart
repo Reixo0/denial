@@ -128,6 +128,8 @@ class ShadeStackLayout extends MultiChildRenderObjectWidget {
     super.key,
     required this.panel,
     required this.qs,
+    required this.overshoot,
+    required this.overscroll,
     required this.pullsBoth,
     required this.listScroll,
     required this.panelColor,
@@ -140,6 +142,13 @@ class ShadeStackLayout extends MultiChildRenderObjectWidget {
 
   final Animation<double> panel;
   final Animation<double> qs;
+
+  /// How far past its place a fling open has carried the notification
+  /// stack (ShadeExpansion.overshoot).
+  final Animation<double> overshoot;
+
+  /// How far the list is pushed up past its end (ShadeExpansion.overscroll).
+  final Animation<double> overscroll;
 
   /// A two-finger pull: the panel uncovers the full quick settings, without
   /// the notifications.
@@ -167,6 +176,8 @@ class ShadeStackLayout extends MultiChildRenderObjectWidget {
   RenderShadeStack createRenderObject(BuildContext context) => RenderShadeStack(
     panel: panel,
     qs: qs,
+    overshoot: overshoot,
+    overscroll: overscroll,
     pullsBoth: pullsBoth,
     listScroll: listScroll,
     panelColor: panelColor,
@@ -181,6 +192,8 @@ class ShadeStackLayout extends MultiChildRenderObjectWidget {
     renderObject
       ..panel = panel
       ..qs = qs
+      ..overshoot = overshoot
+      ..overscroll = overscroll
       ..pullsBoth = pullsBoth
       ..listScroll = listScroll
       ..panelColor = panelColor
@@ -307,6 +320,8 @@ class RenderShadeStack extends RenderBox
   RenderShadeStack({
     required this._panel,
     required this._qs,
+    required this._overshoot,
+    required this._overscroll,
     required this._pullsBoth,
     required this._listScroll,
     required this._panelColor,
@@ -335,6 +350,26 @@ class RenderShadeStack extends RenderBox
     if (attached) _qs.removeListener(markNeedsPaint);
     _qs = value;
     if (attached) _qs.addListener(markNeedsPaint);
+    markNeedsPaint();
+  }
+
+  Animation<double> _overshoot;
+  Animation<double> get overshoot => _overshoot;
+  set overshoot(Animation<double> value) {
+    if (identical(value, _overshoot)) return;
+    if (attached) _overshoot.removeListener(markNeedsPaint);
+    _overshoot = value;
+    if (attached) _overshoot.addListener(markNeedsPaint);
+    markNeedsPaint();
+  }
+
+  Animation<double> _overscroll;
+  Animation<double> get overscroll => _overscroll;
+  set overscroll(Animation<double> value) {
+    if (identical(value, _overscroll)) return;
+    if (attached) _overscroll.removeListener(markNeedsPaint);
+    _overscroll = value;
+    if (attached) _overscroll.addListener(markNeedsPaint);
     markNeedsPaint();
   }
 
@@ -412,6 +447,8 @@ class RenderShadeStack extends RenderBox
     super.attach(owner);
     _panel.addListener(markNeedsPaint);
     _qs.addListener(markNeedsPaint);
+    _overshoot.addListener(markNeedsPaint);
+    _overscroll.addListener(markNeedsPaint);
     _pullsBoth.addListener(markNeedsPaint);
     _listScroll.addListener(markNeedsPaint);
   }
@@ -420,6 +457,8 @@ class RenderShadeStack extends RenderBox
   void detach() {
     _panel.removeListener(markNeedsPaint);
     _qs.removeListener(markNeedsPaint);
+    _overshoot.removeListener(markNeedsPaint);
+    _overscroll.removeListener(markNeedsPaint);
     _pullsBoth.removeListener(markNeedsPaint);
     _listScroll.removeListener(markNeedsPaint);
     super.detach();
@@ -518,11 +557,15 @@ class RenderShadeStack extends RenderBox
       e,
     )!;
     final both = _pullsBoth.value;
-    final stackTop = both
-        ? (restTop - _Places.panelPadding) * p
-        : e > 0
-        ? restTop - _Places.panelPadding
-        : (_stackTop - _Places.panelPadding) * p;
+    // They move the whole stack (AOSP's stackY), nothing else.
+    final past = (overshoot.value - overscroll.value) * p;
+    final stackTop =
+        past +
+        (both
+            ? (restTop - _Places.panelPadding) * p
+            : e > 0
+            ? restTop - _Places.panelPadding
+            : (_stackTop - _Places.panelPadding) * p);
     // AOSP's getEdgePosition: the panel of the notifications scrolls up over
     // the quick tiles, to the header.
     final edge = math.max(
@@ -637,7 +680,7 @@ class RenderShadeStack extends RenderBox
           hittable = e >= 0.99;
         case ShadePart.list:
           // The list rises to its place by itself (NotificationShadeList).
-          y = restTop - _stackTop;
+          y = restTop - _stackTop + past;
           // AOSP hides the stack until a two-finger pull is fully open.
           alpha = both ? 0 : AndroidStackExpansion.alpha(p);
           clip = _ShadeClip.inPanel;

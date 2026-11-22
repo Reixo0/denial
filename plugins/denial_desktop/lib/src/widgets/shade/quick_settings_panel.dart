@@ -350,9 +350,6 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
 
   bool _closedBefore = true;
 
-  /// The notification list's overscroll is moving the shade.
-  bool _listDragging = false;
-
   /// The full quick settings' tile pages; each pull starts on the first.
   final PageController _pages = PageController();
 
@@ -446,28 +443,6 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
     _qsFull.dispose();
     _pages.dispose();
     super.dispose();
-  }
-
-  /// A scrolling notification list pulled down past its top opens the
-  /// full quick settings, as a drag on the rest of the shade does.
-  bool _onListScroll(ScrollNotification notification) {
-    final expansion = widget.expansion;
-    final scale = PixelShadeViewport.scaleOf(context);
-    if (notification is OverscrollNotification &&
-        notification.dragDetails != null &&
-        (notification.overscroll < 0 || _listDragging)) {
-      if (!_listDragging) {
-        _listDragging = expansion.beginDrag();
-        if (!_listDragging) return false;
-      }
-      expansion.dragBy(-notification.overscroll * scale);
-    } else if (notification is ScrollEndNotification && _listDragging) {
-      _listDragging = false;
-      expansion.endDrag(
-        (notification.dragDetails?.primaryVelocity ?? 0) * scale,
-      );
-    }
-    return false;
   }
 
   void _openSettingsPage(String page) {
@@ -753,6 +728,8 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
         child: ShadeStackLayout(
           panel: widget.progress,
           qs: _expansion,
+          overshoot: widget.expansion.overshoot,
+          overscroll: widget.expansion.overscroll,
           pullsBoth: widget.expansion.pullsBoth,
           listScroll: _listScroll,
           panelColor: phoneNotificationPanel(phoneSchemeOf(context)),
@@ -873,17 +850,14 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
             ShadeStackSlot(
               part: ShadePart.list,
               child: RepaintBoundary(
-                child: NotificationListener<ScrollNotification>(
-                  onNotification: _onListScroll,
-                  child: ValueListenableBuilder<bool>(
-                    valueListenable: _qsCollapsed,
-                    builder: (context, collapsed, _) => _Notifications(
-                      progress: widget.progress,
-                      closed: widget.closed,
-                      active: widget.active && collapsed,
-                      expansion: widget.expansion,
-                      scroll: _listScroll,
-                    ),
+                child: ValueListenableBuilder<bool>(
+                  valueListenable: _qsCollapsed,
+                  builder: (context, collapsed, _) => _Notifications(
+                    progress: widget.progress,
+                    closed: widget.closed,
+                    active: widget.active && collapsed,
+                    expansion: widget.expansion,
+                    scroll: _listScroll,
                   ),
                 ),
               ),
@@ -1045,6 +1019,11 @@ class _Notifications extends ConsumerWidget {
       builder: (context, constraints) {
         // ShadeStackLayout: the list's place below the screen's top.
         final top = constraints.maxHeight - constraints.minHeight;
+        if (empty) {
+          expansion.contentBottom =
+              (top + _EmptyNotifications.height) *
+              PixelShadeViewport.scaleOf(context);
+        }
         return SizedBox(
           height: constraints.maxHeight,
           child: empty
@@ -1068,6 +1047,9 @@ class _Notifications extends ConsumerWidget {
 
 class _EmptyNotifications extends StatelessWidget {
   const _EmptyNotifications();
+
+  /// Android's empty shade view and the footer under it, for the pull.
+  static const double height = 180;
 
   @override
   Widget build(BuildContext context) {

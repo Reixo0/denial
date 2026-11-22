@@ -1,7 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/widgets.dart';
 
-import 'shade_expansion_motion.dart' show ShadeBlurAnimation, aospShadeFling;
+import 'shade_expansion_motion.dart';
 
 /// What a drag on the shade is moving.
 enum _Moving { panel, quickSettings }
@@ -12,10 +12,12 @@ enum _Moving { panel, quickSettings }
 /// QuickSettingsController), with one drag handler for every place a finger
 /// can move them.
 ///
-/// The panel follows the finger 1:1 over [panelTravel]; the quick settings
+/// The finger moves the panel 1:1 over [panelTravel], the notifications'
+/// bottom (AOSP's getMaxPanelHeight); the quick settings
 /// over [qsTravel], the tiles' growth, so their bottom edge stays under the
 /// finger. A release flings with Android's FlingAnimationUtils
-/// ([aospShadeFling]). Distances are in logical pixels.
+/// ([aospFling]); flung open, the notifications overshoot and spring back
+/// ([overshoot]). Distances are in logical pixels.
 class ShadeExpansion {
   ShadeExpansion({
     required TickerProvider vsync,
@@ -24,6 +26,8 @@ class ShadeExpansion {
     this.onDragEnd,
   }) : panel = AnimationController(vsync: vsync),
        qs = AnimationController(vsync: vsync),
+       overshoot = AnimationController.unbounded(vsync: vsync),
+       overscroll = AnimationController.unbounded(vsync: vsync),
        engaged = AnimationController(vsync: vsync, duration: _engageDuration) {
     _catchUp = AnimationController(vsync: vsync, duration: _catchUpDuration)
       ..addListener(_followPanel);
@@ -68,6 +72,50 @@ class ShadeExpansion {
   /// 0 the quick tiles over the notifications, 1 the full quick settings.
   final AnimationController qs;
 
+  /// How far past its place the notification stack is, in dp (AOSP's
+  /// overExpansion): a fling open carries it there and it springs back.
+  final AnimationController overshoot;
+
+  /// How far the notification list is pushed up past its end, in dp.
+  final AnimationController overscroll;
+
+  /// A finger pushed the list [dp] on past its end
+  /// (RUBBER_BAND_FACTOR_NORMAL).
+  void overscrollBy(double dp) {
+    overscroll.value = overscroll.value + dp * 0.1;
+  }
+
+  /// The finger came back by [dp]; what of it is left for the list.
+  double takeOverscroll(double dp) {
+    final taken = dp.clamp(0.0, overscroll.value);
+    if (taken > 0) overscroll.value -= taken;
+    return dp - taken;
+  }
+
+  /// The list reached its end at [speed] (dp/s): it runs on for as far as
+  /// NotificationStackScrollLayout lets it (its speed over 1000 times the
+  /// overfling distance, 6 dp, in Android's pixels), then springs back.
+  /// [pushed] already past its end it runs a tenth of that.
+  void flingOverscroll(double speed, {bool pushed = false}) {
+    if (speed < 50 || reduceMotion) return releaseOverscroll();
+    final seconds = AospOvershoot.overfling * (pushed ? 0.1 : 1);
+    overscroll
+        .animateTo(
+          overscroll.value + speed * seconds,
+          duration: Duration(microseconds: (seconds * 1e6).round()),
+        )
+        .then((_) => releaseOverscroll());
+  }
+
+  void releaseOverscroll() {
+    if (overscroll.value <= 0) return;
+    overscroll.animateTo(
+      0,
+      duration: reduceMotion ? Duration.zero : AospOvershoot.listSpringBack,
+      curve: Curves.fastOutSlowIn,
+    );
+  }
+
   /// Android's two-finger pull (`isExpandImmediate`): the quick settings
   /// open with the panel, straight to the full ones, the notifications
   /// hidden. From the second finger until the panel rests open or closed.
@@ -111,7 +159,18 @@ class ShadeExpansion {
   final void Function(bool pulled)? onDragMove;
   final void Function(bool open, double velocity)? onDragEnd;
 
-  double panelTravel = 600;
+  double screenTravel = 600;
+
+  /// Where the notifications end on the screen while there are few; more
+  /// fill it.
+  double? contentBottom;
+
+  double get panelTravel {
+    final bottom = contentBottom;
+    if (bottom == null || pullsBoth.value) return screenTravel;
+    return bottom.clamp(screenTravel * 0.2, screenTravel);
+  }
+
   double qsTravel = 520;
 
   /// Logical pixels per dp, for Android's speeds.
@@ -150,6 +209,7 @@ class ShadeExpansion {
     bool qsAllowed = true,
   }) {
     if (_dragging) return false;
+    if (panel.isAnimating) _springBack();
     panel.stop();
     if (!pullsBoth.value) qs.stop();
     _dragging = true;
@@ -269,27 +329,79 @@ class ShadeExpansion {
   }
 
   /// Settles the panel to [open], continuing [velocity] (logical px/s).
-  TickerFuture settlePanel(bool open, {double velocity = 0}) =>
-      _fling(panel, open ? 1 : 0, velocity / panelTravel, dp / panelTravel);
-
-  /// Settles the quick settings to [target] (0 or 1).
-  TickerFuture flingQs(double target, {double velocity = 0}) =>
-      _fling(qs, target, velocity / qsTravel, dp / qsTravel);
-
-  TickerFuture _fling(
-    AnimationController controller,
-    double target,
-    double velocity,
-    double unitsPerDp,
-  ) {
-    final fling = aospShadeFling(
-      distance: target - controller.value,
+  TickerFuture settlePanel(bool open, {double velocity = 0}) {
+    final target = open ? 1.0 : 0.0;
+    // A fling open aims past the end by its overshoot.
+    final overshoots =
+        open &&
+        panel.value < 1 &&
+        velocity >= 0 &&
+        overshoot.value == 0 &&
+        !reduceMotion;
+    final past = overshoots ? AospOvershoot.of(velocity / dp) : 0.0;
+    final fling = aospFling(
+      open ? AospFling.open : AospFling.close,
+      distance: (target - panel.value) * panelTravel + past * dp,
       velocity: velocity,
-      dp: unitsPerDp,
+      dp: dp,
+      maxDistance: screenTravel,
     );
-    return controller.animateTo(
+    final duration = reduceMotion
+        ? Duration.zero
+        : open && velocity == 0 && panel.value < 1
+        ? AospOvershoot.springOut
+        : fling.duration;
+    if (overshoots || (!open && overshoot.value != 0)) {
+      _springingBack = false;
+      overshoot
+          .animateTo(
+            past,
+            duration: duration,
+            curve: ChainedCurve(fling.curve, Curves.fastOutSlowIn),
+          )
+          .then((_) => _springBack());
+    } else {
+      _springBack();
+    }
+    return panel.animateTo(target, duration: duration, curve: fling.curve);
+  }
+
+  void _springBack() {
+    if (overshoot.value == 0) {
+      overshoot.stop();
+      return;
+    }
+    if (overshoot.isAnimating && _springingBack) return;
+    _springingBack = true;
+    overshoot
+        .animateTo(
+          0,
+          duration: reduceMotion ? Duration.zero : AospOvershoot.springBack,
+          curve: Curves.fastOutSlowIn,
+        )
+        .whenCompleteOrCancel(() => _springingBack = false);
+  }
+
+  bool _springingBack = false;
+
+  /// Settles the quick settings to [target] (0 or 1). A finger going the
+  /// other way leaves no speed and takes 350 ms.
+  TickerFuture flingQs(double target, {double velocity = 0}) {
+    final distance = (target - qs.value) * qsTravel;
+    final opposite = velocity * distance < 0;
+    final fling = aospFling(
+      AospFling.open,
+      distance: distance,
+      velocity: opposite ? 0 : velocity,
+      dp: dp,
+    );
+    return qs.animateTo(
       target,
-      duration: reduceMotion ? Duration.zero : fling.duration,
+      duration: reduceMotion
+          ? Duration.zero
+          : opposite
+          ? const Duration(milliseconds: 350)
+          : fling.duration,
       curve: fling.curve,
     );
   }
@@ -298,6 +410,8 @@ class ShadeExpansion {
     _unwatchFingers();
     panel.dispose();
     qs.dispose();
+    overshoot.dispose();
+    overscroll.dispose();
     engaged.dispose();
     _catchUp.dispose();
     pullsBoth.dispose();

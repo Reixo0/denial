@@ -5,7 +5,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
-import 'shade/shade_expansion_motion.dart' show aospShadeFling;
+import 'shade/shade_expansion_motion.dart' show AospFling, aospFling;
 
 /// Android's ExpandHelper on one notification row: a downward pull grows
 /// the row with the finger, 1:1, from its collapsed height to its natural
@@ -149,11 +149,11 @@ class _NotificationPullExpandState extends State<NotificationPullExpand>
       _finish(open);
       return;
     }
-    final fling = aospShadeFling(
-      distance: (target - current) / range,
-      velocity: velocity / range,
-      dp: 1 / range,
-      maxSeconds: 0.3,
+    final fling = aospFling(
+      AospFling.expand,
+      distance: target - current,
+      velocity: velocity,
+      dp: 1,
     );
     void follow() => _pulled.value =
         current + (target - current) * fling.curve.transform(_settle.value);

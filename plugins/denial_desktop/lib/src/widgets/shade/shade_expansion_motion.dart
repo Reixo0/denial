@@ -34,41 +34,114 @@ abstract final class AospShadeInterpolation {
   static const double qsParallax = 0.175;
 }
 
-/// Android's shade fling (FlingAnimationUtils with ShadeViewController's
-/// FLING_MAX_LENGTH_SECONDS 0.6 and FLING_SPEED_UP_FACTOR 0.6): the motion
-/// starts at the finger's speed and slows down on a linear-out-slow-in
-/// curve, taking at most 0.6 s, less over a shorter way (by its square
-/// root). Without a fling it takes the longest time, fast-out-slow-in.
-/// Distances and speeds are in the animation's own units (its whole travel
-/// is 1); [dp] is how many of those units make one dp.
-({Duration duration, Curve curve}) aospShadeFling({
+/// The shade's flings (NotificationPanelViewController): opening and the
+/// quick settings take at most 0.4 s without a speed-up (`loadDimens`),
+/// closing at most 0.6 s with ShadeViewController's speed-up of 0.6.
+enum AospFling {
+  open(0.4, 0),
+  close(0.6, 0.6),
+
+  /// A notification's height (ExpandHelper).
+  expand(0.3, 0);
+
+  const AospFling(this.maxSeconds, this.speedUp);
+
+  final double maxSeconds;
+  final double speedUp;
+}
+
+/// Android's fling (FlingAnimationUtils): the motion starts at the finger's
+/// speed and slows down on a linear-out-slow-in curve. Where that would take
+/// longer than the fling may, it crosses over from the finger's speed to that
+/// curve; too slow to be a fling, it is fast-out-slow-in.
+///
+/// Distances and speeds share one unit of which [dp] make one dp. The longest
+/// time falls with the square root of [distance] over [maxDistance]; without
+/// one it stays.
+({Duration duration, Curve curve}) aospFling(
+  AospFling kind, {
   required double distance,
   required double velocity,
   required double dp,
-  double maxSeconds = 0.6,
+  double? maxDistance,
 }) {
-  const speedUp = 0.6;
-  const x2Min = 0.35;
-  const x2Max = 0.68;
   final diff = distance.abs();
   if (diff <= 0) return (duration: Duration.zero, curve: Curves.linear);
   final speed = velocity.abs();
-  final minSpeed = 250 * dp;
-  final highSpeed = 3000 * dp;
-  final maxLength = maxSeconds * math.sqrt(diff.clamp(0.0, 1.0));
-  final fastest = x2Min + (x2Max - x2Min) * speedUp;
-  final factor = math.min(speed / highSpeed, 1.0);
-  final x2 = x2Min + (fastest - x2Min) * factor;
-  var seconds = speed <= 0 ? double.infinity : diff / (speed * x2);
-  Curve curve = Cubic(0, 0, x2, 1);
+  final maxLength =
+      kind.maxSeconds *
+      (maxDistance == null ? 1 : math.sqrt(diff / maxDistance));
+  final x2 = 0.35 + (0.68 - 0.35) * kind.speedUp;
+  // Android compares its pixels with its 3000 dp per second here.
+  final factor = kind.speedUp == 0
+      ? 1.0
+      : math.min(speed / (3000 * dp / _androidPixelsPerDp), 1.0);
+  final gradient = 0.75 * (1 - factor) + factor / x2;
+  final x1 = kind.speedUp * (1 - factor);
+  final slowIn = Cubic(x1, x1 * gradient, x2, 1);
+  var seconds = speed <= 0 ? double.infinity : gradient * diff / speed;
+  Curve curve = slowIn;
   if (seconds > maxLength) {
     seconds = maxLength;
-    if (speed < minSpeed) curve = Curves.fastOutSlowIn;
+    curve = speed >= 250 * dp
+        ? _FlingCurve(slowIn, seconds * speed / diff)
+        : Curves.fastOutSlowIn;
   }
   return (
     duration: Duration(microseconds: (seconds * 1e6).round()),
     curve: curve,
   );
+}
+
+/// EvolutionX's density on this phone, 468 dpi.
+const _androidPixelsPerDp = 468 / 160;
+
+/// From a constant speed ([distance] over the whole time) to [slowIn].
+class _FlingCurve extends Curve {
+  const _FlingCurve(this.slowIn, this.distance);
+
+  final Curve slowIn;
+  final double distance;
+
+  static const _crossfade = Cubic(0, 0, 0.2, 1);
+
+  @override
+  double transformInternal(double t) {
+    final fade = _crossfade.transform(t);
+    return math.min(1, (1 - fade) * distance * t + fade * slowIn.transform(t));
+  }
+}
+
+/// The overshoot of a shade flung open (`flingToHeight`): while the panel
+/// opens, the notifications go this far past their place, up to 16 dp
+/// (panel_overshoot_amount) by the finger's speed, and spring back.
+abstract final class AospOvershoot {
+  static const double amount = 16;
+  static const Duration springBack = Duration(milliseconds: 400);
+
+  /// The list past its end: 6 dp of Android's pixels, in seconds of its
+  /// speed, and the way back (ANIMATION_DURATION_STANDARD).
+  static const double overfling = 6 * _androidPixelsPerDp / 1000;
+  static const Duration listSpringBack = Duration(milliseconds: 360);
+
+  /// Opened without a finger's speed (SHADE_OPEN_SPRING_OUT_DURATION).
+  static const Duration springOut = Duration(milliseconds: 350);
+
+  /// In dp, for a release at [speed] dp per second.
+  static double of(double speed) =>
+      amount * (0.2 + 0.8 * unit(speed / (3000 * 0.5)));
+}
+
+/// [second] over [first]'s progress.
+class ChainedCurve extends Curve {
+  const ChainedCurve(this.first, this.second);
+
+  final Curve first;
+  final Curve second;
+
+  @override
+  double transformInternal(double t) =>
+      second.transform(first.transform(t).clamp(0.0, 1.0));
 }
 
 /// [AospShadeInterpolation.blurFraction] of a shade's panel fraction and its

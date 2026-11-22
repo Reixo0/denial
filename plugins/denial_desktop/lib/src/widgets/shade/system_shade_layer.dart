@@ -97,7 +97,7 @@ class _SystemShadeLayerState extends ConsumerState<SystemShadeLayer>
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
     _expansion
-      ..panelTravel = ReferenceShellMetrics.quickSettingsPanelExtent(size)
+      ..screenTravel = ReferenceShellMetrics.quickSettingsPanelExtent(size)
       ..dp = PixelShadeViewport.scaleFor(size)
       ..reduceMotion = MediaQuery.disableAnimationsOf(context);
     final closed = ref.watch(

@@ -44,6 +44,7 @@ class NotificationShadeList extends SliverList {
     this.topPadding = 0,
     this.opaqueRows = false,
     this.onRowsMoved,
+    this.onExtent,
     super.key,
   });
 
@@ -62,6 +63,10 @@ class NotificationShadeList extends SliverList {
   /// after a layout, and for a descendant transform such as a dismissal.
   /// Retained glass slices in the rows follow through it.
   final VoidCallback? onRowsMoved;
+
+  /// Told after a layout where the rows end, from the list's top: its
+  /// bottom when more than fit.
+  final ValueChanged<double>? onExtent;
 
   /// Descendant paint transforms (for example a sideways dismissal) also move
   /// the silhouette, even when a retained row does not repaint this sliver.
@@ -97,7 +102,8 @@ class NotificationShadeList extends SliverList {
         )
         ..topPadding = topPadding
         ..opaqueRows = opaqueRows
-        ..onRowsMoved = onRowsMoved;
+        ..onRowsMoved = onRowsMoved
+        ..onExtent = onExtent;
 
   @override
   void updateRenderObject(
@@ -109,7 +115,8 @@ class NotificationShadeList extends SliverList {
       ..entrance = entrance
       ..topPadding = topPadding
       ..opaqueRows = opaqueRows
-      ..onRowsMoved = onRowsMoved;
+      ..onRowsMoved = onRowsMoved
+      ..onExtent = onExtent;
   }
 }
 
@@ -123,6 +130,7 @@ class _RenderNotificationShadeList extends RenderSliverList {
   Animation<double> _progress;
   Animation<double> _entrance;
   VoidCallback? onRowsMoved;
+  ValueChanged<double>? onExtent;
   bool _opaqueRows = false;
   set opaqueRows(bool value) {
     if (value == _opaqueRows) return;
@@ -156,6 +164,12 @@ class _RenderNotificationShadeList extends RenderSliverList {
       _clips.remove(child)!.layer = null;
     }
     _cachedRows = null;
+    onExtent?.call(
+      math.min(
+        constraints.viewportMainAxisExtent,
+        _topPadding + (geometry?.scrollExtent ?? 0),
+      ),
+    );
     onRowsMoved?.call();
   }
 
