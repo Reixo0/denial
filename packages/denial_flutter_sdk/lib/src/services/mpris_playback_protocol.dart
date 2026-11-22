@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:collection/collection.dart';
 import 'package:dbus/dbus.dart';
 
@@ -39,11 +41,31 @@ List<MprisCustomAction> parseMprisCustomActions(DBusValue? value) {
       MprisCustomAction(
         id: id.value,
         label: normalizeBoundedText(label.value, 128),
-        icon: pixels.length == 48 * 48 * 4 ? pixels : const <int>[],
+        icon: _squareIcon(pixels, 96) ? pixels : const <int>[],
       ),
     );
   }
   return List.unmodifiable(actions);
+}
+
+/// RGBA pixels forming a square of at most [max] px a side.
+bool _squareIcon(List<int> pixels, int max) {
+  if (pixels.isEmpty || pixels.length % 4 != 0) return false;
+  final side = math.sqrt(pixels.length ~/ 4).round();
+  return side >= 1 && side <= max && side * side * 4 == pixels.length;
+}
+
+/// The app's small icon from that interface's `Icon` property (ay): 48 px
+/// RGBA, white on clear.
+List<int> parseMprisAppIcon(DBusValue? value) {
+  if (value is! DBusArray) return const <int>[];
+  final pixels = value.children
+      .whereType<DBusByte>()
+      .map((b) => b.value)
+      .toList(growable: false);
+  return pixels.length == 48 * 48 * 4 || pixels.length == 96 * 96 * 4
+      ? pixels
+      : const <int>[];
 }
 
 MprisPlaybackState? parseMprisPlaybackState(
@@ -192,6 +214,7 @@ MprisPlaybackState? applyMprisPlayerProperties(
     trackId: trackId,
     canSeek: canSeek,
     actions: current.actions,
+    appIcon: current.appIcon,
   );
 }
 

@@ -5,7 +5,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart'
-    show ColorScheme, DynamicSchemeVariant, Icons;
+    show AnimatedIcon, AnimatedIcons, ColorScheme, DynamicSchemeVariant, Icons;
 import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -141,9 +141,6 @@ class _MediaColors {
 
 class _PixelMediaCardState extends ConsumerState<PixelMediaCard>
     with SingleTickerProviderStateMixin {
-  /// The art's blur while playing, in dp.
-  static const double _playingBlur = 12;
-
   // A ticker, not a timer: it stops while the shade is closed (TickerMode).
   late final Ticker _tick = createTicker(_onTick);
   Duration _shown = Duration.zero;
@@ -153,6 +150,18 @@ class _PixelMediaCardState extends ConsumerState<PixelMediaCard>
 
   /// A seek drag in progress, as a fraction of the track.
   double? _seeking;
+
+  final _cardKey = GlobalKey();
+  final _ripples = GlobalKey<_CardRipplesState>();
+
+  /// AOSP plays a touch ripple from every button the user taps.
+  void _rippleFrom(BuildContext button) {
+    final box = button.findRenderObject();
+    final card = _cardKey.currentContext?.findRenderObject();
+    if (box is! RenderBox || card is! RenderBox) return;
+    final centre = box.localToGlobal(box.size.center(Offset.zero));
+    _ripples.currentState?.play(card.globalToLocal(centre));
+  }
 
   @override
   void dispose() {
@@ -246,6 +255,7 @@ class _PixelMediaCardState extends ConsumerState<PixelMediaCard>
       final action = customs.removeAt(0);
       return _MediaButton(
         tooltip: action.label,
+        ripple: _rippleFrom,
         onTap: () => unawaited(service.invokeAction(action.id)),
         child: _ActionIcon(pixels: action.icon),
       );
@@ -254,6 +264,7 @@ class _PixelMediaCardState extends ConsumerState<PixelMediaCard>
     final previous = live && playback.canGoPrevious
         ? _MediaButton(
             tooltip: 'Previous',
+            ripple: _rippleFrom,
             onTap: () => unawaited(service.previous()),
             child: const Icon(
               Icons.skip_previous_rounded,
@@ -265,6 +276,7 @@ class _PixelMediaCardState extends ConsumerState<PixelMediaCard>
     final next = live && playback.canGoNext
         ? _MediaButton(
             tooltip: 'Next',
+            ripple: _rippleFrom,
             onTap: () => unawaited(service.next()),
             child: const Icon(
               Icons.skip_next_rounded,
@@ -284,35 +296,28 @@ class _PixelMediaCardState extends ConsumerState<PixelMediaCard>
       child: ClipRRect(
         borderRadius: BorderRadius.circular(28),
         child: SizedBox(
+          key: _cardKey,
           height: PixelMediaCard.height,
           child: Stack(
             fit: StackFit.expand,
             children: <Widget>[
-              if (art != null)
-                // EvolutionX blurs the art while the player plays.
-                TweenAnimationBuilder<double>(
-                  tween: Tween<double>(
-                    end: live && playback.playing ? _playingBlur : 0,
-                  ),
-                  duration: const Duration(milliseconds: 400),
-                  curve: Curves.fastOutSlowIn,
-                  builder: (context, sigma, child) => sigma < 0.1
-                      ? child!
-                      : ImageFiltered(
-                          imageFilter: ui.ImageFilter.blur(
-                            sigmaX: sigma,
-                            sigmaY: sigma,
-                            tileMode: TileMode.clamp,
-                          ),
-                          child: child,
-                        ),
-                  child: Image(
-                    image: art,
-                    fit: BoxFit.cover,
-                    gaplessPlayback: true,
-                    errorBuilder: (_, _, _) => const SizedBox.shrink(),
-                  ),
+              // AOSP cross-fades a new artwork (TransitionDrawable, 333 ms).
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 333),
+                layoutBuilder: (current, previous) => Stack(
+                  fit: StackFit.expand,
+                  children: <Widget>[...previous, ?current],
                 ),
+                child: art == null
+                    ? const SizedBox.expand(key: ValueKey<String>(''))
+                    : Image(
+                        key: ValueKey<String>(_artUrl),
+                        image: art,
+                        fit: BoxFit.cover,
+                        gaplessPlayback: true,
+                        errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                      ),
+              ),
               // AOSP: a radial scrim of the scheme's onSurface over the art.
               AnimatedContainer(
                 duration: const Duration(milliseconds: 333),
@@ -329,12 +334,13 @@ class _PixelMediaCardState extends ConsumerState<PixelMediaCard>
                         ),
                 ),
               ),
+              _CardRipples(key: _ripples, color: colors.button),
               Positioned(
                 left: 16,
                 top: 16,
                 width: 24,
                 height: 24,
-                child: _PlayerIcon(playback: playback),
+                child: _PlayerIcon(playback: playback, colors: colors),
               ),
               Positioned(
                 right: 16,
@@ -346,33 +352,9 @@ class _PixelMediaCardState extends ConsumerState<PixelMediaCard>
                 left: 16,
                 right: 16 + 23 + 58,
                 top: 78,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      playback.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontFamily: 'Google Sans',
-                        fontSize: 16,
-                        height: 1.5,
-                        fontWeight: FontWeight.w500,
-                        color: Color(0xFFFFFFFF),
-                      ),
-                    ),
-                    Text(
-                      playback.artistLabel,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontFamily: 'Google Sans',
-                        fontSize: 14,
-                        height: 1.43,
-                        color: Color(0xFFFFFFFF),
-                      ),
-                    ),
-                  ],
+                child: _SongText(
+                  title: playback.title,
+                  artist: playback.artistLabel,
                 ),
               ),
               Positioned(
@@ -380,15 +362,20 @@ class _PixelMediaCardState extends ConsumerState<PixelMediaCard>
                 top: 75,
                 width: 58,
                 height: 40,
-                child: _PlayPill(
-                  playing: playback.playing,
-                  colors: colors,
-                  // A player that is gone resumes in its app.
-                  onTap: live
-                      ? () => unawaited(service.playPause())
-                      : playback.desktopEntry.isEmpty
-                      ? () {}
-                      : _open,
+                child: Builder(
+                  builder: (pill) => _PlayPill(
+                    playing: playback.playing,
+                    colors: colors,
+                    // A player that is gone resumes in its app.
+                    onTap: live
+                        ? () {
+                            _rippleFrom(pill);
+                            unawaited(service.playPause());
+                          }
+                        : playback.desktopEntry.isEmpty
+                        ? () {}
+                        : _open,
+                  ),
                 ),
               ),
               Positioned(
@@ -436,14 +423,23 @@ class _PixelMediaCardState extends ConsumerState<PixelMediaCard>
   }
 }
 
-/// The player's app icon, from its desktop entry.
+/// The player's app icon: Android shows the app's small icon (white on
+/// clear) tinted with the player's colour; without one, the desktop entry's.
 class _PlayerIcon extends ConsumerWidget {
-  const _PlayerIcon({required this.playback});
+  const _PlayerIcon({required this.playback, required this.colors});
 
   final MprisPlaybackState playback;
+  final _MediaColors colors;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    if (playback.appIcon.isNotEmpty) {
+      return _ActionIcon(
+        pixels: playback.appIcon,
+        color: colors.button,
+        size: 24,
+      );
+    }
     if (playback.desktopEntry.isEmpty && playback.identity.isEmpty) {
       return const SizedBox.shrink();
     }
@@ -496,8 +492,16 @@ class _OutputChip extends StatelessWidget {
   }
 }
 
-/// Play/pause: a pill while paused, a rounded square while playing.
-class _PlayPill extends StatelessWidget {
+/// Android's accelerate-decelerate interpolator (an animator's default).
+double _accelerateDecelerate(double t) =>
+    math.cos((t.clamp(0.0, 1.0) + 1) * math.pi) / 2 + 0.5;
+
+/// Play/pause: a pill while paused, a rounded square while playing. On a
+/// change AOSP's button containers (ic_media_play_button_container and
+/// ic_media_pause_button_container) swell by a ninth over 167 ms and settle
+/// over 333 ms while the corners morph; the icon morphs between play and
+/// pause over 333 ms (ic_media_play_button).
+class _PlayPill extends StatefulWidget {
   const _PlayPill({
     required this.playing,
     required this.colors,
@@ -509,29 +513,204 @@ class _PlayPill extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
+  State<_PlayPill> createState() => _PlayPillState();
+}
+
+class _PlayPillState extends State<_PlayPill> with TickerProviderStateMixin {
+  static const _swell = 1.17758 / 1.05905;
+  static const double _pill = 20;
+  static const double _square = 14;
+
+  late final AnimationController _container = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 500),
+    value: 1,
+  );
+  late final AnimationController _icon = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 333),
+    value: widget.playing ? 1 : 0,
+  );
+
+  @override
+  void didUpdateWidget(_PlayPill old) {
+    super.didUpdateWidget(old);
+    if (old.playing == widget.playing) return;
+    _container.forward(from: 0);
+    _icon.animateTo(widget.playing ? 1 : 0, curve: const Cubic(0.433, 0, 0, 1));
+  }
+
+  @override
+  void dispose() {
+    _container.dispose();
+    _icon.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final playing = widget.playing;
     return Semantics(
       button: true,
       label: playing ? 'Pause' : 'Play',
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.fastOutSlowIn,
-          decoration: BoxDecoration(
-            color: colors.button,
-            borderRadius: BorderRadius.circular(playing ? 14 : 20),
-          ),
+        onTap: widget.onTap,
+        child: AnimatedBuilder(
+          animation: _container,
+          builder: (context, icon) {
+            final ms = _container.value * 500;
+            final scale = ms < 167
+                ? 1 +
+                      (_swell - 1) *
+                          const Cubic(0.226, 0, 0.667, 1).transform(ms / 167)
+                : _swell +
+                      (1 - _swell) *
+                          const Cubic(
+                            0.213,
+                            0,
+                            0.248,
+                            1,
+                          ).transform((ms - 167) / 333);
+            // The corners morph after a short hold: 167 ms into a pause
+            // button, 133 ms into a play button.
+            final start = playing ? 167.0 : 133.0;
+            final shape =
+                (playing
+                        ? const Cubic(0.493, 0, 0, 1)
+                        : const Cubic(0.473, 0, 0.065, 1))
+                    .transform(((ms - start) / (500 - start)).clamp(0.0, 1.0));
+            final from = playing ? _pill : _square;
+            final to = playing ? _square : _pill;
+            return Transform.scale(
+              scale: scale,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: widget.colors.button,
+                  borderRadius: BorderRadius.circular(
+                    from + (to - from) * shape,
+                  ),
+                ),
+                child: icon,
+              ),
+            );
+          },
           child: Center(
-            child: Icon(
-              playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+            child: AnimatedIcon(
+              icon: AnimatedIcons.play_pause,
+              progress: _icon,
               size: 24,
-              color: colors.onButton,
+              color: widget.colors.onButton,
             ),
           ),
         ),
       ),
+    );
+  }
+}
+
+/// The title and artist. A new song slides them as AOSP's metadata
+/// animations do: out 32 dp to the left (167 ms, fading over its second
+/// half), then in from 32 dp to the right (600 ms, fading in over 167 ms).
+class _SongText extends StatefulWidget {
+  const _SongText({required this.title, required this.artist});
+
+  final String title;
+  final String artist;
+
+  @override
+  State<_SongText> createState() => _SongTextState();
+}
+
+class _SongTextState extends State<_SongText>
+    with SingleTickerProviderStateMixin {
+  static const double _exit = 167;
+  static const double _enter = 600;
+
+  late final AnimationController _change = AnimationController(
+    vsync: this,
+    duration: Duration(milliseconds: (_exit + _enter).round()),
+    value: 1,
+  )..addListener(_swapWhenOut);
+  late String _title = widget.title;
+  late String _artist = widget.artist;
+
+  @override
+  void didUpdateWidget(_SongText old) {
+    super.didUpdateWidget(old);
+    if (widget.title == _title && widget.artist == _artist) return;
+    // A change while sliding out only swaps the text it will show.
+    if (_change.isAnimating && _change.value * (_exit + _enter) < _exit) {
+      return;
+    }
+    _change.forward(from: 0);
+  }
+
+  void _swapWhenOut() {
+    if (_change.value * (_exit + _enter) < _exit) return;
+    if (widget.title == _title && widget.artist == _artist) return;
+    setState(() {
+      _title = widget.title;
+      _artist = widget.artist;
+    });
+  }
+
+  @override
+  void dispose() {
+    _change.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          _title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontFamily: 'Google Sans',
+            fontSize: 16,
+            height: 1.5,
+            fontWeight: FontWeight.w500,
+            color: Color(0xFFFFFFFF),
+          ),
+        ),
+        Text(
+          _artist,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontFamily: 'Google Sans',
+            fontSize: 14,
+            height: 1.43,
+            color: Color(0xFFFFFFFF),
+          ),
+        ),
+      ],
+    );
+    return AnimatedBuilder(
+      animation: _change,
+      child: text,
+      builder: (context, child) {
+        final ms = _change.value * (_exit + _enter);
+        double dx;
+        double alpha;
+        if (ms < _exit) {
+          dx = -32 * _accelerateDecelerate(ms / _exit);
+          alpha = 1 - ((ms - _exit / 2) / (_exit / 2)).clamp(0.0, 1.0);
+        } else {
+          final t = ms - _exit;
+          dx = 32 * (1 - _accelerateDecelerate(t / _enter));
+          alpha = _accelerateDecelerate(t / _exit);
+        }
+        return Opacity(
+          opacity: alpha,
+          child: Transform.translate(offset: Offset(dx, 0), child: child),
+        );
+      },
     );
   }
 }
@@ -541,11 +720,15 @@ class _MediaButton extends StatelessWidget {
     required this.tooltip,
     required this.onTap,
     required this.child,
+    this.ripple,
   });
 
   final String tooltip;
   final VoidCallback onTap;
   final Widget child;
+
+  /// Plays the card's ripple from this button.
+  final void Function(BuildContext button)? ripple;
 
   @override
   Widget build(BuildContext context) {
@@ -554,26 +737,147 @@ class _MediaButton extends StatelessWidget {
       label: tooltip,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: onTap,
+        onTap: () {
+          ripple?.call(context);
+          onTap();
+        },
         child: SizedBox(width: 48, height: 48, child: Center(child: child)),
       ),
     );
   }
 }
 
-/// An app's own button icon: 48 px RGBA, drawn white at 24 dp.
+/// AOSP's media touch ripple (MultiRippleController with a circle
+/// RippleShader, 1.5 s, at most 10 at once): a soft disc of the button
+/// colour at 100/255 opacity grows from the tapped button over the whole
+/// card. Timing measured on EvolutionX: the front crosses the card in about
+/// 0.12 s, holds about 0.1 s, fades out by 0.45 s with a faint tail to 1.5 s.
+class _CardRipples extends StatefulWidget {
+  const _CardRipples({super.key, required this.color});
+
+  final Color color;
+
+  @override
+  State<_CardRipples> createState() => _CardRipplesState();
+}
+
+class _CardRipplesState extends State<_CardRipples>
+    with TickerProviderStateMixin {
+  final _ripples = <({Offset centre, AnimationController time})>[];
+
+  void play(Offset centre) {
+    if (_ripples.length >= 10) return;
+    final time = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    );
+    final ripple = (centre: centre, time: time);
+    setState(() => _ripples.add(ripple));
+    time.forward().whenComplete(() {
+      time.dispose();
+      if (mounted) setState(() => _ripples.remove(ripple));
+    });
+  }
+
+  @override
+  void dispose() {
+    for (final ripple in _ripples) {
+      ripple.time.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_ripples.isEmpty) return const SizedBox.shrink();
+    return IgnorePointer(
+      child: CustomPaint(
+        size: Size.infinite,
+        painter: _RipplePainter(
+          ripples: List.of(_ripples),
+          color: widget.color,
+          repaint: Listenable.merge(<Listenable>[
+            for (final ripple in _ripples) ripple.time,
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+class _RipplePainter extends CustomPainter {
+  _RipplePainter({
+    required this.ripples,
+    required this.color,
+    required Listenable repaint,
+  }) : super(repaint: repaint);
+
+  final List<({Offset centre, AnimationController time})> ripples;
+  final Color color;
+
+  /// Opacity over the ripple's 1.5 s, in seconds since the tap.
+  static double _opacity(double seconds) {
+    const peak = 100 / 255;
+    if (seconds < 0.12) return peak;
+    if (seconds < 0.45) {
+      return peak +
+          (peak * 0.15 - peak) *
+              Curves.easeOut.transform((seconds - 0.12) / 0.33);
+    }
+    return peak * 0.15 * (1 - (seconds - 0.45) / 1.05).clamp(0.0, 1.0);
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint();
+    for (final ripple in ripples) {
+      final seconds = ripple.time.value * 1.5;
+      final radius =
+          size.width *
+          1.3 *
+          Curves.easeOutCubic.transform((seconds / 0.2).clamp(0.0, 1.0));
+      final alpha = _opacity(seconds);
+      if (radius <= 0 || alpha <= 0) continue;
+      final c = color.withValues(alpha: alpha);
+      paint.shader = RadialGradient(
+        colors: <Color>[c, c, c.withValues(alpha: 0)],
+        stops: const <double>[0, 0.7, 1],
+      ).createShader(Rect.fromCircle(center: ripple.centre, radius: radius));
+      canvas.drawCircle(ripple.centre, radius, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_RipplePainter old) => true;
+}
+
+/// An app's icon from Droidloom: square RGBA at 2 px per dp (its own
+/// size), drawn in one colour (white for the app's buttons).
 class _ActionIcon extends StatefulWidget {
-  const _ActionIcon({required this.pixels});
+  const _ActionIcon({
+    required this.pixels,
+    this.color = const Color(0xFFFFFFFF),
+    this.size,
+  });
 
   final List<int> pixels;
+  final Color color;
+
+  /// A fixed size in dp; by default the icon's own (its side / 2).
+  final double? size;
 
   @override
   State<_ActionIcon> createState() => _ActionIconState();
 }
 
 class _ActionIconState extends State<_ActionIcon> {
-  static const int _size = 48;
   ui.Image? _image;
+
+  int get _side {
+    final pixels = widget.pixels.length ~/ 4;
+    final side = math.sqrt(pixels).round();
+    return side * side == pixels && widget.pixels.length % 4 == 0 ? side : 0;
+  }
 
   @override
   void initState() {
@@ -589,14 +893,15 @@ class _ActionIconState extends State<_ActionIcon> {
 
   void _decode() {
     final pixels = widget.pixels;
-    if (pixels.length != _size * _size * 4) {
+    final side = _side;
+    if (side == 0) {
       _swap(null);
       return;
     }
     ui.decodeImageFromPixels(
       pixels is Uint8List ? pixels : Uint8List.fromList(pixels),
-      _size,
-      _size,
+      side,
+      side,
       ui.PixelFormat.rgba8888,
       (image) {
         if (!mounted || !identical(pixels, widget.pixels)) {
@@ -623,13 +928,14 @@ class _ActionIconState extends State<_ActionIcon> {
   @override
   Widget build(BuildContext context) {
     final image = _image;
-    if (image == null) return const SizedBox(width: 24, height: 24);
+    final size = widget.size ?? (_side == 0 ? 24.0 : _side / 2);
+    if (image == null) return SizedBox(width: size, height: size);
     return ColorFiltered(
-      colorFilter: const ColorFilter.mode(Color(0xFFFFFFFF), BlendMode.srcIn),
+      colorFilter: ColorFilter.mode(widget.color, BlendMode.srcIn),
       child: RawImage(
         image: image,
-        width: 24,
-        height: 24,
+        width: size,
+        height: size,
         filterQuality: FilterQuality.medium,
       ),
     );
@@ -664,63 +970,50 @@ class _SeekBar extends StatefulWidget {
 
 class _SeekBarState extends State<_SeekBar>
     with SingleTickerProviderStateMixin {
-  static const double _track = 6;
-  static const double _waveLength = 20 * _track / 2;
-  static const double _amplitude = 1.5 * _track / 2;
-  static const double _phaseSpeed = 8 * _track / 2;
+  /// EvolutionX's WaveformSeekBar: a full turn of the wave every 3.5 s,
+  /// its height eased in or out over 300 ms when playback starts or stops.
+  static const _turn = Duration(milliseconds: 3500);
+  static const _fade = Duration(milliseconds: 300);
 
   late final Ticker _ticker = createTicker(_onTick);
+  Duration _now = Duration.zero;
   Duration _last = Duration.zero;
   double _phase = 0;
   double _height = 0;
   double _heightFrom = 0;
   double _heightTo = 0;
   Duration _heightStart = Duration.zero;
-  Duration _now = Duration.zero;
   double _drag = 0;
 
   @override
   void initState() {
     super.initState();
-    _height = widget.playing ? 1 : 0;
-    _heightFrom = _heightTo = _height;
+    _height = _heightFrom = _heightTo = widget.playing ? 1 : 0;
     if (widget.playing) _ticker.start();
   }
 
   @override
   void didUpdateWidget(_SeekBar old) {
     super.didUpdateWidget(old);
-    if (old.playing != widget.playing) {
-      _heightFrom = _height;
-      _heightTo = widget.playing ? 1 : 0;
-      _heightStart = _now;
-      if (!_ticker.isActive) {
-        _last = Duration.zero;
-        _now = Duration.zero;
-        _heightStart = Duration.zero;
-        _ticker.start();
-      }
+    if (old.playing == widget.playing) return;
+    _heightFrom = _height;
+    _heightTo = widget.playing ? 1 : 0;
+    if (!_ticker.isActive) {
+      _now = _last = Duration.zero;
+      _ticker.start();
     }
+    _heightStart = _now;
   }
 
   void _onTick(Duration elapsed) {
-    final dt = (elapsed - _last).inMicroseconds / 1e6;
-    _last = elapsed;
-    _now = elapsed;
-    if (widget.playing) {
-      _phase = (_phase + dt * _phaseSpeed) % _waveLength;
-    }
-    final growing = _heightTo > _heightFrom;
-    final delay = growing ? 60 : 0;
-    final span = growing ? 800 : 550;
-    final t = ((elapsed - _heightStart).inMilliseconds - delay) / span;
-    final curve = growing
-        ? Curves
-              .easeOutQuint // emphasized decelerate
-        : Curves.decelerate; // standard decelerate
-    _height =
-        _heightFrom +
-        (_heightTo - _heightFrom) * curve.transform(t.clamp(0.0, 1.0));
+    final dt = (elapsed - _last).inMicroseconds / _turn.inMicroseconds;
+    _last = _now = elapsed;
+    if (widget.playing) _phase = (_phase + dt * 2 * math.pi) % (2 * math.pi);
+    final t = ((elapsed - _heightStart).inMicroseconds / _fade.inMicroseconds)
+        .clamp(0.0, 1.0);
+    // ValueAnimator's default interpolator: accelerate-decelerate.
+    final eased = (math.cos((t + 1) * math.pi) / 2) + 0.5;
+    _height = _heightFrom + (_heightTo - _heightFrom) * eased;
     setState(() {});
     if (!widget.playing && t >= 1) _ticker.stop();
   }
@@ -753,13 +1046,10 @@ class _SeekBarState extends State<_SeekBar>
             size: Size(width, 48),
             painter: _SeekPainter(
               fraction: widget.fraction,
-              active: widget.colors.button,
+              color: widget.colors.button,
               thumb: enabled,
               phase: _phase,
               height: _height,
-              track: _track,
-              waveLength: _waveLength,
-              amplitude: _amplitude,
             ),
           ),
         );
@@ -768,90 +1058,139 @@ class _SeekBarState extends State<_SeekBar>
   }
 }
 
+/// EvolutionX's WaveformSeekBar, in dp: a 6 dp track in the media colour at
+/// 30 %; the played part in the colour with its top edge raised by a sine
+/// wave (80 dp long, up to 12 dp high) that tapers to the track over 0.4 of
+/// a wave at both ends; a white 8 dp thumb with a soft shadow.
 class _SeekPainter extends CustomPainter {
   const _SeekPainter({
     required this.fraction,
-    required this.active,
+    required this.color,
     required this.thumb,
     required this.phase,
     required this.height,
-    required this.track,
-    required this.waveLength,
-    required this.amplitude,
   });
 
   final double fraction;
-  final Color active;
+  final Color color;
   final bool thumb;
   final double phase;
+
+  /// The wave's height, 0 (flat, paused) to 1 (playing).
   final double height;
-  final double track;
-  final double waveLength;
-  final double amplitude;
+
+  static const double _track = 6;
+  static const double _corner = 8;
+  static const double _waveHeight = 12;
+  static const double _waveLength = 80;
+  static const double _thumb = 8;
+
+  /// The wave's top edge over [x], from [start] to the played end [end].
+  double _waveY(double x, double start, double end, double top, double amp) {
+    final span = end - start;
+    if (span <= 0) return top;
+    final from = x - start;
+    final wave = (math.sin(from / _waveLength * 2 * math.pi + phase) + 1) / 2;
+    const ramp = _waveLength * 0.4;
+    double taper;
+    if (span < ramp * 2) {
+      final t = from / span;
+      taper = 4 * t * (1 - t);
+    } else if (from < ramp) {
+      final t = from / ramp;
+      taper = t * t * (3 - 2 * t);
+    } else if (end - x < ramp) {
+      final t = (end - x) / ramp;
+      taper = t * t * (3 - 2 * t);
+    } else {
+      taper = 1;
+    }
+    return top - wave * _waveHeight * taper.clamp(0.0, 1.0) * height * amp;
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
-    final y = size.height / 2;
+    final centre = size.height / 2;
+    final top = centre - _track / 2;
+    final bottom = centre + _track / 2;
     final width = size.width;
     final x = width * fraction;
-    final rest = Paint()
-      ..color = const Color(0x4DFFFFFF)
-      ..strokeWidth = track
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
-    final played = Paint()
-      ..color = active
-      ..strokeWidth = track
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
-    // The rest of the track, flat.
-    if (x < width - track / 2) {
-      canvas.drawLine(
-        Offset(math.max(x, track / 2), y),
-        Offset(width - track / 2, y),
-        rest,
-      );
-    }
-    if (x > 0) {
-      final amp = amplitude * height;
-      if (amp < 0.05) {
-        canvas.drawLine(
-          Offset(track / 2, y),
-          Offset(math.max(track / 2, x), y),
-          played,
-        );
-      } else {
-        // AOSP: a wave of half-wavelength cubic segments, starting before
-        // the bar and moving right; the bar's start keeps a round cap.
-        final path = Path();
-        var cx = -phase - waveLength / 2;
-        var sign = 1.0;
-        path.moveTo(cx, y + sign * amp);
-        while (cx < x) {
-          sign = -sign;
-          final nx = cx + waveLength / 2;
-          final mx = cx + waveLength / 4;
-          path.cubicTo(
-            mx,
-            y - sign * amp,
-            mx,
-            y + sign * amp,
-            nx,
-            y + sign * amp,
-          );
-          cx = nx;
+    canvas.drawRRect(
+      RRect.fromLTRBR(0, top, width, bottom, const Radius.circular(_corner)),
+      Paint()..color = color.withAlpha(77),
+    );
+    final played = Paint()..color = color;
+    if (x > 0 && height > 0.01) {
+      // Short progress keeps a lower wave (0.3 to 1 over 0.8 of a wave).
+      final amp =
+          (math.sqrt((x / (_waveLength * 0.8)).clamp(0.0, 1.0)) * 0.7 + 0.3)
+              .clamp(0.3, 1.0);
+      final r = math.min(_track / 2, _corner);
+      final start = r;
+      final path = Path()
+        ..moveTo(start, bottom)
+        ..arcTo(
+          Rect.fromLTRB(0, top, r * 2, bottom),
+          math.pi / 2,
+          math.pi / 2,
+          false,
+        )
+        ..quadraticBezierTo(0, top, start, _waveY(start, start, x, top, amp));
+      if (x > start) {
+        // Points every 2 dp, joined by a Catmull-Rom spline.
+        final points = <Offset>[
+          for (var px = start; px <= x; px += 2)
+            Offset(px, _waveY(px, start, x, top, amp)),
+        ];
+        if (points.isEmpty || points.last.dx < x) {
+          points.add(Offset(x, _waveY(x, start, x, top, amp)));
         }
-        canvas.save();
-        canvas.clipRect(Rect.fromLTRB(0, 0, x, size.height));
-        canvas.translate(track / 2, 0);
-        canvas.drawPath(path, played);
-        canvas.restore();
+        if (points.length < 2) {
+          path.lineTo(x, top);
+        } else {
+          for (var i = 0; i < points.length - 1; i++) {
+            final p0 = points[i > 0 ? i - 1 : i];
+            final p1 = points[i];
+            final p2 = points[i + 1];
+            final p3 = points[i + 2 < points.length ? i + 2 : i + 1];
+            path.cubicTo(
+              p1.dx + (p2.dx - p0.dx) * 0.5 / 3,
+              p1.dy + (p2.dy - p0.dy) * 0.5 / 3,
+              p2.dx - (p3.dx - p1.dx) * 0.5 / 3,
+              p2.dy - (p3.dy - p1.dy) * 0.5 / 3,
+              p2.dx,
+              p2.dy,
+            );
+          }
+        }
       }
+      path
+        ..lineTo(x, top)
+        ..lineTo(x, bottom)
+        ..close();
+      canvas.drawPath(path, played);
+    } else if (x > 0) {
+      canvas.drawRRect(
+        RRect.fromLTRBR(0, top, x, bottom, const Radius.circular(_corner)),
+        played,
+      );
     }
     if (thumb) {
       canvas.drawCircle(
-        Offset(x.clamp(8.0, math.max(8.0, width - 8)), y),
-        8,
+        Offset(x, centre + 2),
+        _thumb,
+        Paint()..color = const Color(0x3C000000),
+      );
+      canvas.drawShadow(
+        Path()
+          ..addOval(Rect.fromCircle(center: Offset(x, centre), radius: _thumb)),
+        const Color(0x50000000),
+        2,
+        false,
+      );
+      canvas.drawCircle(
+        Offset(x, centre),
+        _thumb,
         Paint()..color = const Color(0xFFFFFFFF),
       );
     }
@@ -860,7 +1199,7 @@ class _SeekPainter extends CustomPainter {
   @override
   bool shouldRepaint(_SeekPainter old) =>
       old.fraction != fraction ||
-      old.active != active ||
+      old.color != color ||
       old.thumb != thumb ||
       old.phase != phase ||
       old.height != height;

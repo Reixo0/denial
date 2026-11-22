@@ -1,10 +1,12 @@
+import 'dart:math' as math;
+
 import 'package:meta/meta.dart';
 
 enum MprisPlaybackStatus { playing, paused, stopped }
 
 /// One of the player's own buttons (an Android app's custom action, from
 /// Droidloom's `org.droidloom.MediaPlayer2.Actions`): its id, its label and
-/// its 48 px RGBA icon, or none.
+/// its square RGBA icon at 2 px per dp (the app's own size), or none.
 @immutable
 class MprisCustomAction {
   const MprisCustomAction({
@@ -16,8 +18,11 @@ class MprisCustomAction {
   final String id;
   final String label;
 
-  /// 48 × 48 RGBA pixels, or empty.
+  /// Square RGBA pixels, 2 per dp (48 × 48 for 24 dp), or empty.
   final List<int> icon;
+
+  /// The icon's side in pixels, 0 without one.
+  int get iconSide => icon.isEmpty ? 0 : math.sqrt(icon.length ~/ 4).round();
 
   @override
   bool operator ==(Object other) =>
@@ -51,6 +56,7 @@ class MprisPlaybackState {
     this.trackId = '',
     this.canSeek = false,
     this.actions = const <MprisCustomAction>[],
+    this.appIcon = const <int>[],
   });
 
   MprisPlaybackState.unavailable()
@@ -71,7 +77,8 @@ class MprisPlaybackState {
       desktopEntry = '',
       trackId = '',
       canSeek = false,
-      actions = const <MprisCustomAction>[];
+      actions = const <MprisCustomAction>[],
+      appIcon = const <int>[];
 
   final String serviceName;
   final String identity;
@@ -97,6 +104,10 @@ class MprisPlaybackState {
   final bool canSeek;
   final List<MprisCustomAction> actions;
 
+  /// The app's small icon, white on clear, 48 × 48 RGBA (Droidloom's
+  /// players), or empty: Android's media player shows it tinted.
+  final List<int> appIcon;
+
   MprisPlaybackState copyWith({
     String? title,
     List<String>? artists,
@@ -114,6 +125,7 @@ class MprisPlaybackState {
     String? trackId,
     bool? canSeek,
     List<MprisCustomAction>? actions,
+    List<int>? appIcon,
   }) => MprisPlaybackState(
     serviceName: serviceName,
     identity: identity,
@@ -133,6 +145,7 @@ class MprisPlaybackState {
     trackId: trackId ?? this.trackId,
     canSeek: canSeek ?? this.canSeek,
     actions: actions ?? this.actions,
+    appIcon: appIcon ?? this.appIcon,
   );
 
   bool get available =>

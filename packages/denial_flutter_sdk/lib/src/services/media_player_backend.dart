@@ -238,8 +238,12 @@ class MediaPlayerService {
             .getAllProperties(mprisActionsInterface)
             .timeout(_readTimeout)
             .then(
-              (properties) => parseMprisCustomActions(properties['Actions']),
-              onError: (Object _) => const <MprisCustomAction>[],
+              (properties) => (
+                actions: parseMprisCustomActions(properties['Actions']),
+                icon: parseMprisAppIcon(properties['Icon']),
+              ),
+              onError: (Object _) =>
+                  (actions: const <MprisCustomAction>[], icon: const <int>[]),
             ),
       ).wait;
       if (_disposed) return null;
@@ -247,7 +251,8 @@ class MediaPlayerService {
         object: object,
         player: player.properties,
         root: root,
-        actions: actions,
+        actions: actions.actions,
+        icon: actions.icon,
         observedAt: player.observedAt,
         changes: changes,
       );
@@ -303,8 +308,14 @@ class MediaPlayerService {
     }
     if (signal.propertiesInterface == mprisActionsInterface) {
       final actions = signal.changedProperties['Actions'];
-      if (actions != null) {
-        _emit(_current.copyWith(actions: parseMprisCustomActions(actions)));
+      final icon = signal.changedProperties['Icon'];
+      if (actions != null || icon != null) {
+        _emit(
+          _current.copyWith(
+            actions: actions == null ? null : parseMprisCustomActions(actions),
+            appIcon: icon == null ? null : parseMprisAppIcon(icon),
+          ),
+        );
       }
       return;
     }
@@ -403,6 +414,7 @@ class const _MprisRead({
   required final Map<String, DBusValue> player,
   required final Map<String, DBusValue> root,
   required final List<MprisCustomAction> actions,
+  required final List<int> icon,
   required final DateTime observedAt,
   required final MprisReadReconciliation? changes,
 }) {
@@ -412,7 +424,8 @@ class const _MprisRead({
       final state = reconciliation == null
           ? parseMprisPlaybackState(object.name, player, root, observedAt)
           : reconciliation.resolve(object.name, player, root, observedAt);
-      return actions.isEmpty ? state : state?.copyWith(actions: actions);
+      if (actions.isEmpty && icon.isEmpty) return state;
+      return state?.copyWith(actions: actions, appIcon: icon);
     } on Object {
       // One malformed player must not discard the other candidates.
       return null;
