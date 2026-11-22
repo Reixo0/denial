@@ -1382,6 +1382,30 @@ class AppLocalizationsEn extends AppLocalizations {
   String get quickSettingsAutoRotate => 'Auto-rotate';
 
   @override
+  String quickSettingsActiveApps(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count apps are active',
+      one: '1 app is active',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get activeAppsTitle => 'Active apps';
+
+  @override
+  String get activeAppsMessage =>
+      'These apps keep running while you are not using them, which can use battery.';
+
+  @override
+  String get activeAppsStop => 'Stop';
+
+  @override
+  String get activeAppsStopped => 'Stopped';
+
+  @override
   String get notificationsClearAllButton => 'Clear all';
 
   @override

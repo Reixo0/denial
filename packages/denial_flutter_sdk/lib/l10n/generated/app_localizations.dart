@@ -2478,6 +2478,36 @@ abstract class AppLocalizations {
   /// **'Auto-rotate'**
   String get quickSettingsAutoRotate;
 
+  /// Chip at the bottom of the full quick settings: how many Android apps run in the foreground.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 app is active} other{{count} apps are active}}'**
+  String quickSettingsActiveApps(int count);
+
+  /// Title of the dialog that lists the active Android apps.
+  ///
+  /// In en, this message translates to:
+  /// **'Active apps'**
+  String get activeAppsTitle;
+
+  /// Text under the title of the dialog that lists the active Android apps.
+  ///
+  /// In en, this message translates to:
+  /// **'These apps keep running while you are not using them, which can use battery.'**
+  String get activeAppsMessage;
+
+  /// Button that stops an active Android app.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop'**
+  String get activeAppsStop;
+
+  /// The stop button of an Android app that was just stopped.
+  ///
+  /// In en, this message translates to:
+  /// **'Stopped'**
+  String get activeAppsStopped;
+
   /// Button under the phone shade's notifications that dismisses them all, as on Android.
   ///
   /// In en, this message translates to:

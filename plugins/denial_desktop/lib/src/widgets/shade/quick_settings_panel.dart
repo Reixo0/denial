@@ -827,9 +827,24 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
                     child: SizedBox(
                       height: 48,
                       child: Center(
-                        child: ShadeActions(
-                          onOpenPower: () => showPowerSessionSurface(ref),
-                          onOpenSettings: _openSettings,
+                        child: Consumer(
+                          builder: (context, ref, _) => ShadeActions(
+                            onOpenPower: () => showPowerSessionSurface(ref),
+                            onOpenSettings: _openSettings,
+                            activeApps: ref.watch(
+                              activeAppsProvider.select(
+                                (apps) => apps.value?.length ?? 0,
+                              ),
+                            ),
+                            onActiveApps: (origin) => showQuickSettingsDialog(
+                              ref,
+                              keyName: 'active-apps',
+                              debugLabel: 'Active apps',
+                              origin: origin,
+                              builder: (close) =>
+                                  QuickSettingsActiveAppsDialog(onClose: close),
+                            ),
+                          ),
                         ),
                       ),
                     ),

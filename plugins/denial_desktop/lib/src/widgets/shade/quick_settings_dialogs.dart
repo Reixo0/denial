@@ -9,9 +9,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:denial_flutter_sdk/localization.dart';
 import 'package:denial_flutter_sdk/motion.dart';
 import 'package:denial_flutter_sdk/popups.dart';
+import 'package:denial_flutter_sdk/rendering.dart' show AppIconImage;
 import 'package:denial_flutter_sdk/state.dart';
 import 'package:denial_flutter_sdk/system_services.dart';
 
+import '../notification_media.dart'
+    show NotificationIconRequest, notificationIconPathProvider;
 import '../phone_scheme.dart';
 import 'quick_settings_panel.dart' show PixelShadeViewport;
 
@@ -945,4 +948,148 @@ class QuickSettingsBluetoothDialog extends ConsumerWidget {
     if (icon.contains('watch')) return Icons.watch_rounded;
     return Icons.bluetooth_rounded;
   }
+}
+
+// Active apps ----------------------------------------------------------------
+
+/// Android's task manager dialog: the apps that are active, how long, and a
+/// Stop button for those the user may stop. A stopped app stays, marked so,
+/// until the dialog closes.
+class QuickSettingsActiveAppsDialog extends ConsumerStatefulWidget {
+  const QuickSettingsActiveAppsDialog({super.key, required this.onClose});
+
+  final VoidCallback onClose;
+
+  @override
+  ConsumerState<QuickSettingsActiveAppsDialog> createState() =>
+      _QuickSettingsActiveAppsDialogState();
+}
+
+class _QuickSettingsActiveAppsDialogState
+    extends ConsumerState<QuickSettingsActiveAppsDialog> {
+  final Map<String, ActiveApp> _stopped = <String, ActiveApp>{};
+
+  String _since(BuildContext context, DateTime since) {
+    final l10n = context.l10n;
+    final time = DateTime.now().difference(since);
+    if (time.inMinutes < 1) return l10n.notificationTimeNow;
+    if (time.inHours < 1) return l10n.notificationTimeMinutes(time.inMinutes);
+    if (time.inDays < 1) return l10n.notificationTimeHours(time.inHours);
+    return l10n.notificationTimeDays(time.inDays);
+  }
+
+  void _stop(ActiveApp app) {
+    setState(() => _stopped[app.package] = app);
+    unawaited(ref.read(activeAppsServiceProvider).stop(app.package));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final scheme = phoneSchemeOf(context);
+    final active = ref.watch(activeAppsProvider).value ?? const <ActiveApp>[];
+    final listed = <String, ActiveApp>{
+      ..._stopped,
+      for (final app in active) app.package: app,
+    };
+    final apps = listed.values.toList()
+      ..sort((a, b) => b.since.compareTo(a.since));
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _DialogHeader(
+          title: l10n.activeAppsTitle,
+          subtitle: l10n.activeAppsMessage,
+          busy: false,
+        ),
+        _DialogBody(
+          children: <Widget>[
+            for (final app in apps)
+              _ItemRow(
+                leading: SizedBox.square(
+                  dimension: 28,
+                  child: _ActiveAppIcon(app: app),
+                ),
+                title: app.label,
+                subtitle: _since(context, app.since),
+                onTap: null,
+                trailing: !app.stoppable
+                    ? null
+                    : _TextAction(
+                        label: _stopped.containsKey(app.package)
+                            ? l10n.activeAppsStopped
+                            : l10n.activeAppsStop,
+                        color: scheme.primary,
+                        onTap: _stopped.containsKey(app.package)
+                            ? null
+                            : () => _stop(app),
+                      ),
+              ),
+          ],
+        ),
+        _DialogButtons(onDone: widget.onClose),
+      ],
+    );
+  }
+}
+
+class _ActiveAppIcon extends ConsumerWidget {
+  const _ActiveAppIcon({required this.app});
+
+  final ActiveApp app;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final path = ref.watch(
+      notificationIconPathProvider(
+        NotificationIconRequest(
+          appIcon: '',
+          desktopEntry: app.desktopEntry,
+          appName: app.label,
+        ),
+      ),
+    );
+    return AppIconImage(iconPath: path.value);
+  }
+}
+
+/// A row's text button.
+class _TextAction extends StatelessWidget {
+  const _TextAction({
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  final String label;
+  final Color color;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    enabled: onTap != null,
+    child: GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 64, minHeight: 48),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Center(
+            widthFactor: 1,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: onTap == null ? color.withValues(alpha: 0.38) : color,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 }

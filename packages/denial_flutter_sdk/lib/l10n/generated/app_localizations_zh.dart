@@ -1337,6 +1337,28 @@ class AppLocalizationsZh extends AppLocalizations {
   String get quickSettingsAutoRotate => '自动旋转';
 
   @override
+  String quickSettingsActiveApps(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count 个应用正在运行',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get activeAppsTitle => '活跃应用';
+
+  @override
+  String get activeAppsMessage => '这些应用在您不使用时仍在运行，可能会消耗电量。';
+
+  @override
+  String get activeAppsStop => '停止';
+
+  @override
+  String get activeAppsStopped => '已停止';
+
+  @override
   String get notificationsClearAllButton => '全部清除';
 
   @override

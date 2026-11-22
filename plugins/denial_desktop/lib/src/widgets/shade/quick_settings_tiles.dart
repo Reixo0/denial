@@ -541,22 +541,34 @@ class ShadeActions extends StatelessWidget {
     super.key,
     required this.onOpenPower,
     this.onOpenSettings,
+    this.activeApps = 0,
+    this.onActiveApps,
   });
 
   final VoidCallback onOpenPower;
   final VoidCallback? onOpenSettings;
+
+  /// How many apps Android calls active, and what a tap on that does, given
+  /// where the chip is on the screen.
+  final int activeApps;
+  final ValueChanged<Rect>? onActiveApps;
 
   @override
   Widget build(BuildContext context) {
     final scheme = phoneSchemeOf(context);
     final l10n = context.l10n;
     return Row(
-      mainAxisSize: MainAxisSize.min,
       children: <Widget>[
+        Expanded(
+          child: activeApps > 0
+              ? _ActiveAppsChip(count: activeApps, onTap: onActiveApps)
+              : const SizedBox.shrink(),
+        ),
+        const SizedBox(width: 8),
         _RoundButton(
           label: l10n.settingsApplicationTitle,
           icon: Icons.settings_rounded,
-          color: scheme.surfaceContainerHigh,
+          color: scheme.surfaceEffect1,
           iconColor: scheme.onSurface,
           onPressed: onOpenSettings,
         ),
@@ -569,6 +581,93 @@ class ShadeActions extends StatelessWidget {
           onPressed: onOpenPower,
         ),
       ],
+    );
+  }
+}
+
+/// AOSP's foreground services button (FooterActions' TextButton): 40 dp tall,
+/// 20 dp inside, the icon and the chevron 20 dp.
+class _ActiveAppsChip extends StatefulWidget {
+  const _ActiveAppsChip({required this.count, this.onTap});
+
+  final int count;
+  final ValueChanged<Rect>? onTap;
+
+  @override
+  State<_ActiveAppsChip> createState() => _ActiveAppsChipState();
+}
+
+class _ActiveAppsChipState extends State<_ActiveAppsChip> {
+  bool _pressed = false;
+
+  void _press(bool pressed) {
+    if (_pressed != pressed) setState(() => _pressed = pressed);
+  }
+
+  void _tap() {
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return;
+    widget.onTap?.call(
+      Rect.fromPoints(
+        box.localToGlobal(Offset.zero),
+        box.localToGlobal(box.size.bottomRight(Offset.zero)),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = phoneSchemeOf(context);
+    final label = context.l10n.quickSettingsActiveApps(widget.count);
+    return Semantics(
+      button: true,
+      label: label,
+      excludeSemantics: true,
+      onTap: _tap,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: (_) => _press(true),
+        onTapUp: (_) => _press(false),
+        onTapCancel: () => _press(false),
+        onTap: _tap,
+        child: Container(
+          height: _RoundButtonState._size,
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          decoration: BoxDecoration(
+            color: _pressed
+                ? Color.alphaBlend(
+                    scheme.onSurface.withValues(alpha: 0.12),
+                    scheme.surfaceEffect1,
+                  )
+                : scheme.surfaceEffect1,
+            borderRadius: BorderRadius.circular(_RoundButtonState._size / 2),
+          ),
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.info_rounded, size: 20, color: scheme.onSurface),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: scheme.onSurface,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 20,
+                color: scheme.onSurface,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

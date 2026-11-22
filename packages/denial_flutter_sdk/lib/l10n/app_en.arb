@@ -1957,6 +1957,27 @@
   "@quickSettingsAutoRotate": {
     "description": "Quick Settings toggle that is on while the screen follows the orientation sensor."
   },
+  "quickSettingsActiveApps": "{count, plural, =1{1 app is active} other{{count} apps are active}}",
+  "@quickSettingsActiveApps": {
+    "description": "Chip at the bottom of the full quick settings: how many Android apps run in the foreground.",
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "activeAppsTitle": "Active apps",
+  "@activeAppsTitle": {
+    "description": "Title of the dialog that lists the active Android apps."
+  },
+  "activeAppsMessage": "These apps keep running while you are not using them, which can use battery.",
+  "@activeAppsMessage": {
+    "description": "Text under the title of the dialog that lists the active Android apps."
+  },
+  "activeAppsStop": "Stop",
+  "@activeAppsStop": {
+    "description": "Button that stops an active Android app."
+  },
+  "activeAppsStopped": "Stopped",
+  "@activeAppsStopped": {
+    "description": "The stop button of an Android app that was just stopped."
+  },
   "notificationsClearAllButton": "Clear all",
   "@notificationsClearAllButton": {
     "description": "Button under the phone shade's notifications that dismisses them all, as on Android."

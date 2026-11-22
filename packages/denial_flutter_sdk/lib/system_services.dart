@@ -30,6 +30,8 @@ export 'src/models/upower.dart'
         UPowerBatteryTechnology,
         UPowerSnapshot,
         UPowerWarningLevel;
+export 'src/services/active_apps_service.dart'
+    show ActiveApp, activeAppsProvider, activeAppsServiceProvider;
 export 'src/services/audio_service.dart'
     show AudioService, audioServiceProvider;
 export 'src/services/authentication_service.dart' show AuthenticationService;
