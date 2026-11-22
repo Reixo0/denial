@@ -13,10 +13,14 @@ abstract final class AospShadeInterpolation {
 
   /// NotificationShadeDepthController's blur: 0.8 of it follows the scrim
   /// (INTERACTION_BLUR_FRACTION) and 0.2 springs in as soon as the shade
-  /// starts moving (shadeAnimation, ANIMATION_BLUR_FRACTION), which is why
-  /// what is behind blurs at the first touch of a pull.
-  static double blurFraction(double fraction, double engaged) =>
-      0.8 * scrimAlpha(fraction) + 0.2 * unit(engaged);
+  /// starts moving and out as it is let go to close (shadeAnimation,
+  /// ANIMATION_BLUR_FRACTION), which is why what is behind blurs at the first
+  /// touch of a pull. The full quick settings keep it up with the panel.
+  static double blurFraction(double fraction, double depth, double qs) =>
+      math.max(
+        0.8 * scrimAlpha(fraction) + 0.2 * unit(depth),
+        scrimAlpha(qs) * unit(fraction),
+      );
 
   /// getContentAlpha: the shade's content, from 30 % of the pull on.
   static double contentAlpha(double fraction) =>
@@ -144,13 +148,42 @@ class ChainedCurve extends Curve {
       second.transform(first.transform(t).clamp(0.0, 1.0));
 }
 
-/// [AospShadeInterpolation.blurFraction] of a shade's panel fraction and its
-/// [ShadeExpansion.engaged] animation.
+/// [AospShadeInterpolation.blurFraction] of a shade's panel fraction, its
+/// [ShadeExpansion.depth] and its quick settings (which move on their own only
+/// under a full blur).
 class ShadeBlurAnimation extends CompoundAnimation<double> {
-  ShadeBlurAnimation(Animation<double> panel, Animation<double> engaged)
-    : super(first: panel, next: engaged);
+  ShadeBlurAnimation(Animation<double> panel, Animation<double> depth, this._qs)
+    : super(first: panel, next: depth);
+
+  final Animation<double> _qs;
 
   @override
   double get value =>
-      AospShadeInterpolation.blurFraction(first.value, next.value);
+      AospShadeInterpolation.blurFraction(first.value, next.value, _qs.value);
+}
+
+/// NotificationShadeDepthController's shadeAnimation: the spring of the part
+/// of the blur that does not follow the finger.
+abstract final class AospDepthSpring {
+  /// SpringForce.STIFFNESS_LOW, DAMPING_RATIO_NO_BOUNCY.
+  static final SpringDescription spring = SpringDescription.withDampingRatio(
+    mass: 1,
+    stiffness: 200,
+  );
+
+  /// max_shade_window_blur_radius, 34 dp, in EvolutionX's pixels.
+  static const double radius = 34 * 2.925;
+
+  /// It ends within three quarters of a pixel (DynamicAnimation's
+  /// VALUE_THRESHOLD_MULTIPLIER; the speed, that in a frame of 16 ms).
+  static const Tolerance tolerance = Tolerance(
+    distance: 0.75 / radius,
+    velocity: 0.75 / radius * 62.5,
+  );
+
+  /// The spring's speed at the start of a move of the panel by [change] in
+  /// [seconds] (VELOCITY_SCALE, MAX_VELOCITY), in blurs per second.
+  static double speed(double change, double seconds) =>
+      (100 * change / seconds.clamp(0.00001, 1.0)).clamp(-3000.0, 3000.0) /
+      radius;
 }

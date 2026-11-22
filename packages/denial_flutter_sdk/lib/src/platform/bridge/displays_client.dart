@@ -73,6 +73,7 @@ final class BridgeDisplaysClient {
               pixelSize: Size(pixelWidth.toDouble(), pixelHeight.toDouble()),
               scale: output.scale,
               refreshRate: mode.refreshHz,
+              transform: output.transform,
             );
           })
           .toList(growable: false);

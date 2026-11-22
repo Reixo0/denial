@@ -166,6 +166,10 @@ class ShellThemeData {
   ImageFilterConfig edgelessBlurConfigAt(double strength, {double scale = 1}) =>
       _resolution.edgelessBlurConfigAt(strength, scale: scale);
 
+  /// The sigma of [edgelessBlurConfigAt].
+  double edgelessBlurSigmaAt(double strength, {double scale = 1}) =>
+      _resolution.edgelessBlurSigmaAt(strength, scale: scale);
+
   /// The frost alone of the window material: the blur that
   /// [backdropFilterConfigAt] applies before any glass shading. A backdrop
   /// frosted once with it can be shared by translucent windows, each shading
@@ -480,18 +484,28 @@ class _ShellThemeResolution {
   _backdropFilters = {};
   final Map<(int, double), ImageFilterConfig> _edgelessBlurs = {};
 
+  /// Finer than the window material's: at the end of its fade a step of a
+  /// wide blur is seen.
+  static const int _edgelessStrengthSteps = 128;
+
+  int _edgelessStep(double strength) =>
+      (strength.clamp(0.0, 1.0) * _edgelessStrengthSteps)
+          .round()
+          .clamp(1, _edgelessStrengthSteps)
+          .toInt();
+
+  double edgelessBlurSigmaAt(double strength, {double scale = 1}) =>
+      (theme.transparencyMode == ShellTransparencyMode.glass
+          ? theme.glass.blurSigma
+          : theme.backdropBlurSigma) *
+      scale *
+      _edgelessStep(strength) /
+      _edgelessStrengthSteps;
+
   ImageFilterConfig edgelessBlurConfigAt(double strength, {double scale = 1}) {
-    final step = (strength.clamp(0.0, 1.0) * _materialStrengthSteps)
-        .round()
-        .clamp(1, _materialStrengthSteps)
-        .toInt();
-    return _edgelessBlurs.putIfAbsent((step, scale), () {
+    return _edgelessBlurs.putIfAbsent((_edgelessStep(strength), scale), () {
       final glass = theme.transparencyMode == ShellTransparencyMode.glass;
-      final sigma =
-          (glass ? theme.glass.blurSigma : theme.backdropBlurSigma) *
-          scale *
-          step /
-          _materialStrengthSteps;
+      final sigma = edgelessBlurSigmaAt(strength, scale: scale);
       return ImageFilterConfig.blur(
         sigmaX: sigma,
         sigmaY: sigma,

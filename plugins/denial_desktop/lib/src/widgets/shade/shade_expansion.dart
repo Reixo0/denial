@@ -1,4 +1,5 @@
 import 'package:flutter/gestures.dart';
+import 'package:flutter/physics.dart';
 import 'package:flutter/widgets.dart';
 
 import 'shade_expansion_motion.dart';
@@ -28,23 +29,96 @@ class ShadeExpansion {
        qs = AnimationController(vsync: vsync),
        overshoot = AnimationController.unbounded(vsync: vsync),
        overscroll = AnimationController.unbounded(vsync: vsync),
-       engaged = AnimationController(vsync: vsync, duration: _engageDuration) {
+       engaged = AnimationController(vsync: vsync, duration: _engageDuration),
+       depth = AnimationController.unbounded(vsync: vsync) {
     _catchUp = AnimationController(vsync: vsync, duration: _catchUpDuration)
       ..addListener(_followPanel);
     panel
       ..addListener(_collapseWhenClosed)
       ..addListener(_engage)
+      ..addListener(_updateDepth)
       ..addListener(_followPanel);
   }
 
   /// Android's timed reaction to the shade leaving closed, apart from the
-  /// finger: the status bar's icons fade out (CollapsedStatusBarFragment)
-  /// and a fifth of the blur springs in (NotificationShadeDepthController).
+  /// finger: the status bar's icons fade out (CollapsedStatusBarFragment).
   /// It runs to 1 when the panel leaves 0 and back once it is closed.
   final AnimationController engaged;
 
+  /// The part of the blur that does not follow the finger, 0 to 1
+  /// ([AospDepthSpring]). It goes on past the end of a close.
+  final AnimationController depth;
+
   /// What the shade blurs behind it, 0 to 1 ([ShadeBlurAnimation]).
-  late final Animation<double> blur = ShadeBlurAnimation(panel, engaged);
+  late final Animation<double> blur = ShadeBlurAnimation(panel, depth, qs);
+
+  double _depthPanel = 0;
+  bool _depthTracking = false;
+  bool _depthClosed = true;
+  bool _depthOpen = false;
+  bool _depthBlurred = false;
+  final Stopwatch _clock = Stopwatch()..start();
+  Duration _depthTime = Duration.zero;
+
+  /// NotificationShadeDepthController.onPanelExpansionChanged.
+  void _updateDepth() {
+    final now = _clock.elapsed;
+    final expansion = panel.value;
+    if (expansion == _depthPanel && _dragging == _depthTracking) {
+      _depthTime = now;
+      return;
+    }
+    final change = expansion - _depthPanel;
+    final speed = AospDepthSpring.speed(
+      change,
+      (now - _depthTime).inMicroseconds / 1e6,
+    );
+    _depthPanel = expansion;
+    _depthTracking = _dragging;
+    _depthTime = now;
+    if (expansion > 0) {
+      if (_depthClosed) {
+        _springDepth(true, speed);
+        _depthClosed = false;
+      }
+      // Caught while it was going away.
+      if (_dragging && !_depthBlurred) _springDepth(true, 0);
+      // Closing by itself.
+      if (!_dragging && change < 0 && _depthBlurred) {
+        _springDepth(false, speed);
+      }
+      if (expansion == 1) {
+        if (!_depthOpen) {
+          _depthOpen = true;
+          if (!_depthBlurred) _springDepth(true, speed);
+        }
+      } else {
+        _depthOpen = false;
+      }
+    } else if (!_depthClosed) {
+      _depthClosed = true;
+      if (_depthBlurred) _springDepth(false, speed);
+    }
+  }
+
+  void _springDepth(bool blurred, double speed) {
+    _depthBlurred = blurred;
+    final target = blurred ? 1.0 : 0.0;
+    if (reduceMotion) {
+      depth.value = target;
+      return;
+    }
+    depth.animateWith(
+      SpringSimulation(
+        AospDepthSpring.spring,
+        depth.value,
+        target,
+        speed,
+        tolerance: AospDepthSpring.tolerance,
+        snapToEnd: true,
+      ),
+    );
+  }
 
   static const _engageDuration = Duration(milliseconds: 160);
 
@@ -216,6 +290,7 @@ class ShadeExpansion {
     _moving = null;
     _fromStatusBar = fromStatusBar;
     _qsAllowed = qsAllowed;
+    _updateDepth();
     if (fromStatusBar) {
       // Each pull from the status bar starts on the quick tiles.
       if (panel.value <= 0) {
@@ -301,6 +376,7 @@ class ShadeExpansion {
   void endDrag(double velocity) {
     if (!_dragging) return;
     _dragging = false;
+    _updateDepth();
     _unwatchFingers();
     final moving = _moving;
     final started = _started;
@@ -413,6 +489,7 @@ class ShadeExpansion {
     overshoot.dispose();
     overscroll.dispose();
     engaged.dispose();
+    depth.dispose();
     _catchUp.dispose();
     pullsBoth.dispose();
   }

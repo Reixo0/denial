@@ -31,6 +31,7 @@ class _SystemShadeLayerState extends ConsumerState<SystemShadeLayer>
   late final ProxyAnimation _sharedProgress;
   bool _mountedPanel = false;
   bool _offstage = true;
+  bool _active = false;
 
   AnimationController get _panel => _expansion.panel;
 
@@ -48,17 +49,22 @@ class _SystemShadeLayerState extends ConsumerState<SystemShadeLayer>
     _panel
       ..value = ref.read(referenceShellProvider).quickSettingsVisible ? 1 : 0
       ..addListener(_updateVisibility);
+    _expansion.depth.addListener(_updateVisibility);
     _mountedPanel = _panel.value > 0;
     _offstage = !_mountedPanel;
+    _active = _mountedPanel;
     _sharedProgress = ref.read(shadeProgressProvider)..parent = _panel;
     ref.read(shadeExpansionProvider).current = _expansion;
   }
 
   void _updateVisibility() {
-    final offstage = _panel.value <= 0;
-    if (offstage == _offstage) return;
+    // The blur goes away after the shade has.
+    final active = _panel.value > 0;
+    final offstage = !active && _expansion.blur.value <= 0;
+    if (offstage == _offstage && active == _active) return;
     setState(() {
       _offstage = offstage;
+      _active = active;
       _mountedPanel = true;
     });
   }
@@ -127,7 +133,8 @@ class _SystemShadeLayerState extends ConsumerState<SystemShadeLayer>
                   child: RepaintBoundary(
                     child: QuickSettingsShade(
                       expansion: _expansion,
-                      active: !_offstage,
+                      active: _active,
+                      shown: _active,
                       closed: closed,
                     ),
                   ),

@@ -90,6 +90,7 @@ class PhoneDeskLayout {
           scale: phone.scale,
           refreshRate: phone.refreshRate,
           activeWorkspace: phone.activeWorkspace,
+          transform: phone.transform,
         ),
       ],
     );

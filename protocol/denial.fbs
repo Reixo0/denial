@@ -513,6 +513,9 @@ table DisplayOutput {
   // Rust-authoritative monitor-local workspace. Appended so older peers keep
   // the historical workspace-1 default.
   active_workspace:uint = 1;
+  // wl_output.transform of the panel. The layout above is already transformed;
+  // backdrop filters need it to find the target's own pixels.
+  transform:ubyte = 0;
 }
 
 table DisplayLayout {

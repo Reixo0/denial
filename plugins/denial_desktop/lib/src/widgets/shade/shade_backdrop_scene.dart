@@ -116,7 +116,7 @@ class RenderShadeBackdropScene extends RenderProxyBox {
 
   @override
   void paint(PaintingContext context, Offset offset) {
-    if (_progress.value <= 0) return;
+    if (_progress.value <= 0 && (_blur?.value ?? 0) <= 0) return;
     if (_cached) {
       super.paint(context, offset);
       return;

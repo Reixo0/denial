@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:denial_flutter_sdk/panels.dart';
 import 'package:flutter/widgets.dart';
 
+import 'output_configuration.dart' show DenialOutputTransform;
+
 export 'package:denial_flutter_sdk/panels.dart' show PanelEdge;
 
 typedef SystemBarSide = PanelEdge;
@@ -18,6 +20,7 @@ class DisplayOutput {
     required this.refreshRate,
     this.activeWorkspace = 1,
     this.inputOnly = false,
+    this.transform = DenialOutputTransform.normal,
   });
 
   final int monitorId;
@@ -30,6 +33,9 @@ class DisplayOutput {
 
   /// Reserved for shell input controls while still participating in scanout.
   final bool inputOnly;
+
+  /// How the panel turns this output, whose geometry is already turned.
+  final DenialOutputTransform transform;
 }
 
 @immutable
@@ -277,6 +283,7 @@ class DisplayLayout {
           refreshRate: output.refreshRate,
           activeWorkspace: output.activeWorkspace,
           inputOnly: output.name == name,
+          transform: output.transform,
         ),
     ],
   );

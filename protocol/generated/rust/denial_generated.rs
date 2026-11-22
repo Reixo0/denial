@@ -5728,6 +5728,7 @@ impl<'a> DisplayOutput<'a> {
   pub const VT_SCALE: flatbuffers::VOffsetT = 14;
   pub const VT_REFRESH_RATE: flatbuffers::VOffsetT = 16;
   pub const VT_ACTIVE_WORKSPACE: flatbuffers::VOffsetT = 18;
+  pub const VT_TRANSFORM: flatbuffers::VOffsetT = 20;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -5747,6 +5748,7 @@ impl<'a> DisplayOutput<'a> {
     if let Some(x) = args.pixel_size { builder.add_pixel_size(x); }
     if let Some(x) = args.logical_rect { builder.add_logical_rect(x); }
     if let Some(x) = args.name { builder.add_name(x); }
+    builder.add_transform(args.transform);
     builder.finish()
   }
 
@@ -5807,6 +5809,13 @@ impl<'a> DisplayOutput<'a> {
     // which contains a valid value in this slot
     unsafe { self._tab.get::<u32>(DisplayOutput::VT_ACTIVE_WORKSPACE, Some(1)).unwrap()}
   }
+  #[inline]
+  pub fn transform(&self) -> u8 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u8>(DisplayOutput::VT_TRANSFORM, Some(0)).unwrap()}
+  }
 }
 
 impl flatbuffers::Verifiable for DisplayOutput<'_> {
@@ -5824,6 +5833,7 @@ impl flatbuffers::Verifiable for DisplayOutput<'_> {
      .visit_field::<f64>("scale", Self::VT_SCALE, false)?
      .visit_field::<f64>("refresh_rate", Self::VT_REFRESH_RATE, false)?
      .visit_field::<u32>("active_workspace", Self::VT_ACTIVE_WORKSPACE, false)?
+     .visit_field::<u8>("transform", Self::VT_TRANSFORM, false)?
      .finish();
     Ok(())
   }
@@ -5837,6 +5847,7 @@ pub struct DisplayOutputArgs<'a> {
     pub scale: f64,
     pub refresh_rate: f64,
     pub active_workspace: u32,
+    pub transform: u8,
 }
 impl<'a> Default for DisplayOutputArgs<'a> {
   #[inline]
@@ -5850,6 +5861,7 @@ impl<'a> Default for DisplayOutputArgs<'a> {
       scale: 1.0,
       refresh_rate: 60.0,
       active_workspace: 1,
+      transform: 0,
     }
   }
 }
@@ -5892,6 +5904,10 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> DisplayOutputBuilder<'a, 'b, A>
     self.fbb_.push_slot::<u32>(DisplayOutput::VT_ACTIVE_WORKSPACE, active_workspace, 1);
   }
   #[inline]
+  pub fn add_transform(&mut self, transform: u8) {
+    self.fbb_.push_slot::<u8>(DisplayOutput::VT_TRANSFORM, transform, 0);
+  }
+  #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> DisplayOutputBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
     DisplayOutputBuilder {
@@ -5917,6 +5933,7 @@ impl core::fmt::Debug for DisplayOutput<'_> {
       ds.field("scale", &self.scale());
       ds.field("refresh_rate", &self.refresh_rate());
       ds.field("active_workspace", &self.active_workspace());
+      ds.field("transform", &self.transform());
       ds.finish()
   }
 }

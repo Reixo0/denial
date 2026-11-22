@@ -71,11 +71,15 @@ class QuickSettingsShade extends ConsumerWidget {
     super.key,
     required this.expansion,
     this.active = true,
+    this.shown = true,
     this.closed = false,
   });
 
   final ShadeExpansion expansion;
   final bool active;
+
+  /// Only the blur is left for a moment once the shade has closed.
+  final bool shown;
   final bool closed;
 
   @override
@@ -106,22 +110,26 @@ class QuickSettingsShade extends ConsumerWidget {
                   ),
                   _FullScreenShade(
                     progress: progress,
-                    child: Focus(
-                      autofocus: active,
-                      canRequestFocus: active,
-                      onKeyEvent: (_, event) {
-                        if (event is KeyDownEvent &&
-                            event.logicalKey == LogicalKeyboardKey.escape) {
-                          controller.closeQuickSettings();
-                          return KeyEventResult.handled;
-                        }
-                        return KeyEventResult.ignored;
-                      },
-                      child: PixelShadeViewport(
-                        child: _PixelShade(
-                          expansion: expansion,
-                          closed: closed,
-                          active: active,
+                    blur: expansion.blur,
+                    child: Visibility.maintain(
+                      visible: shown,
+                      child: Focus(
+                        autofocus: active,
+                        canRequestFocus: active,
+                        onKeyEvent: (_, event) {
+                          if (event is KeyDownEvent &&
+                              event.logicalKey == LogicalKeyboardKey.escape) {
+                            controller.closeQuickSettings();
+                            return KeyEventResult.handled;
+                          }
+                          return KeyEventResult.ignored;
+                        },
+                        child: PixelShadeViewport(
+                          child: _PixelShade(
+                            expansion: expansion,
+                            closed: closed,
+                            active: active,
+                          ),
                         ),
                       ),
                     ),
@@ -136,19 +144,49 @@ class QuickSettingsShade extends ConsumerWidget {
   }
 }
 
-class _FullScreenShade extends StatelessWidget {
-  const _FullScreenShade({required this.progress, required this.child});
+class _FullScreenShade extends ConsumerWidget {
+  const _FullScreenShade({
+    required this.progress,
+    required this.blur,
+    required this.child,
+  });
 
   final Animation<double> progress;
+
+  /// How much of the blur shows, and with it of the zoom.
+  final Animation<double> blur;
   final Widget child;
 
   /// How much wider EvolutionX's shade blurs than the glass setting's frost,
   /// as drawn on the phone: 70 px to 50 at the default frost of 30.
   static const double _blurScale = 1.4;
 
+  /// AOSP NotificationShadeDepthController's PUSHBACK_SCALE_FOR_LAUNCHER and
+  /// PUSHBACK_SCALE_FOR_APP: how much what is behind shrinks.
+  static const double _pushbackHome = 0.05;
+  static const double _pushbackApp = 0.025;
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = ShellTheme.of(context);
+    final home = ref.watch(
+      referenceShellProvider.select(
+        (state) =>
+            state.primaryWindow == null ||
+            state.overviewVisible ||
+            state.homeTransitionActive,
+      ),
+    );
+    final output = ref.watch(
+      displayLayoutProvider.select((layout) => layout?.mainOutput),
+    );
+    final size = MediaQuery.sizeOf(context);
+    // Android's landscape (split) shade does not zoom.
+    final pushback = size.width > size.height
+        ? 0.0
+        : home
+        ? _pushbackHome
+        : _pushbackApp;
     // Android's shade panel over its scrim (SystemUI ShadeColors).
     final panel = phoneShadePanel(phoneSchemeOf(context));
     final background = AnimatedBuilder(
@@ -205,7 +243,7 @@ class _FullScreenShade extends StatelessWidget {
         occludesNotifications: false,
         borderRadius: BorderRadius.zero,
         child: AnimatedBuilder(
-          animation: progress,
+          animation: blur,
           child: Stack(
             fit: StackFit.expand,
             children: [
@@ -214,17 +252,19 @@ class _FullScreenShade extends StatelessWidget {
             ],
           ),
           builder: (context, composedShade) {
-            final blur = AospShadeInterpolation.scrimAlpha(progress.value);
+            final fraction = blur.value;
             return ShellBackdropBlur(
               grouped: true,
               blur:
                   !ShadeBackdropScene.sharesBlur(context) &&
                   theme.effectivePanelOpacity < 1.0,
-              strength: blur,
+              strength: fraction,
               separateChild: true,
               borderRadius: BorderRadius.zero,
               edgeless: true,
               edgelessScale: _blurScale,
+              edgelessZoom: 1 - pushback * fraction,
+              edgelessZoomOutput: output,
               child: composedShade!,
             );
           },

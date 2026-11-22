@@ -1784,6 +1784,7 @@ pub(super) fn encode_display_layout(
                 active_workspace: u32::from(
                     active_workspaces.get(&monitor_id).copied().unwrap_or(1),
                 ),
+                transform: output.transform.wl_value(),
             },
         ));
     }

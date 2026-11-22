@@ -94,6 +94,20 @@ pub enum OutputTransform {
 }
 
 impl OutputTransform {
+    /// The value of `wl_output.transform`.
+    pub const fn wl_value(self) -> u8 {
+        match self {
+            Self::Normal => 0,
+            Self::Rotate90 => 1,
+            Self::Rotate180 => 2,
+            Self::Rotate270 => 3,
+            Self::Flipped => 4,
+            Self::Flipped90 => 5,
+            Self::Flipped180 => 6,
+            Self::Flipped270 => 7,
+        }
+    }
+
     pub const fn swaps_axes(self) -> bool {
         matches!(
             self,

@@ -15,6 +15,7 @@ import '../models/denial_cursor_state.dart';
 import '../models/desktop_notification.dart' as model;
 import '../models/input_device_capabilities.dart';
 import '../models/keyboard_configuration.dart';
+import '../models/output_configuration.dart' show DenialOutputTransform;
 import '../models/shortcut_configuration.dart';
 import '../models/system_tray_item.dart' as tray_model;
 import '../models/denial_pet.dart';
@@ -1795,6 +1796,7 @@ class DenialWireCodec {
           output.activeWorkspace < 1 ||
           output.activeWorkspace > 9 ||
           output.monitorId < 0 ||
+          output.transform >= DenialOutputTransform.values.length ||
           !outputIds.add(output.monitorId)) {
         rejectedStructuredMessages += 1;
         return null;
@@ -1808,6 +1810,7 @@ class DenialWireCodec {
           scale: output.scale,
           refreshRate: output.refreshRate,
           activeWorkspace: output.activeWorkspace,
+          transform: DenialOutputTransform.values[output.transform],
         ),
       );
     }
