@@ -28,6 +28,15 @@ final _accentSourceWallpaperProvider = Provider<WallpaperResource>((ref) {
   final assignment = ref.watch(
     wallpaperControllerProvider.select((state) => state.assignment),
   );
+  final fromLock = ref.watch(
+    shellSettingsProvider.select(
+      (settings) =>
+          settings.appearance.accentSource == ShellAccentSource.lockWallpaper,
+    ),
+  );
+  if (fromLock) {
+    if (assignment.lock case final lock?) return lock.resource;
+  }
   final outputName = ref.watch(
     displayLayoutProvider.select((layout) => layout?.systemBarOutput?.name),
   );

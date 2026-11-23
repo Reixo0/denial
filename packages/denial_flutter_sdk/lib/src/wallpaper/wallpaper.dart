@@ -137,6 +137,30 @@ class WallpaperSpanAlignment {
   int get hashCode => Object.hash(x, y);
 }
 
+/// The lock screen's own wallpaper, apart from the home screen's.
+@immutable
+class WallpaperLockScreen {
+  const WallpaperLockScreen({
+    required this.resource,
+    this.alignment = const WallpaperSpanAlignment(),
+    this.zoom = 1.0,
+  });
+
+  final WallpaperResource resource;
+  final WallpaperSpanAlignment alignment;
+  final double zoom;
+
+  @override
+  bool operator ==(Object other) =>
+      other is WallpaperLockScreen &&
+      other.resource == resource &&
+      other.alignment == alignment &&
+      other.zoom == zoom;
+
+  @override
+  int get hashCode => Object.hash(resource, alignment, zoom);
+}
+
 @immutable
 class WallpaperAssignment {
   WallpaperAssignment({
@@ -144,6 +168,7 @@ class WallpaperAssignment {
     this.spanAlignment = const WallpaperSpanAlignment(),
     this.zoom = 1.0,
     this.allDarkness = 0.0,
+    this.lock,
     Map<String, WallpaperResource> outputOverrides =
         const <String, WallpaperResource>{},
     Map<String, WallpaperSpanAlignment> outputAlignmentOverrides =
@@ -191,6 +216,11 @@ class WallpaperAssignment {
   static const double maxZoom = 4.0;
 
   final double allDarkness;
+
+  /// The lock screen's wallpaper on every output, or null when it shows the
+  /// home screen's.
+  final WallpaperLockScreen? lock;
+
   final Map<String, WallpaperResource> outputOverrides;
   final Map<String, WallpaperSpanAlignment> outputAlignmentOverrides;
   final Map<String, double> outputDarknessOverrides;
@@ -198,6 +228,23 @@ class WallpaperAssignment {
   /// The [zoom] of outputs placed on their own, such as a monitor beside a
   /// phone.
   final Map<String, double> outputZoomOverrides;
+
+  /// What the lock screen shows: its own wallpaper on every output, dimmed
+  /// as the home screen's, or this assignment itself without one.
+  WallpaperAssignment forLock() {
+    final lock = this.lock;
+    if (lock == null) {
+      return this;
+    }
+    return WallpaperAssignment(
+      all: lock.resource,
+      spanAlignment: lock.alignment,
+      zoom: lock.zoom,
+      allDarkness: allDarkness,
+      lock: lock,
+      outputDarknessOverrides: outputDarknessOverrides,
+    );
+  }
 
   double zoomForOutput(String outputName) {
     return outputZoomOverrides[outputName] ?? zoom;
@@ -241,6 +288,7 @@ class WallpaperAssignment {
         spanAlignment: spanAlignment,
         zoom: zoom,
         allDarkness: allDarkness,
+        lock: lock,
         outputAlignmentOverrides: outputAlignmentOverrides,
         outputZoomOverrides: outputZoomOverrides,
         outputDarknessOverrides: outputDarknessOverrides,
@@ -257,6 +305,7 @@ class WallpaperAssignment {
       spanAlignment: spanAlignment,
       zoom: zoom,
       allDarkness: allDarkness,
+      lock: lock,
       outputOverrides: updated,
       outputAlignmentOverrides: outputAlignmentOverrides,
       outputZoomOverrides: outputZoomOverrides,
@@ -279,6 +328,7 @@ class WallpaperAssignment {
         spanAlignment: spanAlignment,
         zoom: zoom,
         allDarkness: allDarkness,
+        lock: lock,
         outputOverrides: outputOverrides,
         outputAlignmentOverrides: updated,
         outputZoomOverrides: outputZoomOverrides,
@@ -290,6 +340,7 @@ class WallpaperAssignment {
       spanAlignment: alignment,
       zoom: zoom,
       allDarkness: allDarkness,
+      lock: lock,
       outputOverrides: outputOverrides,
       outputDarknessOverrides: outputDarknessOverrides,
     );
@@ -306,6 +357,7 @@ class WallpaperAssignment {
         spanAlignment: spanAlignment,
         zoom: zoom,
         allDarkness: safeDarkness,
+        lock: lock,
         outputOverrides: outputOverrides,
         outputAlignmentOverrides: outputAlignmentOverrides,
         outputZoomOverrides: outputZoomOverrides,
@@ -323,6 +375,7 @@ class WallpaperAssignment {
       spanAlignment: spanAlignment,
       zoom: zoom,
       allDarkness: allDarkness,
+      lock: lock,
       outputOverrides: outputOverrides,
       outputAlignmentOverrides: outputAlignmentOverrides,
       outputZoomOverrides: outputZoomOverrides,
@@ -337,6 +390,7 @@ class WallpaperAssignment {
         other.spanAlignment == spanAlignment &&
         other.zoom == zoom &&
         other.allDarkness == allDarkness &&
+        other.lock == lock &&
         mapEquals(other.outputOverrides, outputOverrides) &&
         mapEquals(other.outputAlignmentOverrides, outputAlignmentOverrides) &&
         mapEquals(other.outputDarknessOverrides, outputDarknessOverrides) &&
@@ -361,6 +415,7 @@ class WallpaperAssignment {
       spanAlignment,
       zoom,
       allDarkness,
+      lock,
       Object.hashAll(
         orderedEntries.map((entry) => Object.hash(entry.key, entry.value)),
       ),

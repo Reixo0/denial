@@ -20,7 +20,9 @@ import '../theme/cursor_themes.dart';
 import 'package:denial_flutter_sdk/glass_configuration.dart';
 import 'package:denial_flutter_sdk/tokens.dart';
 
-enum ShellAccentSource { wallpaper, custom }
+/// Where the accent comes from: the home screen's wallpaper, the lock
+/// screen's (the home screen's when it has none of its own), or the user.
+enum ShellAccentSource { wallpaper, lockWallpaper, custom }
 
 enum DesktopColorSchemePreference {
   preferDark,

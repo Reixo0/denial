@@ -57,9 +57,10 @@ class _LockBackdropState extends ConsumerState<_LockBackdrop> {
                 ),
                 child: output == null
                     ? ShellWallpaper(
+                        lock: true,
                         onPainted: onPainted == null ? null : _wallpaperPainted,
                       )
-                    : ShellOutputWallpaper(output: output),
+                    : ShellOutputWallpaper(output: output, lock: true),
               ),
             ),
           CustomPaint(
@@ -742,7 +743,7 @@ class _LockDepthForegroundState extends ConsumerState<_LockDepthForeground> {
           .select((layout) => layout?.mainOutput?.name),
     );
     final assignment = ref.watch(
-      wallpaperControllerProvider.select((state) => state.assignment),
+      wallpaperControllerProvider.select((state) => state.assignment.forLock()),
     );
     final resource = outputName == null
         ? assignment.all

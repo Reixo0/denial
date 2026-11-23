@@ -16,13 +16,17 @@ import '../wallpaper/wallpaper.dart';
 import '../wallpaper/widgets/wallpaper_image.dart';
 
 class ShellWallpaper extends ConsumerWidget {
-  const ShellWallpaper({super.key, this.onPainted});
+  const ShellWallpaper({super.key, this.onPainted, this.lock = false});
 
   static const String assetPath = defaultShellWallpaperAsset;
 
   /// Called from paint whenever the wallpaper repaints, with the boundary
   /// that holds it, for a consumer that captures the wallpaper.
   final ValueChanged<RenderRepaintBoundary>? onPainted;
+
+  /// Shows the lock screen's wallpaper. The home screen's keeps that one
+  /// decoded meanwhile, so the lock screen comes up with it.
+  final bool lock;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -53,7 +57,10 @@ class ShellWallpaper extends ConsumerWidget {
           outputs,
           spanRect,
         );
-        final outgoing = wallpaper.outgoingAssignment;
+        final ownLock = wallpaper.assignment.lock;
+        final outgoing = lock && ownLock != null
+            ? null
+            : wallpaper.outgoingAssignment;
         final animateOutgoing =
             outgoing != null && !reduceMotion && !transitionRect.isEmpty;
         if (outgoing != null && !animateOutgoing) {
@@ -69,8 +76,19 @@ class ShellWallpaper extends ConsumerWidget {
             child: Stack(
               fit: StackFit.expand,
               children: [
+                if (!lock && ownLock != null)
+                  Offstage(
+                    child: WallpaperScene(
+                      assignment: wallpaper.assignment.forLock(),
+                      outputs: outputs,
+                      spanRect: spanRect,
+                      spanPixelSize: spanPixelSize,
+                    ),
+                  ),
                 WallpaperScene(
-                  assignment: wallpaper.assignment,
+                  assignment: lock
+                      ? wallpaper.assignment.forLock()
+                      : wallpaper.assignment,
                   outputs: outputs,
                   spanRect: spanRect,
                   spanPixelSize: spanPixelSize,
@@ -184,14 +202,23 @@ class _RenderWallpaperBoundary extends RenderRepaintBoundary {
 /// the empty space around rotated or offset monitors. A local, fully opaque
 /// wallpaper gives security surfaces a real edge for every output instead.
 class ShellOutputWallpaper extends ConsumerWidget {
-  const ShellOutputWallpaper({required this.output, super.key});
+  const ShellOutputWallpaper({
+    required this.output,
+    this.lock = false,
+    super.key,
+  });
 
   final DisplayOutput output;
+
+  /// Shows the lock screen's wallpaper.
+  final bool lock;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final assignment = ref.watch(
-      wallpaperControllerProvider.select((state) => state.assignment),
+      wallpaperControllerProvider.select(
+        (state) => lock ? state.assignment.forLock() : state.assignment,
+      ),
     );
     final darkness = assignment.darknessForOutput(output.name);
     return RepaintBoundary(

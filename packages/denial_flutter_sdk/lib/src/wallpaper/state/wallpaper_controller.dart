@@ -815,8 +815,26 @@ class WallpaperStore {
           }
         }
       }
+      WallpaperLockScreen? lock;
+      final rawLock = decoded['lock'];
+      if (rawLock is Map) {
+        final resource = WallpaperResource.fromPersistenceValue(
+          rawLock['resource'] is String ? rawLock['resource'] as String : '',
+        );
+        if (await _validResource(resource)) {
+          lock = WallpaperLockScreen(
+            resource: resource!,
+            alignment: WallpaperSpanAlignment.precise(
+              x: _alignmentPosition(rawLock['alignmentX']) ?? 0.0,
+              y: _alignmentPosition(rawLock['alignmentY']) ?? 0.0,
+            ),
+            zoom: _zoom(rawLock['zoom']) ?? 1.0,
+          );
+        }
+      }
       return WallpaperAssignment(
         all: all,
+        lock: lock,
         spanAlignment: alignment,
         zoom: _zoom(decoded['zoom']) ?? 1.0,
         allDarkness: allDarkness,
@@ -883,6 +901,13 @@ class WallpaperStore {
         },
         'outputDarkness': assignment.outputDarknessOverrides,
         'outputZooms': assignment.outputZoomOverrides,
+        if (assignment.lock case final lock?)
+          'lock': <String, Object>{
+            'resource': lock.resource.persistenceValue,
+            'alignmentX': lock.alignment.x,
+            'alignmentY': lock.alignment.y,
+            'zoom': lock.zoom,
+          },
       });
       await temporary.writeAsString('$payload\n', flush: true);
       await temporary.rename(file.path);

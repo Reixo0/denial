@@ -75,7 +75,10 @@ class WallpaperDepth extends Notifier<int> {
         !ref.read(shellSettingsProvider).lockScreen.useSystemWallpaper) {
       return;
     }
-    final assignment = ref.read(wallpaperControllerProvider).assignment;
+    final assignment = ref
+        .read(wallpaperControllerProvider)
+        .assignment
+        .forLock();
     final output = ref.read(displayLayoutProvider)?.mainOutput?.name;
     final resource = output == null
         ? assignment.all

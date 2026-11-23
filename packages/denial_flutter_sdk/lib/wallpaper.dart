@@ -34,6 +34,7 @@ export 'src/wallpaper/wallpaper.dart'
         WallpaperAssignment,
         WallpaperCandidate,
         WallpaperHorizontalAlignment,
+        WallpaperLockScreen,
         WallpaperPage,
         WallpaperQuery,
         WallpaperResource,
