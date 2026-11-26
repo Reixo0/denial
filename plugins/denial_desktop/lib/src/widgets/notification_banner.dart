@@ -7,6 +7,8 @@ import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart' show Icons;
 import 'package:flutter/rendering.dart';
+import 'package:flutter/gestures.dart'
+    show GestureBinding, PointerDeviceKind, VelocityTracker;
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -37,6 +39,7 @@ import 'package:denial_flutter_sdk/rendering.dart'
 import 'shade/quick_settings_panel.dart' show PixelShadeViewport;
 import 'shade/shade_backdrop_scene.dart';
 import 'shade/shade_expansion_motion.dart' show androidDuration;
+import 'shade/shade_progress.dart' show shadeExpansionProvider;
 import '../state/phone_desk.dart';
 
 part 'notification_card.dart';

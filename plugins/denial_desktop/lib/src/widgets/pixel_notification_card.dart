@@ -465,9 +465,16 @@ class _PixelNotificationCardState extends State<PixelNotificationCard>
 
     // Android's ExpandHelper: pulling a collapsed notification down grows
     // it with the finger into its expanded layout (actions and all). Only a
-    // downward pull is taken; the list still scrolls up from the card.
+    // downward pull is taken; the list still scrolls up from the card. A
+    // heads-up's pull goes to the shade instead (NotificationPanelView-
+    // Controller lets HeadsUpTouchHelper intercept before the list).
     final pullable =
-        widget.interactive && group == null && full && !_expanded && !_guts;
+        widget.interactive &&
+        !widget.headsUp &&
+        group == null &&
+        full &&
+        !_expanded &&
+        !_guts;
     return Semantics(
       container: true,
       expanded: _expanded,
