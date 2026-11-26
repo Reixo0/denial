@@ -62,6 +62,7 @@ export 'src/settings/settings_store.dart'
 export 'src/settings/shell_settings.dart'
     show
         ClipboardTrayEdge,
+        PhoneRingerMode,
         DesktopColorSchemePreference,
         DesktopWindowLayout,
         MinimizedWindowPlacement,

@@ -905,6 +905,23 @@ impl SettingsManager {
             .unwrap_or(false)
     }
 
+    /// Android's ringer mode (`sound.ringerMode`): notifications make a
+    /// sound in `normal`, only vibrate in `vibrate`, neither in `silent`.
+    pub(super) fn ringer_mode(&self) -> crate::notification_sound::RingerMode {
+        use crate::notification_sound::RingerMode;
+        match self
+            .document
+            .get("sound")
+            .and_then(Value::as_object)
+            .and_then(|sound| sound.get("ringerMode"))
+            .and_then(Value::as_str)
+        {
+            Some("vibrate") => RingerMode::Vibrate,
+            Some("silent") => RingerMode::Silent,
+            _ => RingerMode::Normal,
+        }
+    }
+
     pub(super) fn workspace_settings(&self) -> WorkspaceSettings {
         parse_workspace_settings(&self.document).unwrap_or_default()
     }

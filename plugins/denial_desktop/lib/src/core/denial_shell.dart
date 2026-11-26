@@ -26,7 +26,7 @@ import 'package:denial_flutter_sdk/wallpaper.dart';
 import '../widgets/input_layout_publisher.dart';
 import '../widgets/mobile_screenshot_flash.dart';
 import '../widgets/session/power_session_surface.dart';
-import '../widgets/mobile_volume_hud.dart';
+import '../widgets/pixel_volume_dialog.dart';
 import '../widgets/low_battery_notification_binding.dart';
 import '../widgets/rgb_lights_binding.dart';
 
@@ -339,7 +339,7 @@ class _ProfileScene extends StatelessWidget {
             // from.
             const UnlockedAmbientDisplay(),
             // Volume shows over the lock screen too, as on any phone.
-            const MobileVolumeHud(),
+            const PixelVolumeDialog(),
             // Above everything, the lock screen included.
             const MobileScreenshotFlash(),
             const PowerMenuShortcut(),

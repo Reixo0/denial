@@ -4,7 +4,9 @@
 //! Nothing plays for an update that doesn't alert, a low-urgency or a call
 //! notification (the calls app rings itself), one that asks for silence
 //! (Android's, which keeps its own sound policy), or, unless it is
-//! critical, under Do not disturb.
+//! critical, under Do not disturb. The ringer mode (Android's) silences the
+//! rest too: in vibrate mode the motor pulses Android's default notification
+//! pattern instead, in silent mode nothing happens.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -24,17 +26,40 @@ const DEFAULT_SOUND: &str = "message-new-instant";
 const GAP: Duration = Duration::from_millis(500);
 static LAST: Mutex<Option<Instant>> = Mutex::new(None);
 
-/// Plays the sound of the first notification in `events` that makes one.
-pub(super) fn play<'a>(events: impl IntoIterator<Item = &'a NotificationEvent>, quiet: bool) {
-    let Some(path) = events
+/// Android's ringer mode, from `sound.ringerMode` in the settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RingerMode {
+    Normal,
+    Vibrate,
+    Silent,
+}
+
+/// Plays the sound of the first notification in `events` that makes one,
+/// or vibrates for it in vibrate mode.
+pub(super) fn play<'a>(
+    events: impl IntoIterator<Item = &'a NotificationEvent>,
+    quiet: bool,
+    ringer: RingerMode,
+) {
+    let alerting: Vec<&Notification> = events
         .into_iter()
         .filter(|event| event.kind != NotificationEventKind::Closed)
         .filter_map(|event| event.notification.as_ref())
-        .filter(|notification| sounds(notification, quiet))
-        .find_map(sound_path)
-    else {
+        .collect();
+    let muted = quiet || ringer != RingerMode::Normal;
+    let sound = alerting
+        .iter()
+        .filter(|notification| sounds(notification, muted))
+        .find_map(|notification| sound_path(notification));
+    // What would have sounded with the ringer on vibrates instead.
+    let vibrate = sound.is_none()
+        && ringer == RingerMode::Vibrate
+        && alerting
+            .iter()
+            .any(|notification| sounds(notification, quiet));
+    if sound.is_none() && !vibrate {
         return;
-    };
+    }
     let now = Instant::now();
     {
         let mut last = LAST
@@ -45,6 +70,17 @@ pub(super) fn play<'a>(events: impl IntoIterator<Item = &'a NotificationEvent>, 
         }
         *last = Some(now);
     }
+    let Some(path) = sound else {
+        // Android's DEFAULT_VIBRATE_PATTERN: 250 ms on, 250 off, 250 on.
+        match Command::new("hapticctl")
+            .args(["pattern", "250:1,250:0,250:1"])
+            .spawn()
+        {
+            Ok(mut child) => drop(std::thread::spawn(move || child.wait())),
+            Err(error) => warn!(%error, "could not vibrate for a notification"),
+        }
+        return;
+    };
     match Command::new("pw-play")
         .arg("--media-role=Notification")
         .arg(&path)

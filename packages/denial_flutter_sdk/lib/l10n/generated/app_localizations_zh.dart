@@ -5207,4 +5207,40 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get notificationGutsSettings => '通知设置';
+
+  @override
+  String get volumePanelPlaysOn => 'Audio will play on';
+
+  @override
+  String get volumePanelThisPhone => 'This phone';
+
+  @override
+  String get volumePanelMedia => 'Media';
+
+  @override
+  String get volumePanelCall => 'Call';
+
+  @override
+  String get volumePanelRing => 'Ring';
+
+  @override
+  String get volumePanelNotification => 'Notification';
+
+  @override
+  String get volumePanelAlarm => 'Alarm';
+
+  @override
+  String get volumePanelSettings => 'Settings';
+
+  @override
+  String get volumePanelDone => 'Done';
+
+  @override
+  String get volumeRingerNormal => 'Ring';
+
+  @override
+  String get volumeRingerVibrate => 'Vibrate';
+
+  @override
+  String get volumeRingerSilent => 'Mute';
 }

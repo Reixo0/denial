@@ -539,6 +539,10 @@ class ShellSettingsController extends Notifier<ShellSettings> {
     _update(state.copyWith(osk: state.osk.copyWith(pcKeys: value)));
   }
 
+  void setRingerMode(PhoneRingerMode mode) {
+    _update(state.copyWith(sound: state.sound.copyWith(ringerMode: mode)));
+  }
+
   void setKeyboardVibration(bool value) {
     _update(
       state.copyWith(sound: state.sound.copyWith(keyboardVibration: value)),

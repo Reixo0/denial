@@ -9747,6 +9747,78 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Notification settings'**
   String get notificationGutsSettings;
+
+  /// Volume panel: heading over where sound plays.
+  ///
+  /// In en, this message translates to:
+  /// **'Audio will play on'**
+  String get volumePanelPlaysOn;
+
+  /// Volume panel: sound plays on the phone's own speaker.
+  ///
+  /// In en, this message translates to:
+  /// **'This phone'**
+  String get volumePanelThisPhone;
+
+  /// Volume panel: the media volume's label.
+  ///
+  /// In en, this message translates to:
+  /// **'Media'**
+  String get volumePanelMedia;
+
+  /// Volume panel: the call volume's label.
+  ///
+  /// In en, this message translates to:
+  /// **'Call'**
+  String get volumePanelCall;
+
+  /// Volume panel: the ringtone volume's label.
+  ///
+  /// In en, this message translates to:
+  /// **'Ring'**
+  String get volumePanelRing;
+
+  /// Volume panel: the notifications volume's label.
+  ///
+  /// In en, this message translates to:
+  /// **'Notification'**
+  String get volumePanelNotification;
+
+  /// Volume panel: the alarm volume's label.
+  ///
+  /// In en, this message translates to:
+  /// **'Alarm'**
+  String get volumePanelAlarm;
+
+  /// Volume panel: opens the sound settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Settings'**
+  String get volumePanelSettings;
+
+  /// Volume panel: closes it.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get volumePanelDone;
+
+  /// Volume dialog: ringer mode that rings.
+  ///
+  /// In en, this message translates to:
+  /// **'Ring'**
+  String get volumeRingerNormal;
+
+  /// Volume dialog: ringer mode that only vibrates.
+  ///
+  /// In en, this message translates to:
+  /// **'Vibrate'**
+  String get volumeRingerVibrate;
+
+  /// Volume dialog: ringer mode with neither sound nor vibration.
+  ///
+  /// In en, this message translates to:
+  /// **'Mute'**
+  String get volumeRingerSilent;
 }
 
 class _AppLocalizationsDelegate

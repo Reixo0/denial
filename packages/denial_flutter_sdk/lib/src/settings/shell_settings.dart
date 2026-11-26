@@ -790,21 +790,43 @@ class ShellNotificationSettings {
   int get hashCode => Object.hash(doNotDisturb, lockPreview, wakeScreen);
 }
 
+/// Android's ringer mode: whether the ringtone and notifications make a
+/// sound, only vibrate, or neither.
+enum PhoneRingerMode {
+  normal,
+  vibrate,
+  silent;
+
+  static PhoneRingerMode fromName(Object? name) => PhoneRingerMode.values
+      .firstWhere((mode) => mode.name == name, orElse: () => normal);
+}
+
 @immutable
 class ShellSoundSettings {
-  const ShellSoundSettings({this.keyboardVibration = true});
+  const ShellSoundSettings({
+    this.keyboardVibration = true,
+    this.ringerMode = PhoneRingerMode.normal,
+  });
 
   /// The on-screen keyboard's keys pulse the vibration motor.
   final bool keyboardVibration;
 
-  ShellSoundSettings copyWith({bool? keyboardVibration}) {
+  /// Read by deniald (notification sounds and vibration) and calls-ringer.
+  final PhoneRingerMode ringerMode;
+
+  ShellSoundSettings copyWith({
+    bool? keyboardVibration,
+    PhoneRingerMode? ringerMode,
+  }) {
     return ShellSoundSettings(
       keyboardVibration: keyboardVibration ?? this.keyboardVibration,
+      ringerMode: ringerMode ?? this.ringerMode,
     );
   }
 
   Map<String, Object> toJson() => <String, Object>{
     'keyboardVibration': keyboardVibration,
+    'ringerMode': ringerMode.name,
   };
 
   factory ShellSoundSettings.fromJson(Object? value) {
@@ -814,17 +836,19 @@ class ShellSoundSettings {
       keyboardVibration: json['keyboardVibration'] is bool
           ? json['keyboardVibration'] as bool
           : defaults.keyboardVibration,
+      ringerMode: PhoneRingerMode.fromName(json['ringerMode']),
     );
   }
 
   @override
   bool operator ==(Object other) {
     return other is ShellSoundSettings &&
-        other.keyboardVibration == keyboardVibration;
+        other.keyboardVibration == keyboardVibration &&
+        other.ringerMode == ringerMode;
   }
 
   @override
-  int get hashCode => keyboardVibration.hashCode;
+  int get hashCode => Object.hash(keyboardVibration, ringerMode);
 }
 
 /// The software keyboard. Its own section: deniald owns `keyboard`, the
