@@ -1,10 +1,11 @@
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
+
+import 'package:denial_flutter_sdk/effects.dart' show logicalFromOutputPixels;
 
 import 'notification_shade_list.dart' show AndroidStackExpansion;
 import 'notification_shelf.dart' show NotificationShelfGeometry;
@@ -135,10 +136,9 @@ class ShadeStackLayout extends MultiChildRenderObjectWidget {
     required this.overscroll,
     required this.brightnessMirror,
     required this.blur,
-    required this.cardBackdrop,
+    required this.cardBlur,
     required this.shadeColor,
     required this.pushback,
-    required this.reach,
     required this.cardBlurEnabled,
     required this.pullsBoth,
     required this.listScroll,
@@ -165,12 +165,14 @@ class ShadeStackLayout extends MultiChildRenderObjectWidget {
   /// Brightness mirror progress (0 normal, 1 only brightness slider visible).
   final Animation<double> brightnessMirror;
 
-  /// Effective shade blur progress (0..1) and pre-captured card backdrop.
+  /// Effective shade blur progress (0..1).
   final Animation<double> blur;
-  final ValueListenable<ShadeCardBackdrop?> cardBackdrop;
+
+  /// How the notification cards blur what is behind the shade (live, from
+  /// the shade's backdrop sample); null for no card blur.
+  final ShadeCardBlur? cardBlur;
   final Color shadeColor;
   final double pushback;
-  final double reach;
   final bool cardBlurEnabled;
 
   /// A two-finger pull: the panel uncovers the full quick settings, without
@@ -208,10 +210,9 @@ class ShadeStackLayout extends MultiChildRenderObjectWidget {
     overscroll: overscroll,
     brightnessMirror: brightnessMirror,
     blur: blur,
-    cardBackdrop: cardBackdrop,
+    cardBlur: cardBlur,
     shadeColor: shadeColor,
     pushback: pushback,
-    reach: reach,
     cardBlurEnabled: cardBlurEnabled,
     pullsBoth: pullsBoth,
     listScroll: listScroll,
@@ -233,10 +234,9 @@ class ShadeStackLayout extends MultiChildRenderObjectWidget {
       ..overscroll = overscroll
       ..brightnessMirror = brightnessMirror
       ..blur = blur
-      ..cardBackdrop = cardBackdrop
+      ..cardBlur = cardBlur
       ..shadeColor = shadeColor
       ..pushback = pushback
-      ..reach = reach
       ..cardBlurEnabled = cardBlurEnabled
       ..pullsBoth = pullsBoth
       ..listScroll = listScroll
@@ -376,10 +376,9 @@ class RenderShadeStack extends RenderBox
     required this._overscroll,
     required this._brightnessMirror,
     required this._blur,
-    required this._cardBackdrop,
+    required this._cardBlur,
     required this._shadeColor,
     required this._pushback,
-    required this._reach,
     required this._cardBlurEnabled,
     required this._pullsBoth,
     required this._listScroll,
@@ -453,12 +452,10 @@ class RenderShadeStack extends RenderBox
     markNeedsPaint();
   }
 
-  ValueListenable<ShadeCardBackdrop?> _cardBackdrop;
-  set cardBackdrop(ValueListenable<ShadeCardBackdrop?> value) {
-    if (identical(value, _cardBackdrop)) return;
-    if (attached) _cardBackdrop.removeListener(markNeedsPaint);
-    _cardBackdrop = value;
-    if (attached) _cardBackdrop.addListener(markNeedsPaint);
+  ShadeCardBlur? _cardBlur;
+  set cardBlur(ShadeCardBlur? value) {
+    if (value == _cardBlur) return;
+    _cardBlur = value;
     markNeedsPaint();
   }
 
@@ -473,13 +470,6 @@ class RenderShadeStack extends RenderBox
   set pushback(double value) {
     if (value == _pushback) return;
     _pushback = value;
-    markNeedsPaint();
-  }
-
-  double _reach;
-  set reach(double value) {
-    if (value == _reach) return;
-    _reach = value;
     markNeedsPaint();
   }
 
@@ -600,7 +590,6 @@ class RenderShadeStack extends RenderBox
     _overscroll.addListener(markNeedsPaint);
     _brightnessMirror.addListener(markNeedsPaint);
     _blur.addListener(markNeedsPaint);
-    _cardBackdrop.addListener(markNeedsPaint);
     _pullsBoth.addListener(markNeedsPaint);
     _listScroll.addListener(markNeedsPaint);
     _headerFade.addListener(markNeedsPaint);
@@ -615,7 +604,6 @@ class RenderShadeStack extends RenderBox
     _overscroll.removeListener(markNeedsPaint);
     _brightnessMirror.removeListener(markNeedsPaint);
     _blur.removeListener(markNeedsPaint);
-    _cardBackdrop.removeListener(markNeedsPaint);
     _pullsBoth.removeListener(markNeedsPaint);
     _listScroll.removeListener(markNeedsPaint);
     _headerFade.removeListener(markNeedsPaint);
@@ -631,6 +619,7 @@ class RenderShadeStack extends RenderBox
       data.opacityLayer.layer = null;
       data.transformLayer.layer = null;
     }
+    _dropCardLayers();
     super.dispose();
   }
 
@@ -977,18 +966,36 @@ class RenderShadeStack extends RenderBox
     }
   }
 
+  final _cardEdgeClip = LayerHandle<ClipRRectLayer>();
+  final _cardShapeClip = LayerHandle<ClipPathLayer>();
+  final _cardOpacity = LayerHandle<OpacityLayer>();
+  final _cardTransform = LayerHandle<TransformLayer>();
+  final _cardFilter = LayerHandle<BackdropFilterLayer>();
+
+  void _dropCardLayers() {
+    _cardEdgeClip.layer = null;
+    _cardShapeClip.layer = null;
+    _cardOpacity.layer = null;
+    _cardTransform.layer = null;
+    _cardFilter.layer = null;
+  }
+
+  /// Android's notification card and shelf blur: each card shows what is
+  /// behind the shade blurred at 25 dp (the shade itself blurs at 34),
+  /// drawn live every frame from the shade's own backdrop sample (one
+  /// backdrop group), as SurfaceFlinger draws a window's blur regions.
   void _paintCards(
     PaintingContext context,
     Offset offset, {
     required bool visible,
   }) {
-    final backdrop = _cardBackdrop.value;
-    if (!_cardBlurEnabled ||
+    final blur = _cardBlur;
+    if (blur == null ||
+        !_cardBlurEnabled ||
         !visible ||
-        backdrop == null ||
-        backdrop.rect.isEmpty ||
         _edge.top >= size.height ||
         _panelAlpha <= 0) {
+      _dropCardLayers();
       return;
     }
     final shapes = Path();
@@ -996,64 +1003,82 @@ class RenderShadeStack extends RenderBox
       card.addTo(shapes, this);
     }
     final bounds = shapes.getBounds();
-    if (bounds.isEmpty) return;
+    if (bounds.isEmpty) {
+      _dropCardLayers();
+      return;
+    }
 
     final p = panel.value.clamp(0.0, 1.0);
     final blurFrac = _blur.value.clamp(0.0, 1.0);
     final mirrorFade = 1 - _brightnessMirror.value.clamp(0.0, 1.0);
-    final cardAlpha = (AospShadeInterpolation.contentAlpha(p) *
-            mirrorFade *
-            blurFrac)
-        .clamp(0.0, 1.0);
-    if (cardAlpha <= 0) return;
+    final cardAlpha =
+        (AospShadeInterpolation.contentAlpha(p) * mirrorFade * blurFrac).clamp(
+          0.0,
+          1.0,
+        );
+    if (cardAlpha <= 0) {
+      _dropCardLayers();
+      return;
+    }
 
-    final zoom = math.max(
-      1 - _pushback * blurFrac,
-      1 - 2 * (_reach * blurFrac) / backdrop.rect.size.longestSide,
-    );
-    final center = backdrop.rect.center;
-    final imageToCanvas = Matrix4.translationValues(offset.dx, offset.dy, 0)
-      ..multiply(Matrix4.inverted(getTransformTo(null)))
-      ..translateByDouble(center.dx, center.dy, 0, 1)
-      ..scaleByDouble(zoom, zoom, 1, 1)
-      ..translateByDouble(-center.dx, -center.dy, 0, 1)
-      ..translateByDouble(backdrop.rect.left, backdrop.rect.top, 0, 1)
-      ..scaleByDouble(
-        backdrop.rect.width / backdrop.image.width,
-        backdrop.rect.height / backdrop.image.height,
-        1,
-        1,
-      );
+    // From the output's pixels, where the filter is defined, to here.
+    final toHere = Matrix4.tryInvert(getTransformTo(null));
+    if (toHere == null) {
+      _dropCardLayers();
+      return;
+    }
+    // Inside the opacity layer, whose origin is this box's.
+    final here = toHere..multiply(logicalFromOutputPixels(blur.output));
+    final filter = (_cardFilter.layer ??= BackdropFilterLayer())
+      ..filter = blur.filterAt(blurFrac, 1 - _pushback * blurFrac)
+      ..blendMode = BlendMode.src
+      ..backdropKey = blur.backdropKey;
 
-    final canvas = context.canvas;
-    final shiftedBounds = bounds.shift(offset);
-    canvas.save();
-    canvas.clipRRect(_edge.shift(offset));
-    canvas.clipPath(shapes.shift(offset));
-    canvas.drawRect(
-      shiftedBounds,
-      Paint()
-        ..shader = ui.ImageShader(
-          backdrop.image,
-          TileMode.clamp,
-          TileMode.clamp,
-          imageToCanvas.storage,
-          filterQuality: FilterQuality.low,
-        )
-        ..color = Color.fromRGBO(255, 255, 255, cardAlpha),
+    _cardEdgeClip.layer = context.pushClipRRect(
+      true,
+      offset,
+      Offset.zero & size,
+      _edge,
+      (context, offset) {
+        _cardShapeClip.layer = context.pushClipPath(
+          true,
+          offset,
+          bounds,
+          shapes,
+          (context, offset) {
+            _cardOpacity.layer = context.pushOpacity(
+              offset,
+              (cardAlpha * 255).round(),
+              (context, _) {
+                _cardTransform.layer = context.pushTransform(
+                  true,
+                  Offset.zero,
+                  here,
+                  (context, _) =>
+                      context.pushLayer(filter, (_, _) {}, Offset.zero),
+                  oldLayer: _cardTransform.layer,
+                );
+              },
+              oldLayer: _cardOpacity.layer,
+            );
+            // The shade's tint over its blur, as over the cards' blur.
+            context.canvas.drawRect(
+              bounds.shift(offset),
+              Paint()
+                ..color = _shadeColor.withValues(
+                  alpha:
+                      _shadeColor.a *
+                      AospShadeInterpolation.scrimAlpha(p) *
+                      mirrorFade *
+                      cardAlpha,
+                ),
+            );
+          },
+          oldLayer: _cardShapeClip.layer,
+        );
+      },
+      oldLayer: _cardEdgeClip.layer,
     );
-    canvas.drawRect(
-      shiftedBounds,
-      Paint()
-        ..color = _shadeColor.withValues(
-          alpha:
-              _shadeColor.a *
-              AospShadeInterpolation.scrimAlpha(p) *
-              mirrorFade *
-              cardAlpha,
-        ),
-    );
-    canvas.restore();
   }
 
   void _paintPanel(PaintingContext context, Offset offset) {

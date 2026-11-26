@@ -424,12 +424,9 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
   AnimationController get _expansion => widget.expansion.qs;
 
   static const double _cardBlurScale =
-      _FullScreenShade._blurScale * ShadeCardBackdropCapture.cardBlurRatio;
+      _FullScreenShade._blurScale * shadeCardBlurRatio;
 
   bool _closedBefore = true;
-  final ShadeCardBackdropCapture _cardBlur = ShadeCardBackdropCapture();
-  ShellThemeData? _theme;
-  double? _lastCardSigma;
 
   /// The full quick settings' tile pages; each pull starts on the first.
   final PageController _pages = PageController();
@@ -485,36 +482,9 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
   void initState() {
     super.initState();
     widget.progress.addListener(_trackOpen);
-    widget.expansion.blur.addListener(_trackBlurClear);
     _trackOpen();
     _expansion.addListener(_trackQs);
     _trackQs();
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final theme = ShellTheme.of(context);
-    _theme = theme;
-    final sigma = theme.backdropBlurEnabled && theme.effectivePanelOpacity < 1
-        ? theme.edgelessBlurSigmaAt(1.0, scale: _cardBlurScale)
-        : 0.0;
-    if (_lastCardSigma != sigma) {
-      _lastCardSigma = sigma;
-      if (widget.progress.value > 0.001) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted && widget.progress.value > 0.001) {
-            _cardBlur.capture(
-              ref.read(shadeSceneBoundaryKeyProvider),
-              theme,
-              scale: _cardBlurScale,
-            );
-          }
-        });
-      } else if (sigma <= 0) {
-        _cardBlur.clear();
-      }
-    }
   }
 
   void _trackOpen() {
@@ -524,24 +494,8 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
       Future.microtask(() {
         if (mounted) ref.read(flashlightProvider.notifier).refresh();
       });
-      final theme = _theme;
-      if (theme != null) {
-        _cardBlur.capture(
-          ref.read(shadeSceneBoundaryKeyProvider),
-          theme,
-          scale: _cardBlurScale,
-        );
-      }
-    } else if (p <= 0 && widget.expansion.blur.value <= 0) {
-      _cardBlur.clear();
     }
     _closedBefore = p <= 0.001;
-  }
-
-  void _trackBlurClear() {
-    if (widget.progress.value <= 0 && widget.expansion.blur.value <= 0) {
-      _cardBlur.clear();
-    }
   }
 
   @override
@@ -556,10 +510,6 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
       oldWidget.progress.removeListener(_trackOpen);
       widget.progress.addListener(_trackOpen);
       _trackOpen();
-    }
-    if (oldWidget.expansion.blur != widget.expansion.blur) {
-      oldWidget.expansion.blur.removeListener(_trackBlurClear);
-      widget.expansion.blur.addListener(_trackBlurClear);
     }
     if (widget.closed || !widget.active) {
       // Closed: every pull starts on the first tile page, out of editing.
@@ -577,9 +527,7 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
   @override
   void dispose() {
     widget.progress.removeListener(_trackOpen);
-    widget.expansion.blur.removeListener(_trackBlurClear);
     _expansion.removeListener(_trackQs);
-    _cardBlur.dispose();
     _edit.dispose();
     _listScroll.dispose();
     _qsCollapsed.dispose();
@@ -872,6 +820,24 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
     final theme = ShellTheme.of(context);
     final scheme = phoneSchemeOf(context);
     final scale = PixelShadeViewport.scaleOf(context);
+    final output = ref.watch(
+      displayLayoutProvider.select((layout) => layout?.mainOutput),
+    );
+    // The cards blur what is behind the shade as the shade does
+    // (_FullScreenShade), only less, from the same backdrop group.
+    final cardBlur =
+        output != null &&
+            theme.backdropBlurEnabled &&
+            theme.blurStrength > 0 &&
+            theme.effectivePanelOpacity < 1 &&
+            !ShadeBackdropScene.sharesBlur(context)
+        ? ShadeCardBlur(
+            theme: theme,
+            output: output,
+            scale: _cardBlurScale,
+            backdropKey: BackdropGroup.of(context)?.backdropKey,
+          )
+        : null;
     // Every part is built once; the fractions only move, clip and fade
     // them (ShadeStackLayout).
     final shade = ShadeDismissGesture(
@@ -892,15 +858,9 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
           overscroll: widget.expansion.overscroll,
           brightnessMirror: widget.expansion.brightnessMirror,
           blur: widget.expansion.blur,
-          cardBackdrop: _cardBlur,
+          cardBlur: cardBlur,
           shadeColor: phoneShadePanel(scheme),
           pushback: pushback,
-          reach:
-              0.8 *
-              theme.edgelessBlurSigmaAt(
-                1.0,
-                scale: _FullScreenShade._blurScale,
-              ),
           cardBlurEnabled: !editing,
           pullsBoth: widget.expansion.pullsBoth,
           listScroll: _listScroll,

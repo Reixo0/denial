@@ -13,7 +13,6 @@ import '../widgets/lock/sim_pin_lock.dart';
 import 'package:denial_flutter_sdk/motion.dart';
 
 import '../widgets/lock/lock_screen_layer.dart';
-import '../widgets/shade/shade_card_blur.dart' show shadeSceneBoundaryKeyProvider;
 
 import 'package:denial_flutter_sdk/rendering.dart';
 
@@ -59,7 +58,6 @@ class ShellSecureStage extends ConsumerWidget {
       onUnlockComplete: ref
           .read(referenceShellProvider.notifier)
           .completeUnlockTransition,
-      sceneBoundaryKey: ref.read(shadeSceneBoundaryKeyProvider),
       scene: scene,
       chrome: chrome,
       overLock: overLockWindow == null
@@ -90,7 +88,6 @@ class UnlockTransitionHost extends StatefulWidget {
     required this.onUnlockComplete,
     required this.scene,
     required this.chrome,
-    this.sceneBoundaryKey,
     this.backdrop = const ShellWallpaper(),
     this.lockLayerBuilder,
     this.animateLock = false,
@@ -105,7 +102,6 @@ class UnlockTransitionHost extends StatefulWidget {
   final VoidCallback onUnlockComplete;
   final Widget scene;
   final Widget chrome;
-  final GlobalKey? sceneBoundaryKey;
   final Widget backdrop;
   final Widget Function(Animation<double> progress)? lockLayerBuilder;
   final bool animateLock;
@@ -198,7 +194,6 @@ class _UnlockTransitionHostState extends State<UnlockTransitionHost>
         return _UnlockVerticalStack(
           progress: progress,
           backdrop: widget.backdrop,
-          sceneBoundaryKey: widget.sceneBoundaryKey,
           scene: widget.scene,
           chrome: widget.chrome,
           lockLayer: child,
@@ -297,7 +292,6 @@ class _UnlockVerticalStack extends StatelessWidget {
   const _UnlockVerticalStack({
     required this.progress,
     required this.backdrop,
-    this.sceneBoundaryKey,
     required this.scene,
     required this.chrome,
     required this.lockLayer,
@@ -306,7 +300,6 @@ class _UnlockVerticalStack extends StatelessWidget {
 
   final double progress;
   final Widget backdrop;
-  final GlobalKey? sceneBoundaryKey;
   final Widget scene;
   final Widget chrome;
   final Widget? lockLayer;
@@ -338,7 +331,7 @@ class _UnlockVerticalStack extends StatelessWidget {
                       fit: StackFit.expand,
                       children: [
                         if (currentLockLayer != null) backdrop,
-                        RepaintBoundary(key: sceneBoundaryKey, child: scene),
+                        scene,
                         chrome,
                       ],
                     ),

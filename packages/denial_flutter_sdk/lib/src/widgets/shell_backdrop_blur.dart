@@ -200,35 +200,19 @@ class _ZoomedBackdrop extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ratio = output.scale;
+    final config = edgelessZoomedBackdropConfig(
+      ShellTheme.of(context),
+      strength: strength,
+      scale: scale,
+      zoom: zoom,
+      output: output,
+    );
     final target = output.transform.swapsAxes
         ? output.pixelSize.flipped
         : output.pixelSize;
-    final centre = target.center(Offset.zero);
-    final theme = ShellTheme.of(context);
-    var config = theme.edgelessBlurConfigAt(strength, scale: scale * ratio);
-    // The blur fills the border that the zoom leaves, as far as it hides that
-    // the picture's edge is drawn out there. (SurfaceFlinger mirrors it.)
-    final reach =
-        0.8 * theme.edgelessBlurSigmaAt(strength, scale: scale * ratio);
-    final zoom = math.max(this.zoom, 1 - 2 * reach / target.longestSide);
-    if (zoom != 1) {
-      config = ImageFilterConfig.compose(
-        outer: config,
-        inner: ImageFilterConfig(
-          ui.ImageFilter.matrix(
-            (Matrix4.translationValues(centre.dx, centre.dy, 0)
-                  ..scaleByDouble(zoom, zoom, 1, 1)
-                  ..translateByDouble(-centre.dx, -centre.dy, 0, 1))
-                .storage,
-            filterQuality: ui.FilterQuality.low,
-          ),
-        ),
-      );
-    }
     const child = SizedBox.expand();
     return Transform(
-      transform: _logicalFromTarget(output),
+      transform: logicalFromOutputPixels(output),
       child: OverflowBox(
         alignment: Alignment.topLeft,
         minWidth: target.width,
@@ -256,7 +240,47 @@ class _ZoomedBackdrop extends StatelessWidget {
 /// Maps the pixels of [output]'s target, whose rows run upwards in OpenGL, to
 /// the output's logical coordinates: what the compositor's OutputProjection
 /// and the engine do to the canvas, undone.
-Matrix4 _logicalFromTarget(DisplayOutput output) {
+/// The blur behind the phone shade, zoomed out by [zoom] (AOSP's
+/// NotificationShadeDepthController pushback), in [output]'s pixels: draw it
+/// under [logicalFromOutputPixels]. Every blur that samples what is behind
+/// the shade (the shade's own, the notification cards') is built here, so
+/// they line up as SurfaceFlinger's blur regions of one window do.
+ImageFilterConfig edgelessZoomedBackdropConfig(
+  ShellThemeData theme, {
+  required double strength,
+  required double scale,
+  required double zoom,
+  required DisplayOutput output,
+}) {
+  final ratio = output.scale;
+  final target = output.transform.swapsAxes
+      ? output.pixelSize.flipped
+      : output.pixelSize;
+  final centre = target.center(Offset.zero);
+  var config = theme.edgelessBlurConfigAt(strength, scale: scale * ratio);
+  // The blur fills the border that the zoom leaves, as far as it hides that
+  // the picture's edge is drawn out there. (SurfaceFlinger mirrors it.)
+  final reach = 0.8 * theme.edgelessBlurSigmaAt(strength, scale: scale * ratio);
+  zoom = math.max(zoom, 1 - 2 * reach / target.longestSide);
+  if (zoom != 1) {
+    config = ImageFilterConfig.compose(
+      outer: config,
+      inner: ImageFilterConfig(
+        ui.ImageFilter.matrix(
+          (Matrix4.translationValues(centre.dx, centre.dy, 0)
+                ..scaleByDouble(zoom, zoom, 1, 1)
+                ..translateByDouble(-centre.dx, -centre.dy, 0, 1))
+              .storage,
+          filterQuality: ui.FilterQuality.low,
+        ),
+      ),
+    );
+  }
+  return config;
+}
+
+/// Maps [output]'s pixels to the shell's logical coordinates.
+Matrix4 logicalFromOutputPixels(DisplayOutput output) {
   final Size(:width, :height) = output.pixelSize;
   // x' = a x + b y + c, y' = d x + e y + f, in pixels.
   final (a, b, c, d, e, f) = switch (output.transform) {
