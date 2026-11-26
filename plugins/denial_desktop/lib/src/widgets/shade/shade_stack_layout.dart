@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
@@ -968,14 +969,12 @@ class RenderShadeStack extends RenderBox
 
   final _cardEdgeClip = LayerHandle<ClipRRectLayer>();
   final _cardShapeClip = LayerHandle<ClipPathLayer>();
-  final _cardOpacity = LayerHandle<OpacityLayer>();
   final _cardTransform = LayerHandle<TransformLayer>();
   final _cardFilter = LayerHandle<BackdropFilterLayer>();
 
   void _dropCardLayers() {
     _cardEdgeClip.layer = null;
     _cardShapeClip.layer = null;
-    _cardOpacity.layer = null;
     _cardTransform.layer = null;
     _cardFilter.layer = null;
   }
@@ -1027,11 +1026,25 @@ class RenderShadeStack extends RenderBox
       _dropCardLayers();
       return;
     }
-    // Inside the opacity layer, whose origin is this box's.
     final here = toHere..multiply(logicalFromOutputPixels(blur.output));
+    // The fade is part of the filter, not an opacity layer around it: a
+    // backdrop filter inside a saveLayer can read that empty layer instead
+    // of the screen (the phone drew the cards black while they faded in).
+    final blurred = blur.filterAt(blurFrac, 1 - _pushback * blurFrac);
+    final faded = cardAlpha >= 1;
     final filter = (_cardFilter.layer ??= BackdropFilterLayer())
-      ..filter = blur.filterAt(blurFrac, 1 - _pushback * blurFrac)
-      ..blendMode = BlendMode.src
+      ..filter = faded
+          ? blurred
+          : ui.ImageFilter.compose(
+              outer: ui.ColorFilter.matrix(<double>[
+                1, 0, 0, 0, 0, //
+                0, 1, 0, 0, 0, //
+                0, 0, 1, 0, 0, //
+                0, 0, 0, cardAlpha, 0, //
+              ]),
+              inner: blurred,
+            )
+      ..blendMode = faded ? BlendMode.src : BlendMode.srcOver
       ..backdropKey = blur.backdropKey;
 
     _cardEdgeClip.layer = context.pushClipRRect(
@@ -1046,20 +1059,15 @@ class RenderShadeStack extends RenderBox
           bounds,
           shapes,
           (context, offset) {
-            _cardOpacity.layer = context.pushOpacity(
-              offset,
-              (cardAlpha * 255).round(),
-              (context, _) {
-                _cardTransform.layer = context.pushTransform(
-                  true,
-                  Offset.zero,
-                  here,
-                  (context, _) =>
-                      context.pushLayer(filter, (_, _) {}, Offset.zero),
-                  oldLayer: _cardTransform.layer,
-                );
-              },
-              oldLayer: _cardOpacity.layer,
+            // The opacity layer used to carry the offset; now the matrix
+            // does (pushTransform would wrap it around the matrix instead).
+            _cardTransform.layer = context.pushTransform(
+              true,
+              Offset.zero,
+              Matrix4.translationValues(offset.dx, offset.dy, 0)
+                ..multiply(here),
+              (context, _) => context.pushLayer(filter, (_, _) {}, Offset.zero),
+              oldLayer: _cardTransform.layer,
             );
             // The shade's tint over its blur, as over the cards' blur.
             context.canvas.drawRect(
