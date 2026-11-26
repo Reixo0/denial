@@ -160,18 +160,39 @@ class ChainedCurve extends Curve {
       second.transform(first.transform(t).clamp(0.0, 1.0));
 }
 
+class _AnimPair extends CompoundAnimation<double> {
+  _AnimPair(Animation<double> a, Animation<double> b) : super(first: a, next: b);
+
+  @override
+  double get value => first.value;
+}
+
 /// [AospShadeInterpolation.blurFraction] of a shade's panel fraction, its
-/// [ShadeExpansion.depth] and its quick settings (which move on their own only
-/// under a full blur).
+/// [ShadeExpansion.depth], its quick settings (which move on their own only
+/// under a full blur), and the brightness mirror (which unblurs the shade while
+/// dragging the brightness slider).
 class ShadeBlurAnimation extends CompoundAnimation<double> {
-  ShadeBlurAnimation(Animation<double> panel, Animation<double> depth, this._qs)
-    : super(first: panel, next: depth);
+  ShadeBlurAnimation(
+    Animation<double> panel,
+    Animation<double> depth,
+    this._qs,
+    this._brightnessMirror,
+  ) : super(
+        first: panel,
+        next: _AnimPair(depth, _AnimPair(_qs, _brightnessMirror)),
+      );
 
   final Animation<double> _qs;
+  final Animation<double> _brightnessMirror;
 
   @override
   double get value =>
-      AospShadeInterpolation.blurFraction(first.value, next.value, _qs.value);
+      AospShadeInterpolation.blurFraction(
+        first.value,
+        next.value,
+        _qs.value,
+      ) *
+      (1 - _brightnessMirror.value.clamp(0.0, 1.0));
 }
 
 /// NotificationShadeDepthController's shadeAnimation: the spring of the part

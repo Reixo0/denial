@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart' show ColorScheme, Icons;
@@ -9,6 +10,8 @@ import 'package:denial_flutter_sdk/localization.dart';
 import 'package:denial_flutter_sdk/system_services.dart';
 
 import '../phone_scheme.dart';
+import 'qs_tile_bounce.dart';
+import 'shade_expansion_motion.dart' show androidDuration;
 
 /// Android 17 quick-settings geometry, in dp (the shade lays itself out in
 /// Android's units; see `PixelShadeViewport`).
@@ -74,7 +77,7 @@ class QuickTile extends StatefulWidget {
 }
 
 class _QuickTileState extends State<QuickTile> {
-  static const Duration _morph = Duration(milliseconds: 220);
+  static final Duration _morph = androidDuration(220);
   bool _pressed = false;
 
   void _press(bool pressed) {
@@ -105,13 +108,17 @@ class _QuickTileState extends State<QuickTile> {
   Widget build(BuildContext context) {
     final scheme = phoneSchemeOf(context);
     final dim = widget.enabled ? 1.0 : 0.38;
+    final bounce = QsBounceScope.maybeOf(context);
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final bounceContainer =
+        widget.enabled && (!widget.wide || widget.onDetails == null);
     final onDetails = widget.onDetails;
     final VoidCallback? details = onDetails == null
         ? null
         : () => onDetails(_onScreen());
     final tile = widget.wide
-        ? _wide(scheme, dim, details)
-        : _small(scheme, dim);
+        ? _wide(scheme, dim, details, bounce)
+        : _small(scheme, dim, bounce);
     return Semantics(
       button: true,
       enabled: widget.enabled,
@@ -134,10 +141,26 @@ class _QuickTileState extends State<QuickTile> {
         },
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTapDown: (_) => _press(true),
-          onTapUp: (_) => _press(false),
-          onTapCancel: () => _press(false),
-          onTap: widget.wide && details != null ? details : _toggle,
+          onTapDown: (_) {
+            _press(true);
+            if (bounceContainer) {
+              bounce?.onPressDown(reduceMotion: reduceMotion);
+            }
+          },
+          onTapUp: (_) {
+            _press(false);
+            if (bounceContainer) bounce?.onPressUp();
+          },
+          onTapCancel: () {
+            _press(false);
+            if (bounceContainer) bounce?.onPressUp();
+          },
+          onTap: widget.wide && details != null
+              ? () {
+                  bounce?.animateContentBounce(reduceMotion: reduceMotion);
+                  details();
+                }
+              : _toggle,
           onLongPress: widget.onSettings == null && details == null
               ? null
               : () {
@@ -150,8 +173,13 @@ class _QuickTileState extends State<QuickTile> {
     );
   }
 
-  Widget _small(ColorScheme scheme, double dim) {
+  Widget _small(ColorScheme scheme, double dim, QsBounceableController? bounce) {
     final active = widget.active;
+    final icon = Icon(
+      widget.icon,
+      size: phoneIconSize,
+      color: active ? scheme.onPrimary : scheme.onSurface,
+    );
     return AnimatedContainer(
       duration: _morph,
       curve: Curves.easeOutCubic,
@@ -170,16 +198,19 @@ class _QuickTileState extends State<QuickTile> {
       alignment: Alignment.center,
       child: Opacity(
         opacity: widget.busy ? 0.6 : dim,
-        child: Icon(
-          widget.icon,
-          size: phoneIconSize,
-          color: active ? scheme.onPrimary : scheme.onSurface,
-        ),
+        child: bounce == null
+            ? icon
+            : ScaleTransition(scale: bounce.iconScale, child: icon),
       ),
     );
   }
 
-  Widget _wide(ColorScheme scheme, double dim, VoidCallback? details) {
+  Widget _wide(
+    ColorScheme scheme,
+    double dim,
+    VoidCallback? details,
+    QsBounceableController? bounce,
+  ) {
     final active = widget.active;
     final subtitle = widget.subtitle;
     // With details, the well toggles and the text opens them (Android's
@@ -219,6 +250,37 @@ class _QuickTileState extends State<QuickTile> {
             squish: squish,
             child: well,
           );
+    final labels = Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          widget.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          // titleSmallEmphasized and labelMedium, both onSurface
+          // (AOSP CommonTile.kt).
+          style: TextStyle(
+            color: scheme.onSurface,
+            fontSize: 14,
+            height: 1.43,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        if (subtitle != null && subtitle.isNotEmpty)
+          Text(
+            subtitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: scheme.onSurface,
+              fontSize: 12,
+              height: 1.33,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+      ],
+    );
     return AnimatedContainer(
       duration: _morph,
       curve: Curves.easeOutCubic,
@@ -252,37 +314,15 @@ class _QuickTileState extends State<QuickTile> {
             // AOSP TileArrangementPadding.
             const SizedBox(width: 6),
             Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    widget.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    // titleSmallEmphasized and labelMedium, both onSurface
-                    // (AOSP CommonTile.kt).
-                    style: TextStyle(
-                      color: scheme.onSurface,
-                      fontSize: 14,
-                      height: 1.43,
-                      fontWeight: FontWeight.w600,
+              child: bounce == null
+                  ? labels
+                  : ScaleTransition(
+                      scale: bounce.textScale,
+                      alignment: Directionality.of(context) == TextDirection.rtl
+                          ? Alignment.centerRight
+                          : Alignment.centerLeft,
+                      child: labels,
                     ),
-                  ),
-                  if (subtitle != null && subtitle.isNotEmpty)
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: scheme.onSurface,
-                        fontSize: 12,
-                        height: 1.33,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                ],
-              ),
             ),
           ],
         ),
@@ -325,75 +365,101 @@ class PixelTileGrid extends StatelessWidget {
   };
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final column =
-          (constraints.maxWidth - PixelQs.gap * (PixelQs.columns - 1)) /
-          PixelQs.columns;
-      final motion = this.motion;
-      var row = -1;
-      var used = PixelQs.columns;
-      final shared = <Widget>[];
-      final rest = <Widget>[];
-      for (final tile in tiles) {
-        final span = _wide(tile) ? 2 : 1;
-        if (used + span > PixelQs.columns) {
-          row++;
-          used = 0;
-        }
-        used += span;
-        final sized = SizedBox(
-          width: span == 2 ? column * 2 + PixelQs.gap : column,
-          height: PixelQs.tileHeight,
-          child: tile,
-        );
-        if (motion == null) {
-          shared.add(sized);
-        } else if (row < motion.sharedRows) {
-          shared.add(QsTileSquish(squish: motion.squish, child: sized));
-        } else {
-          rest.add(sized);
-        }
+  Widget build(BuildContext context) {
+    final motion = this.motion;
+    final rows = <({List<({Widget child, int span})> tiles, int used})>[];
+    var current = <({Widget child, int span})>[];
+    var used = 0;
+    for (final tile in tiles) {
+      final span = _wide(tile) ? 2 : 1;
+      if (used + span > PixelQs.columns) {
+        rows.add((tiles: current, used: used));
+        current = <({Widget child, int span})>[];
+        used = 0;
       }
-      Widget wrap(List<Widget> children) => Wrap(
-        spacing: PixelQs.gap,
-        runSpacing: PixelQs.gap,
-        children: children,
+      current.add((child: tile, span: span));
+      used += span;
+    }
+    if (current.isNotEmpty) {
+      rows.add((tiles: current, used: used));
+    }
+
+    Widget buildRow(int index) {
+      final row = rows[index];
+      final bounced = QsBounceRow(
+        tiles: row.tiles,
+        bounceEnd: row.used < PixelQs.columns,
+        columns: PixelQs.columns,
+        gap: PixelQs.gap,
+        tileHeight: PixelQs.tileHeight,
       );
-      if (motion == null || rest.isEmpty) return wrap(shared);
-      // The rows only the full quick settings show fade in as one layer.
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          wrap(shared),
-          const SizedBox(height: PixelQs.gap),
-          FadeTransition(opacity: motion.contentAlpha, child: wrap(rest)),
-        ],
-      );
-    },
-  );
+      if (motion != null && index < motion.sharedRows) {
+        return QsTileSquish(squish: motion.squish, child: bounced);
+      }
+      return bounced;
+    }
+
+    final shared = <Widget>[];
+    final rest = <Widget>[];
+    for (var i = 0; i < rows.length; i++) {
+      final rowWidget = buildRow(i);
+      if (motion != null && i >= motion.sharedRows) {
+        if (rest.isNotEmpty) rest.add(const SizedBox(height: PixelQs.gap));
+        rest.add(rowWidget);
+      } else {
+        if (shared.isNotEmpty) shared.add(const SizedBox(height: PixelQs.gap));
+        shared.add(rowWidget);
+      }
+    }
+
+    final sharedColumn = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: shared,
+    );
+    if (motion == null || rest.isEmpty) return sharedColumn;
+    // The rows only the full quick settings show fade in as one layer.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        sharedColumn,
+        const SizedBox(height: PixelQs.gap),
+        FadeTransition(
+          opacity: motion.contentAlpha,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: rest,
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 /// Android 17's brightness slider: a thick track split by a thin handle,
-/// the filled part in the accent.
+/// the filled part in the accent, with AOSP mirror container & icon fade.
 class PixelBrightnessSlider extends StatefulWidget {
   const PixelBrightnessSlider({
     super.key,
     required this.value,
     required this.onChanged,
     this.onChangeEnd,
+    this.onDraggingChanged,
   });
 
   final double value;
   final ValueChanged<double> onChanged;
   final ValueChanged<double>? onChangeEnd;
+  final ValueChanged<bool>? onDraggingChanged;
 
   @override
   State<PixelBrightnessSlider> createState() => _PixelBrightnessSliderState();
 }
 
-class _PixelBrightnessSliderState extends State<PixelBrightnessSlider> {
+class _PixelBrightnessSliderState extends State<PixelBrightnessSlider>
+    with TickerProviderStateMixin {
   // AOSP BrightnessSliderDimensions.Default: 40 dp track with 12 dp outer
   // and 2 dp inner corners, a 4×52 dp thumb 6 dp clear of the track.
   static const double _height = 52;
@@ -403,26 +469,98 @@ class _PixelBrightnessSliderState extends State<PixelBrightnessSlider> {
   static const double _outer = 12;
   static const double _inner = 2;
 
+  late final AnimationController _inactiveIcon = AnimationController(
+    vsync: this,
+    value: 1,
+  );
+  late final AnimationController _activeIcon = AnimationController(
+    vsync: this,
+    value: 0,
+  );
+  Timer? _appearDelay;
   double? _dragValue;
+  bool _dragging = false;
+  bool? _iconOnFill;
+  bool _targetIconOnFill = false;
+  bool _syncScheduled = false;
+
+  @override
+  void dispose() {
+    _appearDelay?.cancel();
+    if (_dragging) widget.onDraggingChanged?.call(false);
+    _inactiveIcon.dispose();
+    _activeIcon.dispose();
+    super.dispose();
+  }
+
+  static bool _isIconOnFill(double value, double width) {
+    final handleX = _handle / 2 + value * (width - _handle);
+    final filledEnd = math.max(0.0, handleX - _handle / 2 - _handleGap);
+    final emptyStart = math.min(width, handleX + _handle / 2 + _handleGap);
+    return width - emptyStart <= 40 && filledEnd > 40;
+  }
+
+  static IconData _brightnessIcon(double value) => value <= 0.20
+      ? Icons.brightness_low_rounded
+      : value >= 0.80
+      ? Icons.brightness_high_rounded
+      : Icons.brightness_medium_rounded;
+
+  void _setDragging(bool value) {
+    if (_dragging == value) return;
+    setState(() => _dragging = value);
+    widget.onDraggingChanged?.call(value);
+  }
+
+  void _applyIconSide(
+    bool iconOnFill, {
+    required bool reduceMotion,
+    bool snap = false,
+  }) {
+    _targetIconOnFill = iconOnFill;
+    if (_iconOnFill == iconOnFill && !snap) return;
+    final first = _iconOnFill == null;
+    _iconOnFill = iconOnFill;
+    _appearDelay?.cancel();
+    _appearDelay = null;
+    if (snap || first || reduceMotion) {
+      _inactiveIcon.value = iconOnFill ? 0.0 : 1.0;
+      _activeIcon.value = iconOnFill ? 1.0 : 0.0;
+      if (first && mounted) setState(() {});
+      return;
+    }
+    final outgoing = iconOnFill ? _inactiveIcon : _activeIcon;
+    final incoming = iconOnFill ? _activeIcon : _inactiveIcon;
+    outgoing.animateTo(0, duration: androidDuration(50));
+    _appearDelay = Timer(androidDuration(33), () {
+      _appearDelay = null;
+      if (!mounted) return;
+      incoming.animateTo(1, duration: androidDuration(100));
+    });
+  }
 
   double _valueAt(double x, double width) =>
       ((x - _handle / 2) / math.max(1, width - _handle)).clamp(0.0, 1.0);
 
-  void _update(double x, double width) {
+  void _update(double x, double width, {required bool reduceMotion}) {
     final value = _valueAt(x, width);
     setState(() => _dragValue = value);
+    _setDragging(true);
+    _applyIconSide(_isIconOnFill(value, width), reduceMotion: reduceMotion);
     widget.onChanged(value);
   }
 
   void _end() {
     final value = _dragValue;
     setState(() => _dragValue = null);
+    _setDragging(false);
     if (value != null) widget.onChangeEnd?.call(value);
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = phoneSchemeOf(context);
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final value = (_dragValue ?? widget.value).clamp(0.0, 1.0);
     return Semantics(
       slider: true,
@@ -438,19 +576,92 @@ class _PixelBrightnessSliderState extends State<PixelBrightnessSlider> {
             handleX + _handle / 2 + _handleGap,
           );
           const top = (_height - _track) / 2;
-          final iconOnFill = width - emptyStart < 40;
+          final iconOnFill = _isIconOnFill(value, width);
+          _targetIconOnFill = iconOnFill;
+          if (_iconOnFill != iconOnFill && !_syncScheduled) {
+            final first = _iconOnFill == null;
+            _syncScheduled = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _syncScheduled = false;
+              if (!mounted) return;
+              _applyIconSide(
+                _targetIconOnFill,
+                reduceMotion: MediaQuery.disableAnimationsOf(context),
+                snap: first,
+              );
+            });
+          }
+          final icon = _brightnessIcon(value);
+          final Animation<double> activeOpacity = _iconOnFill == null
+              ? AlwaysStoppedAnimation<double>(iconOnFill ? 1.0 : 0.0)
+              : _activeIcon;
+          final Animation<double> inactiveOpacity = _iconOnFill == null
+              ? AlwaysStoppedAnimation<double>(iconOnFill ? 0.0 : 1.0)
+              : _inactiveIcon;
+          Widget trackIcon({
+            required Animation<double> opacity,
+            required Color color,
+            required BorderRadius radius,
+          }) => ClipRRect(
+            borderRadius: radius,
+            child: OverflowBox(
+              alignment: Alignment.centerRight,
+              minWidth: 32,
+              maxWidth: 32,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: FadeTransition(
+                  opacity: opacity,
+                  child: Icon(icon, size: 24, color: color),
+                ),
+              ),
+            ),
+          );
           return GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onHorizontalDragStart: (d) => _update(d.localPosition.dx, width),
-            onHorizontalDragUpdate: (d) => _update(d.localPosition.dx, width),
+            onHorizontalDragStart: (d) => _update(
+              d.localPosition.dx,
+              width,
+              reduceMotion: reduceMotion,
+            ),
+            onHorizontalDragUpdate: (d) => _update(
+              d.localPosition.dx,
+              width,
+              reduceMotion: reduceMotion,
+            ),
             onHorizontalDragEnd: (_) => _end(),
             onHorizontalDragCancel: _end,
-            onTapDown: (d) => _update(d.localPosition.dx, width),
+            onTapDown: (d) => _update(
+              d.localPosition.dx,
+              width,
+              reduceMotion: reduceMotion,
+            ),
             onTapUp: (_) => _end(),
+            onTapCancel: _end,
             child: SizedBox(
               height: _height,
               child: Stack(
+                clipBehavior: Clip.none,
                 children: <Widget>[
+                  // AOSP BrightnessSlider.kt: mirror backdrop pill while dragging.
+                  Positioned(
+                    left: -10,
+                    right: -10,
+                    top: -6,
+                    bottom: -6,
+                    child: AnimatedContainer(
+                      duration: reduceMotion
+                          ? Duration.zero
+                          : androidDuration(200),
+                      curve: Curves.easeOut,
+                      decoration: BoxDecoration(
+                        color: _dragging
+                            ? scheme.surfaceContainer
+                            : const Color(0x00000000),
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                    ),
+                  ),
                   if (filledEnd > 0)
                     Positioned(
                       left: 0,
@@ -495,20 +706,36 @@ class _PixelBrightnessSliderState extends State<PixelBrightnessSlider> {
                       ),
                     ),
                   ),
-                  // The icon ends the empty track, 6 dp in (onSurface), or,
-                  // when that is too short, the filled one (onPrimary).
-                  // Its 28 dp box holds a 24 dp glyph.
-                  Positioned(
-                    left: iconOnFill ? math.max(8.0, filledEnd - 8 - 24) : null,
-                    right: iconOnFill ? null : 8,
-                    top: 0,
-                    bottom: 0,
-                    child: Icon(
-                      Icons.brightness_medium_rounded,
-                      size: 24,
-                      color: iconOnFill ? scheme.onPrimary : scheme.onSurface,
+                  if (emptyStart < width)
+                    Positioned(
+                      left: emptyStart,
+                      right: 0,
+                      top: top,
+                      height: _track,
+                      child: trackIcon(
+                        opacity: inactiveOpacity,
+                        color: scheme.onSurface,
+                        radius: const BorderRadius.horizontal(
+                          left: Radius.circular(_inner),
+                          right: Radius.circular(_outer),
+                        ),
+                      ),
                     ),
-                  ),
+                  if (filledEnd > 0)
+                    Positioned(
+                      left: 0,
+                      top: top,
+                      width: filledEnd,
+                      height: _track,
+                      child: trackIcon(
+                        opacity: activeOpacity,
+                        color: scheme.onPrimary,
+                        radius: const BorderRadius.horizontal(
+                          left: Radius.circular(_outer),
+                          right: Radius.circular(_inner),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -868,7 +1095,7 @@ class PixelPagerDots extends StatelessWidget {
         final page = (controller.page ?? 0).round();
         controller.animateToPage(
           (page + 1) % count,
-          duration: const Duration(milliseconds: 300),
+          duration: androidDuration(300),
           curve: Curves.easeInOut,
         );
       },

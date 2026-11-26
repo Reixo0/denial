@@ -108,7 +108,8 @@ class PixelNotificationCard extends StatefulWidget {
   State<PixelNotificationCard> createState() => _PixelNotificationCardState();
 }
 
-class _PixelNotificationCardState extends State<PixelNotificationCard> {
+class _PixelNotificationCardState extends State<PixelNotificationCard>
+    with SingleTickerProviderStateMixin {
   bool _expanded = false;
   bool _pressed = false;
 
@@ -117,6 +118,64 @@ class _PixelNotificationCardState extends State<PixelNotificationCard> {
 
   /// Showing the settings in place of the notification.
   bool _guts = false;
+  Offset? _gutsOrigin;
+  Size? _gutsRevealSize;
+  late final AnimationController _gutsController = AnimationController(
+    vsync: this,
+    duration: androidDuration(360),
+  )..addStatusListener(_onGutsStatus);
+  late final Animation<double> _gutsReveal = CurvedAnimation(
+    parent: _gutsController,
+    curve: const Cubic(0, 0, 0.2, 1),
+    reverseCurve: const Cubic(0.4, 0, 1, 1).flipped,
+  );
+
+  void _onGutsStatus(AnimationStatus status) {
+    if (status == AnimationStatus.dismissed ||
+        status == AnimationStatus.completed) {
+      if (mounted) setState(() {});
+    }
+  }
+
+  void _openGuts(Offset origin) {
+    HapticFeedback.heavyImpact();
+    _press(false);
+    setState(() {
+      _sizing = true;
+      _guts = true;
+      _gutsOrigin = origin;
+      _gutsRevealSize = null;
+    });
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _gutsController.value = 1;
+    } else {
+      _gutsController.forward(from: 0);
+    }
+  }
+
+  void _closeGuts() {
+    final box = context.findRenderObject();
+    if (box is RenderBox && box.hasSize) {
+      _gutsRevealSize = box.size;
+    }
+    setState(() {
+      _sizing = true;
+      _guts = false;
+    });
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _gutsController.value = 0;
+    } else {
+      _gutsController.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _gutsController
+      ..removeStatusListener(_onGutsStatus)
+      ..dispose();
+    super.dispose();
+  }
 
   void _toggle() => setState(() {
     _sizing = false;
@@ -421,53 +480,107 @@ class _PixelNotificationCardState extends State<PixelNotificationCard> {
         onTapUp: (_) => _press(false),
         onTapCancel: () => _press(false),
         onTap: onTap,
-        onLongPress: canGuts && !_guts
-            ? () {
-                HapticFeedback.heavyImpact();
-                _press(false);
-                setState(() {
-                  _sizing = true;
-                  _guts = true;
-                });
-              }
+        onLongPressStart: canGuts && !_guts
+            ? (details) => _openGuts(details.localPosition)
             : null,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 120),
+          duration: androidDuration(120),
           decoration: BoxDecoration(color: background, borderRadius: radius),
           child: AnimatedSize(
             // Opening and closing move the height themselves.
             duration: _sizing ? androidDuration(360) : Duration.zero,
             curve: Curves.fastOutSlowIn,
             alignment: Alignment.topCenter,
-            child: _guts
-                ? _PixelGuts(
-                    notification: notification,
-                    appName: appName,
-                    onDismiss: widget.onDismiss,
-                    onControl: widget.onControl,
-                    onClose: () => setState(() => _guts = false),
-                  )
-                : NotificationPullExpand(
-                    enabled: pullable,
-                    open: _expanded,
-                    onStart: () {
-                      _press(false);
-                      setState(() => _sizing = false);
-                    },
-                    onOpen: (open) => setState(() => _expanded = open),
-                    builder: (context, motion) => NotificationMorph(
-                      motion: motion,
-                      collapsed: motion.showsCollapsed
-                          ? layout(expanded: false)
-                          : null,
-                      expanded: motion.showsExpanded
-                          ? layout(expanded: true)
-                          : null,
-                    ),
-                  ),
+            child: _buildGutsTransition(
+              notification: notification,
+              appName: appName,
+              pullable: pullable,
+              layout: layout,
+            ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildGutsTransition({
+    required DesktopNotification notification,
+    required String appName,
+    required bool pullable,
+    required Widget Function({required bool expanded}) layout,
+  }) {
+    final showGuts = _guts || !_gutsController.isDismissed;
+    final gutsFull = _guts && _gutsController.isCompleted;
+    Widget buildContent() => NotificationPullExpand(
+      enabled: pullable,
+      open: _expanded,
+      onStart: () {
+        _press(false);
+        setState(() => _sizing = false);
+      },
+      onOpen: (open) => setState(() => _expanded = open),
+      builder: (context, motion) => NotificationMorph(
+        motion: motion,
+        collapsed: motion.showsCollapsed ? layout(expanded: false) : null,
+        expanded: motion.showsExpanded ? layout(expanded: true) : null,
+      ),
+    );
+    if (!showGuts) return buildContent();
+
+    final guts = _PixelGuts(
+      notification: notification,
+      appName: appName,
+      onDismiss: widget.onDismiss,
+      onControl: widget.onControl,
+      onClose: _closeGuts,
+    );
+    if (gutsFull) return guts;
+
+    Widget clippedContent(Widget child) => ClipPath(
+      clipper: _GutsRevealClipper(
+        progress: _gutsReveal,
+        origin: _gutsOrigin,
+        revealSize: _gutsRevealSize,
+        invert: true,
+      ),
+      child: child,
+    );
+    final gutsLayer = ClipPath(
+      clipper: _GutsRevealClipper(
+        progress: _gutsReveal,
+        origin: _gutsOrigin,
+        revealSize: _gutsRevealSize,
+        invert: false,
+      ),
+      child: guts,
+    );
+    if (_guts) {
+      return Stack(
+        alignment: Alignment.topCenter,
+        children: <Widget>[
+          Positioned.fill(
+            child: IgnorePointer(
+              child: clippedContent(
+                Align(alignment: Alignment.topCenter, child: buildContent()),
+              ),
+            ),
+          ),
+          gutsLayer,
+        ],
+      );
+    }
+    return Stack(
+      alignment: Alignment.topCenter,
+      clipBehavior: Clip.hardEdge,
+      children: <Widget>[
+        clippedContent(buildContent()),
+        Positioned(
+          left: 0,
+          right: 0,
+          top: 0,
+          child: IgnorePointer(child: gutsLayer),
+        ),
+      ],
     );
   }
 
@@ -1146,7 +1259,7 @@ class _GutsChoice extends StatelessWidget {
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
+          duration: androidDuration(200),
           curve: Curves.fastOutSlowIn,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
@@ -1164,7 +1277,7 @@ class _GutsChoice extends StatelessWidget {
               const SizedBox(width: PixelNotificationMetrics.margin),
               Expanded(
                 child: AnimatedSize(
-                  duration: const Duration(milliseconds: 200),
+                  duration: androidDuration(200),
                   curve: Curves.fastOutSlowIn,
                   alignment: Alignment.topCenter,
                   child: Column(
@@ -1674,4 +1787,43 @@ class _RenderPixelGroup extends RenderBox
     if (_motion.active) return false;
     return defaultHitTestChildren(result, position: position);
   }
+}
+
+/// Circular reveal clip matching AOSP `NotificationGuts.animateOpen/Close`.
+class _GutsRevealClipper extends CustomClipper<Path> {
+  _GutsRevealClipper({
+    required this.progress,
+    required this.origin,
+    required this.revealSize,
+    required this.invert,
+  }) : super(reclip: progress);
+
+  final Animation<double> progress;
+  final Offset? origin;
+  final Size? revealSize;
+  final bool invert;
+
+  @override
+  Path getClip(Size size) {
+    final target = revealSize ?? size;
+    final center = origin ?? target.center(Offset.zero);
+    final horz = math.max(target.width - center.dx, center.dx);
+    final vert = math.max(target.height - center.dy, center.dy);
+    final radius =
+        math.sqrt(horz * horz + vert * vert) * progress.value.clamp(0.0, 1.0);
+    final circle = Path()
+      ..addOval(Rect.fromCircle(center: center, radius: radius));
+    if (!invert) return circle;
+    return Path()
+      ..fillType = PathFillType.evenOdd
+      ..addRect(Offset.zero & size)
+      ..addPath(circle, Offset.zero);
+  }
+
+  @override
+  bool shouldReclip(_GutsRevealClipper oldClipper) =>
+      !identical(oldClipper.progress, progress) ||
+      oldClipper.origin != origin ||
+      oldClipper.revealSize != revealSize ||
+      oldClipper.invert != invert;
 }

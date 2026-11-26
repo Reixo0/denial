@@ -37,6 +37,7 @@ import '../../state/qs_tile_layout.dart';
 
 import 'mobile_notification_history.dart';
 import 'shade_backdrop_scene.dart';
+import 'shade_card_blur.dart';
 import 'pixel_media_card.dart';
 import 'shade_dismiss_gesture.dart';
 import 'shade_expansion.dart';
@@ -112,6 +113,7 @@ class QuickSettingsShade extends ConsumerWidget {
                   _FullScreenShade(
                     progress: progress,
                     blur: expansion.blur,
+                    brightnessMirror: expansion.brightnessMirror,
                     child: Visibility.maintain(
                       visible: shown,
                       child: Focus(
@@ -151,6 +153,7 @@ class _FullScreenShade extends ConsumerWidget {
   const _FullScreenShade({
     required this.progress,
     required this.blur,
+    required this.brightnessMirror,
     required this.child,
   });
 
@@ -158,6 +161,7 @@ class _FullScreenShade extends ConsumerWidget {
 
   /// How much of the blur shows, and with it of the zoom.
   final Animation<double> blur;
+  final Animation<double> brightnessMirror;
   final Widget child;
 
   /// How much wider EvolutionX's shade blurs than the glass setting's frost,
@@ -193,10 +197,12 @@ class _FullScreenShade extends ConsumerWidget {
     // Android's shade panel over its scrim (SystemUI ShadeColors).
     final panel = phoneShadePanel(phoneSchemeOf(context));
     final background = AnimatedBuilder(
-      animation: progress,
+      animation: Listenable.merge([progress, brightnessMirror]),
       child: ColoredBox(color: panel),
       builder: (context, background) => Opacity(
-        opacity: AospShadeInterpolation.scrimAlpha(progress.value),
+        opacity:
+            AospShadeInterpolation.scrimAlpha(progress.value) *
+            (1 - brightnessMirror.value.clamp(0.0, 1.0)),
         child: background,
       ),
     );
@@ -417,7 +423,13 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
   /// The quick settings' fraction: 0 the quick tiles, 1 the full QS.
   AnimationController get _expansion => widget.expansion.qs;
 
+  static const double _cardBlurScale =
+      _FullScreenShade._blurScale * ShadeCardBackdropCapture.cardBlurRatio;
+
   bool _closedBefore = true;
+  final ShadeCardBackdropCapture _cardBlur = ShadeCardBackdropCapture();
+  ShellThemeData? _theme;
+  double? _lastCardSigma;
 
   /// The full quick settings' tile pages; each pull starts on the first.
   final PageController _pages = PageController();
@@ -473,9 +485,36 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
   void initState() {
     super.initState();
     widget.progress.addListener(_trackOpen);
+    widget.expansion.blur.addListener(_trackBlurClear);
     _trackOpen();
     _expansion.addListener(_trackQs);
     _trackQs();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final theme = ShellTheme.of(context);
+    _theme = theme;
+    final sigma = theme.backdropBlurEnabled && theme.effectivePanelOpacity < 1
+        ? theme.edgelessBlurSigmaAt(1.0, scale: _cardBlurScale)
+        : 0.0;
+    if (_lastCardSigma != sigma) {
+      _lastCardSigma = sigma;
+      if (widget.progress.value > 0.001) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && widget.progress.value > 0.001) {
+            _cardBlur.capture(
+              ref.read(shadeSceneBoundaryKeyProvider),
+              theme,
+              scale: _cardBlurScale,
+            );
+          }
+        });
+      } else if (sigma <= 0) {
+        _cardBlur.clear();
+      }
+    }
   }
 
   void _trackOpen() {
@@ -485,8 +524,24 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
       Future.microtask(() {
         if (mounted) ref.read(flashlightProvider.notifier).refresh();
       });
+      final theme = _theme;
+      if (theme != null) {
+        _cardBlur.capture(
+          ref.read(shadeSceneBoundaryKeyProvider),
+          theme,
+          scale: _cardBlurScale,
+        );
+      }
+    } else if (p <= 0 && widget.expansion.blur.value <= 0) {
+      _cardBlur.clear();
     }
     _closedBefore = p <= 0.001;
+  }
+
+  void _trackBlurClear() {
+    if (widget.progress.value <= 0 && widget.expansion.blur.value <= 0) {
+      _cardBlur.clear();
+    }
   }
 
   @override
@@ -501,6 +556,10 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
       oldWidget.progress.removeListener(_trackOpen);
       widget.progress.addListener(_trackOpen);
       _trackOpen();
+    }
+    if (oldWidget.expansion.blur != widget.expansion.blur) {
+      oldWidget.expansion.blur.removeListener(_trackBlurClear);
+      widget.expansion.blur.addListener(_trackBlurClear);
     }
     if (widget.closed || !widget.active) {
       // Closed: every pull starts on the first tile page, out of editing.
@@ -518,7 +577,9 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
   @override
   void dispose() {
     widget.progress.removeListener(_trackOpen);
+    widget.expansion.blur.removeListener(_trackBlurClear);
     _expansion.removeListener(_trackQs);
+    _cardBlur.dispose();
     _edit.dispose();
     _listScroll.dispose();
     _qsCollapsed.dispose();
@@ -793,6 +854,23 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
     final mediaActive = ref.watch(
       mediaCardProvider.select((card) => card?.active ?? false),
     );
+    final editing = ref.watch(qsEditingProvider);
+    final home = ref.watch(
+      referenceShellProvider.select(
+        (state) =>
+            state.primaryWindow == null ||
+            state.overviewVisible ||
+            state.homeTransitionActive,
+      ),
+    );
+    final size = MediaQuery.sizeOf(context);
+    final pushback = size.width > size.height
+        ? 0.0
+        : home
+        ? _FullScreenShade._pushbackHome
+        : _FullScreenShade._pushbackApp;
+    final theme = ShellTheme.of(context);
+    final scheme = phoneSchemeOf(context);
     final scale = PixelShadeViewport.scaleOf(context);
     // Every part is built once; the fractions only move, clip and fade
     // them (ShadeStackLayout).
@@ -812,9 +890,21 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
           qs: _expansion,
           overshoot: widget.expansion.overshoot,
           overscroll: widget.expansion.overscroll,
+          brightnessMirror: widget.expansion.brightnessMirror,
+          blur: widget.expansion.blur,
+          cardBackdrop: _cardBlur,
+          shadeColor: phoneShadePanel(scheme),
+          pushback: pushback,
+          reach:
+              0.8 *
+              theme.edgelessBlurSigmaAt(
+                1.0,
+                scale: _FullScreenShade._blurScale,
+              ),
+          cardBlurEnabled: !editing,
           pullsBoth: widget.expansion.pullsBoth,
           listScroll: _listScroll,
-          panelColor: phoneNotificationPanel(phoneSchemeOf(context)),
+          panelColor: phoneNotificationPanel(scheme),
           sideMargin: PixelQs.margin,
           quickTilesHeight: twoRows,
           mediaActive: mediaActive,
@@ -838,12 +928,12 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
                 part: part.slot,
                 child: RepaintBoundary(child: _PixelHeader(part: part)),
               ),
-            const ShadeStackSlot(
+            ShadeStackSlot(
               part: ShadePart.slider,
-              child: RepaintBoundary(
-                child: Padding(
-                  padding: EdgeInsets.only(bottom: 6),
-                  child: _BrightnessSlider(),
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: _BrightnessSlider(
+                  onDraggingChanged: widget.expansion.setBrightnessMirror,
                 ),
               ),
             ),
@@ -957,7 +1047,6 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
       ),
     );
     // AOSP's edit mode takes the shade's place, over the same background.
-    final editing = ref.watch(qsEditingProvider);
     ref.listen(qsEditingProvider, (_, editing) {
       if (MediaQuery.disableAnimationsOf(context)) {
         _edit.value = editing ? 1 : 0;
@@ -1065,7 +1154,9 @@ class _PixelHeader extends ConsumerWidget {
 }
 
 class _BrightnessSlider extends ConsumerWidget {
-  const _BrightnessSlider();
+  const _BrightnessSlider({required this.onDraggingChanged});
+
+  final ValueChanged<bool> onDraggingChanged;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1081,6 +1172,7 @@ class _BrightnessSlider extends ConsumerWidget {
     final controller = ref.read(displayBrightnessProvider.notifier);
     return PixelBrightnessSlider(
       value: brightness,
+      onDraggingChanged: onDraggingChanged,
       onChanged: (value) {
         if (output != null) controller.setLevel(output, value);
       },

@@ -27,6 +27,7 @@ class NotificationClearAll {
     begin: 1,
     end: 0,
   ).animate(CurvedAnimation(parent: _time, curve: const Interval(0, 0.5)));
+  int _totalMs = 0;
   bool _running = false;
 
   /// The rows that are laid out, with their index.
@@ -57,6 +58,7 @@ class NotificationClearAll {
       delay += gap;
     }
     final total = rows.last._delay! + _slideMs;
+    _totalMs = total;
     _time.duration = androidDuration(total);
     _running = true;
     try {
@@ -70,6 +72,7 @@ class NotificationClearAll {
       row._delay = null;
     }
     _time.value = 0;
+    _totalMs = 0;
     _running = false;
   }
 
@@ -151,9 +154,9 @@ class _NotificationClearSlideState extends State<NotificationClearSlide> {
 
   double get _offset {
     final delay = _delay;
-    final total = widget.clearAll._time.duration;
-    if (delay == null || total == null) return 0;
-    final ms = widget.clearAll._time.value * total.inMilliseconds - delay;
+    final total = widget.clearAll._totalMs;
+    if (delay == null || total <= 0) return 0;
+    final ms = widget.clearAll._time.value * total - delay;
     return const Cubic(
       0.4,
       0,

@@ -30,7 +30,8 @@ class ShadeExpansion {
        overshoot = AnimationController.unbounded(vsync: vsync),
        overscroll = AnimationController.unbounded(vsync: vsync),
        engaged = AnimationController(vsync: vsync, duration: _engageDuration),
-       depth = AnimationController.unbounded(vsync: vsync) {
+       depth = AnimationController.unbounded(vsync: vsync),
+       brightnessMirror = AnimationController.unbounded(vsync: vsync) {
     _catchUp = AnimationController(vsync: vsync, duration: _catchUpDuration)
       ..addListener(_followPanel);
     panel
@@ -49,8 +50,39 @@ class ShadeExpansion {
   /// ([AospDepthSpring]). It goes on past the end of a close.
   final AnimationController depth;
 
+  /// Fades and unblurs the shade while dragging the brightness slider, 0 to 1
+  /// (`NotificationShadeDepthController.brightnessMirrorSpring`).
+  final AnimationController brightnessMirror;
+  bool _brightnessMirrorActive = false;
+
   /// What the shade blurs behind it, 0 to 1 ([ShadeBlurAnimation]).
-  late final Animation<double> blur = ShadeBlurAnimation(panel, depth, qs);
+  late final Animation<double> blur = ShadeBlurAnimation(
+    panel,
+    depth,
+    qs,
+    brightnessMirror,
+  );
+
+  /// Updates the brightness-mirror fade/unblur state while dragging the slider.
+  void setBrightnessMirror(bool showing) {
+    if (showing == _brightnessMirrorActive) return;
+    _brightnessMirrorActive = showing;
+    final target = showing ? 1.0 : 0.0;
+    if (reduceMotion) {
+      brightnessMirror.value = target;
+      return;
+    }
+    brightnessMirror.animateWith(
+      SpringSimulation(
+        AospDepthSpring.spring,
+        brightnessMirror.value,
+        target,
+        brightnessMirror.velocity,
+        tolerance: AospDepthSpring.tolerance,
+        snapToEnd: true,
+      ),
+    );
+  }
 
   double _depthPanel = 0;
   bool _depthTracking = false;
@@ -298,9 +330,15 @@ class ShadeExpansion {
 
   /// Android resets the quick settings each time the shade closes.
   void _collapseWhenClosed() {
-    if (panel.value <= 0 && qs.value != 0 && !pullsBoth.value) {
-      qs.stop();
-      qs.value = 0;
+    if (panel.value <= 0) {
+      if (_brightnessMirrorActive || brightnessMirror.value != 0) {
+        _brightnessMirrorActive = false;
+        brightnessMirror.value = 0;
+      }
+      if (qs.value != 0 && !pullsBoth.value) {
+        qs.stop();
+        qs.value = 0;
+      }
     }
   }
 
@@ -535,6 +573,7 @@ class ShadeExpansion {
     overscroll.dispose();
     engaged.dispose();
     depth.dispose();
+    brightnessMirror.dispose();
     _catchUp.dispose();
     pullsBoth.dispose();
   }

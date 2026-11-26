@@ -13,6 +13,7 @@ import '../notification_banner.dart' show PixelNotificationMetrics;
 import 'shade_expansion_motion.dart' show androidDuration;
 import 'notification_shade_list.dart'
     show AndroidStackExpansion, NotificationShadeList;
+import 'shade_card_blur.dart';
 
 /// The end of Android's notification stack for one frame: where the rows are
 /// cut, and the shelf.
@@ -249,49 +250,63 @@ class NotificationShelf extends StatelessWidget {
   static const double _icon = 15;
   static const double _padding = 13;
 
+  RRect? _shape(Size size) {
+    final top = geometry.read()?.shelfTop;
+    if (top == null) return null;
+    const height = NotificationShelfGeometry.height;
+    return RRect.fromRectAndRadius(
+      Rect.fromLTWH(0, top, size.width, height),
+      const Radius.circular(height / 2),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = phoneSchemeOf(context);
     return IgnorePointer(
-      child: Flow(
-        clipBehavior: Clip.none,
-        delegate: _ShelfDelegate(geometry, motion),
-        children: <Widget>[
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: scheme.surfaceEffect1,
-              borderRadius: BorderRadius.circular(
-                NotificationShelfGeometry.height / 2,
-              ),
-            ),
-          ),
-          Center(
-            child: SizedBox.square(
-              dimension: 4,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: scheme.onSurface,
-                  shape: BoxShape.circle,
+      child: ShadeCard(
+        shape: _shape,
+        motion: motion,
+        child: Flow(
+          clipBehavior: Clip.none,
+          delegate: _ShelfDelegate(geometry, motion),
+          children: <Widget>[
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: scheme.surfaceEffect1,
+                borderRadius: BorderRadius.circular(
+                  NotificationShelfGeometry.height / 2,
                 ),
               ),
             ),
-          ),
-          for (final notification in notifications)
             Center(
               child: SizedBox.square(
-                dimension: _icon,
-                child: switch (notification.smallIcon) {
-                  final image? => NotificationSmallIcon(
-                    image: image,
+                dimension: 4,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
                     color: scheme.onSurface,
+                    shape: BoxShape.circle,
                   ),
-                  null => ClipOval(
-                    child: NotificationAppIcon(notification: notification),
-                  ),
-                },
+                ),
               ),
             ),
-        ],
+            for (final notification in notifications)
+              Center(
+                child: SizedBox.square(
+                  dimension: _icon,
+                  child: switch (notification.smallIcon) {
+                    final image? => NotificationSmallIcon(
+                      image: image,
+                      color: scheme.onSurface,
+                    ),
+                    null => ClipOval(
+                      child: NotificationAppIcon(notification: notification),
+                    ),
+                  },
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

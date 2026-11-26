@@ -1,13 +1,15 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart' show ColorScheme, Icons;
+import 'package:flutter/physics.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:denial_flutter_sdk/localization.dart';
-import 'package:denial_flutter_sdk/motion.dart';
 import 'package:denial_flutter_sdk/popups.dart';
 import 'package:denial_flutter_sdk/rendering.dart' show AppIconImage;
 import 'package:denial_flutter_sdk/state.dart';
@@ -17,10 +19,11 @@ import '../notification_media.dart'
     show NotificationIconRequest, notificationIconPathProvider;
 import '../phone_scheme.dart';
 import 'quick_settings_panel.dart' show PixelShadeViewport;
+import 'shade_expansion_motion.dart' show androidAnimatorScale, androidDuration;
 
-/// Icons in the dialogs, in the [PixelShadeViewport.screenshotWidth] units
-/// they were measured in.
-const double _iconSize = 20;
+/// Icons in the dialogs, in the shade's `415.7 dp` (`PixelShadeViewport`)
+/// units.
+const double _iconSize = phoneIconSize;
 
 /// Shows one of Android 17's quick-settings dialogs, grown out of the tile
 /// at [origin] (on screen). [builder] gets the dialog's close, which
@@ -50,12 +53,49 @@ void showQuickSettingsDialog(
 
 /// Android's dialog geometry, in dp.
 abstract final class _QsDialog {
-  static const double sideMargin = 14;
+  static const double sideMargin = 16;
   static const double verticalMargin = 48;
   static const double radius = 28;
   static const double rowHeight = 64;
-  static const Duration open = Duration(milliseconds: 320);
-  static const Duration close = Duration(milliseconds: 200);
+
+  // AOSP DialogTransitionAnimator LAUNCH_SPRING_PARAMS & COLLAPSE_SPRING_PARAMS,
+  // scaled by androidAnimatorScale.
+  static const double _scaleFactor = androidAnimatorScale * androidAnimatorScale;
+  static final SpringDescription launchX = SpringDescription.withDampingRatio(
+    mass: 1,
+    stiffness: 700 / _scaleFactor,
+    ratio: 1.1,
+  );
+  static final SpringDescription launchY = SpringDescription.withDampingRatio(
+    mass: 1,
+    stiffness: 700 / _scaleFactor,
+    ratio: 1.1,
+  );
+  static final SpringDescription launchScale =
+      SpringDescription.withDampingRatio(
+        mass: 1,
+        stiffness: 700 / _scaleFactor,
+        ratio: 1.3,
+      );
+
+  static final SpringDescription collapseX = SpringDescription.withDampingRatio(
+    mass: 1,
+    stiffness: 380 / _scaleFactor,
+    ratio: 0.9,
+  );
+  static final SpringDescription collapseY = SpringDescription.withDampingRatio(
+    mass: 1,
+    stiffness: 380 / _scaleFactor,
+    ratio: 0.87,
+  );
+  static final SpringDescription collapseScale =
+      SpringDescription.withDampingRatio(
+        mass: 1,
+        stiffness: 380 / _scaleFactor,
+        ratio: 0.9,
+      );
+
+  static const Tolerance tolerance = Tolerance(distance: 0.002, velocity: 0.01);
 }
 
 class _QsDialogFrame extends StatefulWidget {
@@ -74,124 +114,198 @@ class _QsDialogFrame extends StatefulWidget {
 }
 
 class _QsDialogFrameState extends State<_QsDialogFrame>
-    with SingleTickerProviderStateMixin {
-  final GlobalKey _screen = GlobalKey();
-  late final AnimationController _motion = AnimationController(
+    with TickerProviderStateMixin {
+  late final AnimationController _x = AnimationController.unbounded(
     vsync: this,
-    duration: _QsDialog.open,
-    reverseDuration: _QsDialog.close,
+    value: 0,
   );
-  late final Animation<double> _grow = CurvedAnimation(
-    parent: _motion,
-    curve: Motion.md3EmphasizedDecelerate,
-    reverseCurve: Motion.md3EmphasizedAccelerate,
+  late final AnimationController _y = AnimationController.unbounded(
+    vsync: this,
+    value: 0,
   );
+  late final AnimationController _scale = AnimationController.unbounded(
+    vsync: this,
+    value: 0,
+  );
+  late final Listenable _motion = Listenable.merge(<Listenable>[_x, _y, _scale]);
+  bool _started = false;
   bool _closing = false;
 
   @override
-  void initState() {
-    super.initState();
-    unawaited(_motion.forward());
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _x.value = 1;
+      _y.value = 1;
+      _scale.value = 1;
+      return;
+    }
+    _x.animateWith(
+      SpringSimulation(
+        _QsDialog.launchX,
+        0,
+        1,
+        0,
+        tolerance: _QsDialog.tolerance,
+        snapToEnd: true,
+      ),
+    );
+    _y.animateWith(
+      SpringSimulation(
+        _QsDialog.launchY,
+        0,
+        1,
+        0,
+        tolerance: _QsDialog.tolerance,
+        snapToEnd: true,
+      ),
+    );
+    _scale.animateWith(
+      SpringSimulation(
+        _QsDialog.launchScale,
+        0,
+        1,
+        0,
+        tolerance: _QsDialog.tolerance,
+        snapToEnd: true,
+      ),
+    );
   }
 
   @override
   void dispose() {
-    _motion.dispose();
+    _x.dispose();
+    _y.dispose();
+    _scale.dispose();
     super.dispose();
   }
 
   void _close() {
     if (_closing) return;
     _closing = true;
-    _motion.reverse().whenCompleteOrCancel(() {
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _x.value = 0;
+      _y.value = 0;
+      _scale.value = 0;
+      if (mounted) widget.onClosed();
+      return;
+    }
+    Future.wait<void>(<Future<void>>[
+      _x
+          .animateWith(
+            SpringSimulation(
+              _QsDialog.collapseX,
+              _x.value,
+              0,
+              _x.velocity,
+              tolerance: _QsDialog.tolerance,
+              snapToEnd: true,
+            ),
+          )
+          .orCancel
+          .catchError((_) {}),
+      _y
+          .animateWith(
+            SpringSimulation(
+              _QsDialog.collapseY,
+              _y.value,
+              0,
+              _y.velocity,
+              tolerance: _QsDialog.tolerance,
+              snapToEnd: true,
+            ),
+          )
+          .orCancel
+          .catchError((_) {}),
+      _scale
+          .animateWith(
+            SpringSimulation(
+              _QsDialog.collapseScale,
+              _scale.value,
+              0,
+              _scale.velocity,
+              tolerance: _QsDialog.tolerance,
+              snapToEnd: true,
+            ),
+          )
+          .orCancel
+          .catchError((_) {}),
+    ]).whenComplete(() {
       if (mounted) widget.onClosed();
     });
   }
 
-  /// The tile in the dialog's own (dp) coordinates.
-  Rect _originIn(RenderBox screen) => Rect.fromPoints(
-    screen.globalToLocal(widget.origin.topLeft),
-    screen.globalToLocal(widget.origin.bottomRight),
-  );
+  double _contentOpacity() {
+    final p = _scale.value.clamp(0.0, 1.0);
+    if (_closing) {
+      return ((p - 0.6) / 0.4).clamp(0.0, 1.0);
+    }
+    return const Cubic(0, 0, 0.2, 1).transform(
+      ((p - 0.45) / 0.5).clamp(0.0, 1.0),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return PixelShadeViewport(
-      width: PixelShadeViewport.screenshotWidth,
       child: Builder(
         builder: (context) {
           final scheme = phoneSchemeOf(context);
-          final size = MediaQuery.sizeOf(context);
           final padding = MediaQuery.paddingOf(context);
-          final card = DecoratedBox(
-            decoration: BoxDecoration(color: scheme.surfaceContainer),
-            child: DefaultTextStyle.merge(
-              style: TextStyle(
-                color: scheme.onSurface,
-                fontSize: 16,
-                height: 1.25,
-                decoration: TextDecoration.none,
-              ),
-              child: FadeTransition(
-                // The content shows once the card has nearly grown.
-                opacity: CurvedAnimation(
-                  parent: _motion,
-                  curve: const Interval(0.55, 1, curve: Curves.easeOut),
-                  reverseCurve: const Interval(0.6, 1),
-                ),
+          final insets = EdgeInsets.fromLTRB(
+            _QsDialog.sideMargin + padding.left,
+            _QsDialog.verticalMargin + padding.top,
+            _QsDialog.sideMargin + padding.right,
+            _QsDialog.verticalMargin + padding.bottom,
+          );
+          final content = DefaultTextStyle.merge(
+            style: TextStyle(
+              color: scheme.onSurface,
+              fontSize: 16,
+              height: 1.25,
+              decoration: TextDecoration.none,
+            ),
+            child: GestureDetector(
+              // Taps on the card stay on it.
+              behavior: HitTestBehavior.opaque,
+              onTap: () {},
+              child: AnimatedBuilder(
+                animation: _scale,
                 child: widget.builder(_close),
+                builder: (context, child) => Opacity(
+                  opacity: _contentOpacity(),
+                  child: child,
+                ),
               ),
             ),
           );
           return Stack(
-            key: _screen,
             fit: StackFit.expand,
             children: <Widget>[
               GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: _close,
-                child: FadeTransition(
-                  opacity: _grow,
+                child: AnimatedBuilder(
+                  animation: _scale,
                   child: const ColoredBox(color: Color(0x73000000)),
-                ),
-              ),
-              Padding(
-                padding: EdgeInsets.fromLTRB(
-                  _QsDialog.sideMargin + padding.left,
-                  _QsDialog.verticalMargin + padding.top,
-                  _QsDialog.sideMargin + padding.right,
-                  _QsDialog.verticalMargin + padding.bottom,
-                ),
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxWidth: math.min(420, size.width),
-                    ),
-                    child: AnimatedBuilder(
-                      animation: _grow,
-                      child: card,
-                      builder: (context, card) => ClipRRect(
-                        clipper: _GrowClipper(
-                          progress: _grow.value,
-                          origin: () {
-                            final screen = _screen.currentContext
-                                ?.findRenderObject();
-                            return screen is RenderBox
-                                ? _originIn(screen)
-                                : null;
-                          },
-                          screenSize: size,
-                        ),
-                        child: GestureDetector(
-                          // Taps on the card stay on it.
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () {},
-                          child: card,
-                        ),
-                      ),
-                    ),
+                  builder: (context, child) => Opacity(
+                    opacity: _scale.value.clamp(0.0, 1.0),
+                    child: child,
                   ),
                 ),
+              ),
+              _MorphingDialogBox(
+                origin: widget.origin,
+                insets: insets,
+                x: _x,
+                y: _y,
+                scale: _scale,
+                motion: _motion,
+                surfaceColor: scheme.surfaceContainer,
+                radius: _QsDialog.radius,
+                child: content,
               ),
             ],
           );
@@ -201,41 +315,251 @@ class _QsDialogFrameState extends State<_QsDialogFrame>
   }
 }
 
-/// Clips the card to the tile it grows from, then to itself.
-class _GrowClipper extends CustomClipper<RRect> {
-  _GrowClipper({
-    required this.progress,
+/// Measures the dialog at its resting size, then morphs position, size and
+/// corners between [origin] and its centred resting box via [x], [y], [scale].
+class _MorphingDialogBox extends SingleChildRenderObjectWidget {
+  const _MorphingDialogBox({
     required this.origin,
-    required this.screenSize,
+    required this.insets,
+    required this.x,
+    required this.y,
+    required this.scale,
+    required this.motion,
+    required this.surfaceColor,
+    required this.radius,
+    required super.child,
   });
 
-  final double progress;
-  final Rect? Function() origin;
-  final Size screenSize;
+  final Rect origin;
+  final EdgeInsets insets;
+  final Animation<double> x;
+  final Animation<double> y;
+  final Animation<double> scale;
+  final Listenable motion;
+  final Color surfaceColor;
+  final double radius;
 
   @override
-  RRect getClip(Size size) {
-    final full = Offset.zero & size;
-    final radius = Radius.circular(_QsDialog.radius);
-    if (progress >= 1) return RRect.fromRectAndRadius(full, radius);
-    // The card is centred on the screen.
-    final topLeft = Offset(
-      (screenSize.width - size.width) / 2,
-      (screenSize.height - size.height) / 2,
-    );
-    final from =
-        origin()?.shift(-topLeft) ??
-        Rect.fromCenter(center: full.center, width: 0, height: 0);
-    final rect = Rect.lerp(from, full, progress)!;
-    final r =
-        _QsDialog.radius +
-        (from.height / 2 - _QsDialog.radius) * (1 - progress);
-    return RRect.fromRectAndRadius(rect, Radius.circular(math.max(0, r)));
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderMorphingDialogBox(
+        origin: origin,
+        insets: insets,
+        x: x,
+        y: y,
+        scale: scale,
+        motion: motion,
+        surfaceColor: surfaceColor,
+        radius: radius,
+      );
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderMorphingDialogBox renderObject,
+  ) {
+    renderObject
+      ..origin = origin
+      ..insets = insets
+      ..x = x
+      ..y = y
+      ..scale = scale
+      ..motion = motion
+      ..surfaceColor = surfaceColor
+      ..radius = radius;
+  }
+}
+
+class _RenderMorphingDialogBox extends RenderProxyBox {
+  _RenderMorphingDialogBox({
+    required Rect origin,
+    required EdgeInsets insets,
+    required Animation<double> x,
+    required Animation<double> y,
+    required Animation<double> scale,
+    required Listenable motion,
+    required Color surfaceColor,
+    required double radius,
+  }) : this._raw(
+         origin,
+         insets,
+         x,
+         y,
+         scale,
+         motion,
+         surfaceColor,
+         radius,
+       );
+
+  _RenderMorphingDialogBox._raw(
+    this._origin,
+    this._insets,
+    this._x,
+    this._y,
+    this._scale,
+    this._motion,
+    this._surfaceColor,
+    this._radius,
+  );
+
+  Rect _origin;
+  set origin(Rect value) {
+    if (value == _origin) return;
+    _origin = value;
+    markNeedsPaint();
+  }
+
+  EdgeInsets _insets;
+  set insets(EdgeInsets value) {
+    if (value == _insets) return;
+    _insets = value;
+    markNeedsLayout();
+  }
+
+  Animation<double> _x;
+  set x(Animation<double> value) => _x = value;
+
+  Animation<double> _y;
+  set y(Animation<double> value) => _y = value;
+
+  Animation<double> _scale;
+  set scale(Animation<double> value) => _scale = value;
+
+  Listenable _motion;
+  set motion(Listenable value) {
+    if (identical(value, _motion)) return;
+    if (attached) {
+      _motion.removeListener(markNeedsPaint);
+      value.addListener(markNeedsPaint);
+    }
+    _motion = value;
+    markNeedsPaint();
+  }
+
+  Color _surfaceColor;
+  set surfaceColor(Color value) {
+    if (value == _surfaceColor) return;
+    _surfaceColor = value;
+    markNeedsPaint();
+  }
+
+  double _radius;
+  set radius(double value) {
+    if (value == _radius) return;
+    _radius = value;
+    markNeedsPaint();
+  }
+
+  final _clipLayer = LayerHandle<ClipRRectLayer>();
+  Rect _endRect = Rect.zero;
+
+  @override
+  void attach(PipelineOwner owner) {
+    super.attach(owner);
+    _motion.addListener(markNeedsPaint);
   }
 
   @override
-  bool shouldReclip(_GrowClipper oldClipper) =>
-      oldClipper.progress != progress || oldClipper.screenSize != screenSize;
+  void detach() {
+    _motion.removeListener(markNeedsPaint);
+    super.detach();
+  }
+
+  @override
+  void dispose() {
+    _clipLayer.layer = null;
+    super.dispose();
+  }
+
+  @override
+  void performLayout() {
+    size = constraints.biggest;
+    final available = _insets.deflateRect(Offset.zero & size);
+    final child = this.child;
+    if (child == null) {
+      _endRect = Rect.fromCenter(center: available.center, width: 0, height: 0);
+      return;
+    }
+    child.layout(
+      BoxConstraints(
+        maxWidth: math.min(420.0, math.max(0.0, available.width)),
+        maxHeight: math.max(0.0, available.height),
+      ),
+      parentUsesSize: true,
+    );
+    _endRect = Rect.fromCenter(
+      center: available.center,
+      width: child.size.width,
+      height: child.size.height,
+    );
+  }
+
+  @override
+  bool hitTestSelf(Offset position) => false;
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) {
+    final child = this.child;
+    if (child == null) return false;
+    return result.addWithPaintOffset(
+      offset: _endRect.topLeft,
+      position: position,
+      hitTest: (result, transformed) => child.hitTest(result, position: transformed),
+    );
+  }
+
+  @override
+  void applyPaintTransform(RenderBox child, Matrix4 transform) {
+    transform.translateByDouble(_endRect.left, _endRect.top, 0, 1);
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    final child = this.child;
+    if (child == null) return;
+    final s = _scale.value.clamp(0.0, 1.15);
+    if (s <= 0.001) {
+      _clipLayer.layer = null;
+      return;
+    }
+    final from = _origin == Rect.zero
+        ? Rect.fromCenter(center: _endRect.center, width: 0, height: 0)
+        : Rect.fromPoints(
+            globalToLocal(_origin.topLeft),
+            globalToLocal(_origin.bottomRight),
+          );
+    final cx = lerpDouble(from.center.dx, _endRect.center.dx, _x.value)!;
+    final cy = lerpDouble(from.center.dy, _endRect.center.dy, _y.value)!;
+    final w = math.max(0.0, lerpDouble(from.width, _endRect.width, s)!);
+    final h = math.max(0.0, lerpDouble(from.height, _endRect.height, s)!);
+    final rect = Rect.fromCenter(center: Offset(cx, cy), width: w, height: h);
+    if (rect.isEmpty) {
+      _clipLayer.layer = null;
+      return;
+    }
+    final corner = math.max(
+      0.0,
+      lerpDouble(from.height / 2, _radius, _scale.value.clamp(0.0, 1.0))!,
+    );
+    final rrect = RRect.fromRectAndRadius(rect, Radius.circular(corner));
+    _clipLayer.layer = context.pushClipRRect(
+      needsCompositing,
+      offset,
+      rect,
+      rrect,
+      (context, offset) {
+        context.canvas.drawRect(
+          rect.shift(offset),
+          Paint()..color = _surfaceColor,
+        );
+        final childTopLeft = Offset(
+          cx - child.size.width / 2,
+          cy - child.size.height / 2,
+        );
+        context.paintChild(child, offset + childTopLeft);
+      },
+      oldLayer: _clipLayer.layer,
+    );
+  }
 }
 
 // Parts ----------------------------------------------------------------------
@@ -299,21 +623,28 @@ class _ScanBarState extends State<_ScanBar>
     with SingleTickerProviderStateMixin {
   late final AnimationController _sweep = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 1400),
+    duration: androidDuration(1400),
   );
 
+  bool _reduceMotion = false;
+
   @override
-  void initState() {
-    super.initState();
-    if (widget.busy) unawaited(_sweep.repeat());
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _reduceMotion = MediaQuery.disableAnimationsOf(context);
+    if (_reduceMotion) {
+      _sweep.stop();
+    } else if (widget.busy && !_sweep.isAnimating) {
+      unawaited(_sweep.repeat());
+    }
   }
 
   @override
   void didUpdateWidget(covariant _ScanBar oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.busy && !_sweep.isAnimating) {
+    if (widget.busy && !_reduceMotion && !_sweep.isAnimating) {
       unawaited(_sweep.repeat());
-    } else if (!widget.busy && _sweep.isAnimating) {
+    } else if ((!widget.busy || _reduceMotion) && _sweep.isAnimating) {
       _sweep.stop();
     }
   }
@@ -424,7 +755,9 @@ class PhoneSwitch extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = phoneSchemeOf(context);
-    const duration = Duration(milliseconds: 200);
+    final duration = MediaQuery.disableAnimationsOf(context)
+        ? Duration.zero
+        : androidDuration(200);
     final thumb = value ? 24.0 : 16.0;
     return AnimatedContainer(
       duration: duration,
@@ -522,7 +855,9 @@ class _ItemRowState extends State<_ItemRow> {
           onTapCancel: () => _press(false),
           onTap: widget.onTap,
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : androidDuration(150),
             constraints: const BoxConstraints(minHeight: _QsDialog.rowHeight),
             padding: const EdgeInsetsDirectional.only(start: 20, end: 8),
             decoration: BoxDecoration(
