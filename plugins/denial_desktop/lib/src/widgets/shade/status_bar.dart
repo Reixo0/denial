@@ -9,7 +9,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:denial_flutter_sdk/localization.dart';
 import 'package:denial_flutter_sdk/models.dart';
-import 'package:denial_flutter_sdk/motion.dart';
 import 'package:denial_flutter_sdk/state.dart';
 import 'package:denial_flutter_sdk/shell_color_scheme.dart';
 import 'package:denial_flutter_sdk/shell_theme.dart';
@@ -24,18 +23,21 @@ import 'shade_reference_geometry.dart';
 import 'quick_settings_panel.dart' show PixelShadeViewport;
 import 'status_glyphs.dart';
 
-/// The status row's geometry and its path into the shade header, shared by
-/// [ShadeStatusBar].
+/// The status row's geometry. Android (EvolutionX on this phone, which has
+/// no cutout) centres the clock and icons 13.85 dp from the top, 20 dp in
+/// from each side; Denial's drag strip below stays as it was.
 class _StatusGeometry {
   _StatusGeometry.of(BuildContext context)
     : topPadding = MediaQuery.paddingOf(context).top,
-      referenceScale = colorOsShadeScaleForViewport(MediaQuery.sizeOf(context));
+      referenceScale = colorOsShadeScaleForViewport(MediaQuery.sizeOf(context)),
+      dp = PixelShadeViewport.scaleFor(MediaQuery.sizeOf(context));
 
   final double topPadding;
   final double referenceScale;
 
-  double get collapsedTop => topPadding + 10;
-  static const collapsedHeight = ReferenceShellMetrics.statusBarHeight - 18;
+  /// Logical pixels per Android dp.
+  final double dp;
+
   double get expandedTop => math.max(40 * referenceScale, topPadding);
   double get expandedHeight => 18 * referenceScale;
   double get hitHeight => math.max(
@@ -43,83 +45,34 @@ class _StatusGeometry {
     expandedTop + expandedHeight,
   );
 
-  /// The status row at [progress] of the shade, in screen coordinates.
-  List<Widget> foreground(
-    BuildContext context,
-    double progress,
-    Color foreground,
-  ) {
-    // The row's path into a shade header, unused since the shade draws its
-    // own header: the bar only draws it closed.
-    final fraction = unit(progress / 0.86);
-    final color = _statusColorAt(context, foreground, progress);
-    return [_cluster(fraction, color), ..._clock(context, fraction, color)];
-  }
+  static const double _centre = 13.85;
+  static const double _side = 20;
 
-  /// The icons rise with the row into the shade header.
-  Widget _cluster(double fraction, Color color) {
-    final horizontal = 20 + (35 * referenceScale - 20) * fraction;
-    return Positioned(
-      top: collapsedTop + (expandedTop - collapsedTop) * fraction,
-      left: horizontal,
-      right: horizontal,
-      height: collapsedHeight + (expandedHeight - collapsedHeight) * fraction,
-      child: Row(
-        children: [
-          const Spacer(),
-          _StatusCluster(color: color),
-        ],
-      ),
-    );
-  }
-
-  /// The clock leaves the status row: it grows from its slot into the shade
-  /// header, in line with the tiles, and carries the date.
-  List<Widget> _clock(BuildContext context, double fraction, Color color) {
-    const clockSize = ShadeHeaderClock.fontSize;
-    final clockStartTop = collapsedTop + (collapsedHeight - clockSize) / 2;
-    final clockEndTop =
-        expandedTop +
-        expandedHeight +
-        ShadeHeaderClock.statusGap * referenceScale;
-    final clockTop = clockStartTop + (clockEndTop - clockStartTop) * fraction;
-    final clockStart =
-        20 + (ShadeHeaderClock.inset * referenceScale - 20) * fraction;
-    final clockScale = 1 + (ShadeHeaderClock.expandedScale - 1) * fraction;
-    final dateAlpha = unit((fraction - 0.6) / 0.4);
+  /// The status row, in screen coordinates.
+  List<Widget> foreground(Color color) {
+    final top = topPadding;
+    final height = 2 * _centre * dp;
     return [
       PositionedDirectional(
-        start: clockStart,
-        top: clockTop,
-        child: Transform.scale(
-          scale: clockScale,
-          alignment: AlignmentDirectional.topStart,
-          child: fraction > 0
-              ? _StatusClock(color: color)
-              : Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    _StatusClock(color: color),
-                    // Taking no height, the icons never move the clock;
-                    // they still centre on it.
-                    Align(
-                      heightFactor: 0,
-                      child: _StatusNotificationIcons(color: color),
-                    ),
-                  ],
-                ),
+        top: top,
+        height: height,
+        start: _side * dp,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            _StatusClock(color: color, dp: dp),
+            _StatusNotificationIcons(color: color, dp: dp),
+          ],
         ),
       ),
-      if (dateAlpha > 0)
-        PositionedDirectional(
-          start: clockStart,
-          top: clockTop + clockSize * clockScale + ShadeHeaderClock.dateGap,
-          child: _StatusDate(
-            color: context.shellColors.textSecondary.withValues(
-              alpha: context.shellColors.textSecondary.a * dateAlpha,
-            ),
-          ),
+      PositionedDirectional(
+        top: top,
+        height: height,
+        end: _side * dp,
+        child: Center(
+          child: _StatusCluster(color: color, dp: dp),
         ),
+      ),
     ];
   }
 }
@@ -143,15 +96,6 @@ Color _statusForeground(BuildContext context, WidgetRef ref) {
   return forceWhiteForeground
       ? ShellMediaColors.contrastLight
       : _statusForegroundFor(context.shellColors, statusColorArgb);
-}
-
-/// The status color blends into the panel text as the shade opens.
-Color _statusColorAt(BuildContext context, Color foreground, double progress) {
-  return Color.lerp(
-    foreground,
-    context.shellColors.panelText,
-    AospShadeInterpolation.scrimAlpha(progress),
-  )!;
 }
 
 /// The always-on top status bar. Dragging it down opens the quick-settings
@@ -244,7 +188,7 @@ class _ShadeStatusBarState extends ConsumerState<ShadeStatusBar> {
                 child: Stack(
                   fit: StackFit.expand,
                   clipBehavior: Clip.none,
-                  children: geometry.foreground(context, 0, foreground),
+                  children: geometry.foreground(foreground),
                 ),
               ),
             ),
@@ -255,75 +199,49 @@ class _ShadeStatusBarState extends ConsumerState<ShadeStatusBar> {
   }
 }
 
+/// Android's status bar clock: 14 sp medium in the icon colour
+/// (TextAppearance.StatusBar.Clock); Roboto Flex at 600 has Google Sans
+/// Medium's stroke.
 class _StatusClock extends ConsumerWidget {
-  const _StatusClock({required this.color});
+  const _StatusClock({required this.color, required this.dp});
 
   final Color color;
+  final double dp;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final now = ref.watch(clockProvider).value ?? DateTime.now();
-    final time = localizedTime(context, now);
-    final base = ShellText.statusClock.copyWith(
-      fontSize: ShadeHeaderClock.fontSize,
-      fontWeight: FontWeight.w700,
-      letterSpacing: 0.2,
-    );
-    final separator = time.indexOf(':');
-    return Text.rich(
-      TextSpan(
-        children: separator <= 0 || separator == time.length - 1
-            ? <InlineSpan>[TextSpan(text: time)]
-            : <InlineSpan>[
-                TextSpan(text: time.substring(0, separator + 1)),
-                TextSpan(
-                  text: time.substring(separator + 1),
-                  style: TextStyle(color: color.withValues(alpha: 0.62)),
-                ),
-              ],
-      ),
-      style: base.copyWith(color: color),
-    );
-  }
-}
-
-class _StatusDate extends ConsumerWidget {
-  const _StatusDate({required this.color});
-
-  final Color color;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final now = ref.watch(clockProvider).value ?? DateTime.now();
-    return Text(
-      localizedLongDate(context, now),
-      maxLines: 1,
-      style: ShellText.base.copyWith(
-        color: color,
-        fontSize: ShadeHeaderClock.dateFontSize,
-        height: 1,
-        fontWeight: FontWeight.w500,
+    return Transform.translate(
+      offset: Offset(0, statusTextDrop * statusTextSize * dp),
+      child: Text(
+        localizedTime(context, now),
+        maxLines: 1,
+        softWrap: false,
+        textScaler: TextScaler.noScaling,
+        style: ShellText.statusClock.copyWith(
+          color: color,
+          fontSize: statusTextSize * dp,
+          height: 1,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0,
+        ),
       ),
     );
   }
 }
 
 class _StatusCluster extends ConsumerWidget {
-  const _StatusCluster({required this.color});
+  const _StatusCluster({required this.color, required this.dp});
 
   final Color color;
+  final double dp;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    // The same size as in the shade's header.
-    return StatusCluster(
-      battery: ref.watch(batteryProvider),
-      color: color,
-      scale:
-          phoneStatusIconScale *
-          PixelShadeViewport.scaleFor(MediaQuery.sizeOf(context)),
-    );
-  }
+  Widget build(BuildContext context, WidgetRef ref) => StatusCluster(
+    battery: ref.watch(batteryProvider),
+    color: color,
+    scale: dp,
+  );
 }
 
 Color _statusForegroundFor(ShellColorScheme colors, int? statusColorArgb) {
@@ -344,15 +262,13 @@ Color _statusForegroundFor(ShellColorScheme colors, int? statusColorArgb) {
 /// them (NotificationIconContainer): an icon per notification in the
 /// shade's order, alerting ones only (Android leaves silent notifications
 /// out by default), at most four (max_notif_static_icons) and then a dot.
-/// Sizes from AOSP in sp, scaled as the clock is (14 sp to
-/// [ShadeHeaderClock.fontSize]): 22 sp slots holding 15 dp icons, a 2 sp
-/// dot 3 sp after them.
+/// Sizes from AOSP: 22 sp slots holding 15 dp icons, 6 dp after the
+/// clock (measured on EvolutionX), a 4 sp dot 3 sp after them.
 class _StatusNotificationIcons extends ConsumerWidget {
-  const _StatusNotificationIcons({required this.color});
+  const _StatusNotificationIcons({required this.color, required this.dp});
 
   final Color color;
-
-  static const double _sp = ShadeHeaderClock.fontSize / 14;
+  final double dp;
   static const int _max = 4;
 
   @override
@@ -375,16 +291,16 @@ class _StatusNotificationIcons extends ConsumerWidget {
     if (shown.isEmpty) return const SizedBox.shrink();
     final overflow = shown.length > _max;
     return Padding(
-      padding: const EdgeInsetsDirectional.only(start: 4 * _sp),
+      padding: EdgeInsetsDirectional.only(start: 6 * dp),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           for (final notification in shown.take(_max))
             SizedBox.square(
-              dimension: 22 * _sp,
+              dimension: 22 * dp,
               child: Center(
                 child: SizedBox.square(
-                  dimension: 15 * _sp,
+                  dimension: 15 * dp,
                   child: _StatusNotificationIcon(
                     notification: notification,
                     color: color,
@@ -394,10 +310,10 @@ class _StatusNotificationIcons extends ConsumerWidget {
             ),
           if (overflow)
             Padding(
-              padding: const EdgeInsetsDirectional.only(start: 3 * _sp),
+              padding: EdgeInsetsDirectional.only(start: 3 * dp),
               child: Container(
-                width: 4 * _sp,
-                height: 4 * _sp,
+                width: 4 * dp,
+                height: 4 * dp,
                 decoration: BoxDecoration(color: color, shape: BoxShape.circle),
               ),
             ),

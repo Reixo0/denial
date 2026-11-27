@@ -1,7 +1,11 @@
 import 'package:denial_flutter_sdk/controls.dart';
 import 'package:flutter/material.dart' show Icons;
+
+import 'dart:math' as math;
+
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:denial_flutter_sdk/settings.dart';
 import 'package:denial_flutter_sdk/state.dart';
 import 'package:denial_flutter_sdk/system_services.dart';
 
@@ -298,13 +302,17 @@ class PrivacyUsageMarks extends ConsumerWidget {
   }
 }
 
-/// The status icons' size in the shade's dp: the status bar's earlier size
-/// (1.1 in Denial's units), which the owner prefers, in both places.
-const double phoneStatusIconScale = 0.75;
+/// Logical pixels per Android dp for the status cluster in the shade
+/// header, which is drawn in the shade's dp: Android's own size, as in the
+/// status bar.
+const double phoneStatusIconScale = 1.0;
 
-/// The compact status cluster (privacy · signal · wifi · battery) shared by the status
-/// bar and the shade header.
-class StatusCluster extends StatelessWidget {
+/// Android's status icons (StatusIconContainer and BatteryMeterView), as
+/// EvolutionX shows them on this phone: the ringer mode, the mobile bars,
+/// Wi-Fi, a circle battery and its percentage. [scale] is logical pixels per
+/// Android dp; sizes and gaps were measured from EvolutionX screenshots
+/// (1 dp = 2.925 px) and match AOSP's 15 dp icons and 14 sp text.
+class StatusCluster extends ConsumerWidget {
   const StatusCluster({
     super.key,
     required this.battery,
@@ -317,22 +325,251 @@ class StatusCluster extends StatelessWidget {
   final double scale;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = scale;
+    final foreground = color ?? context.shellColors.textPrimary;
+    final ringer = ref.watch(
+      shellSettingsProvider.select((settings) => settings.sound.ringerMode),
+    );
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        PrivacyUsageMarks(color: color, scale: scale),
-        MobileConnectivityMarks(color: color, scale: scale),
-        SizedBox(width: 12 * scale),
-        BatteryMark(
-          status: battery,
-          scale: 1.18 * scale,
-          textScale: 1.18,
-          color: color,
+        PrivacyUsageMarks(color: color, scale: 0.75 * s),
+        if (ringer != PhoneRingerMode.normal) ...[
+          ringer == PhoneRingerMode.vibrate
+              ? CustomPaint(
+                  size: Size(14 * _vibrateUnit * s, 12 * _vibrateUnit * s),
+                  painter: _VibratePainter(foreground),
+                )
+              : Icon(Icons.volume_off_rounded, size: 15 * s, color: foreground),
+          SizedBox(width: 11.3 * s),
+        ],
+        MobileConnectivityMarks(color: color, scale: s),
+        SizedBox(width: 6.5 * s),
+        StatusBattery(status: battery, scale: s, color: color),
+      ],
+    );
+  }
+}
+
+/// stat_sys_ringer_vibrate: 18 dp tall drawn at the 15 dp icon size.
+const double _vibrateUnit = 15 / 18;
+
+/// The phone with a bar each side (stat_sys_ringer_vibrate), in its own
+/// units: an 8 x 12 body with 1 unit corners, 1.5 x 6 pills 1.5 units off
+/// each side.
+class _VibratePainter extends CustomPainter {
+  const _VibratePainter(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final u = size.width / 14;
+    final paint = Paint()..color = color;
+    canvas.drawRRect(
+      RRect.fromLTRBR(3 * u, 0, 11 * u, 12 * u, Radius.circular(u)),
+      paint,
+    );
+    for (final x in [0.0, 12.5]) {
+      canvas.drawRRect(
+        RRect.fromLTRBR(
+          x * u,
+          3 * u,
+          (x + 1.5) * u,
+          9 * u,
+          Radius.circular(0.75 * u),
+        ),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_VibratePainter oldDelegate) => oldDelegate.color != color;
+}
+
+/// Four rounded bars rising left to right, the unreached ones dimmed, as
+/// Android 17 draws the mobile signal. Measured: 2.74 dp bars 2.05 dp apart,
+/// 5.1 to 12 dp tall.
+class SignalBars extends StatelessWidget {
+  const SignalBars({
+    super.key,
+    required this.bars,
+    required this.color,
+    this.scale = 1,
+  });
+
+  final int bars;
+  final Color color;
+  final double scale;
+
+  static const double width = 4 * _bar + 3 * _gap;
+  static const double height = 11.97;
+  static const double _bar = 2.735;
+  static const double _gap = 2.05;
+
+  @override
+  Widget build(BuildContext context) => CustomPaint(
+    size: Size(width * scale, height * scale),
+    painter: _SignalBarsPainter(bars, color),
+  );
+}
+
+class _SignalBarsPainter extends CustomPainter {
+  const _SignalBarsPainter(this.bars, this.color);
+
+  final int bars;
+  final Color color;
+
+  static const List<double> _heights = <double>[5.13, 7.52, 9.91, 11.97];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final u = size.height / SignalBars.height;
+    final bar = SignalBars._bar * u;
+    for (var i = 0; i < 4; i++) {
+      final left = i * (SignalBars._bar + SignalBars._gap) * u;
+      canvas.drawRRect(
+        RRect.fromLTRBR(
+          left,
+          size.height - _heights[i] * u,
+          left + bar,
+          size.height,
+          Radius.circular(bar / 2),
+        ),
+        Paint()..color = i < bars ? color : color.withValues(alpha: 0.45),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_SignalBarsPainter oldDelegate) =>
+      oldDelegate.bars != bars || oldDelegate.color != color;
+}
+
+/// The circle battery and its percentage (EvolutionX's circle style): a
+/// 13 dp ring, 2 dp thick, filled clockwise from the top over a dimmed
+/// track; green with a bolt inside while charging, red when low. The
+/// percentage is 14 sp regular text 4.8 dp after it.
+class StatusBattery extends StatelessWidget {
+  const StatusBattery({
+    super.key,
+    required this.status,
+    this.scale = 1,
+    this.color,
+  });
+
+  final BatteryStatus status;
+  final double scale;
+  final Color? color;
+
+  static const Color charging = Color(0xff18cc47);
+
+  @override
+  Widget build(BuildContext context) {
+    final s = scale;
+    final foreground = color ?? context.shellColors.textPrimary;
+    final level = ((status.capacity ?? 0) / 100.0).clamp(0.0, 1.0);
+    final arc = status.charging
+        ? charging
+        : _batteryLow(status)
+        ? ShellTelemetryColors.danger
+        : foreground;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox.square(
+          dimension: 13 * s,
+          child: CustomPaint(
+            painter: _BatteryRingPainter(
+              level: level,
+              arc: arc,
+              track: foreground.withValues(alpha: 0.45),
+              stroke: 2.05 * s,
+            ),
+            child: status.charging
+                ? Center(
+                    child: Icon(
+                      Icons.bolt_rounded,
+                      size: 7.5 * s,
+                      color: foreground,
+                    ),
+                  )
+                : null,
+          ),
+        ),
+        SizedBox(width: 4.8 * s),
+        Transform.translate(
+          offset: Offset(0, statusTextDrop * statusTextSize * s),
+          child: Text(
+            status.capacity == null
+                ? context.l10n.batteryCapacityUnavailable
+                : context.l10n.percentCompact(status.capacity!),
+            maxLines: 1,
+            softWrap: false,
+            textScaler: TextScaler.noScaling,
+            style: ShellText.base.copyWith(
+              color: foreground,
+              fontSize: statusTextSize * s,
+              height: 1,
+              fontWeight: FontWeight.w400,
+              letterSpacing: 0,
+              decoration: TextDecoration.none,
+            ),
+          ),
         ),
       ],
     );
   }
+}
+
+/// The status bar's text (clock, battery percentage) in dp: Android's 14 sp,
+/// whose digits come out 31 px tall in Roboto Flex as in Google Sans on
+/// EvolutionX.
+const double statusTextSize = 14;
+
+/// Roboto Flex's digits sit higher in a one-line box than Google Sans's:
+/// this moves them onto the icons' centre, as on EvolutionX (in em).
+const double statusTextDrop = 0.075;
+
+class _BatteryRingPainter extends CustomPainter {
+  const _BatteryRingPainter({
+    required this.level,
+    required this.arc,
+    required this.track,
+    required this.stroke,
+  });
+
+  final double level;
+  final Color arc;
+  final Color track;
+  final double stroke;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = (Offset.zero & size).deflate(stroke / 2);
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke;
+    canvas.drawOval(rect, paint..color = track);
+    if (level > 0) {
+      canvas.drawArc(
+        rect,
+        -math.pi / 2,
+        2 * math.pi * level,
+        false,
+        paint..color = arc,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_BatteryRingPainter oldDelegate) =>
+      oldDelegate.level != level ||
+      oldDelegate.arc != arc ||
+      oldDelegate.track != track ||
+      oldDelegate.stroke != stroke;
 }
 
 class StatusIconCluster extends StatelessWidget {
@@ -347,7 +584,7 @@ class StatusIconCluster extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         PrivacyUsageMarks(color: color),
-        MobileConnectivityMarks(color: color),
+        MobileConnectivityMarks(color: color, scale: 1.2),
         const SizedBox(width: 12),
         BatteryIconMark(status: battery, scale: 1.18, color: color),
       ],
@@ -380,11 +617,15 @@ class MobileConnectivityMarks extends ConsumerWidget {
         mobile.simPresence == MobileSimPresence.present &&
         mobile.registered &&
         !mobile.locked;
+    final s = scale;
+    final technology =
+        wifi == null && mobile.cellularWorking && mobile.technology.isNotEmpty;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         // Hide only a confirmed absent SIM. Discovery/loading failure remains
         // visible as unavailable; modem and WWAN policy are not SIM presence.
+        // Android puts the network type before the bars.
         if (mobile.showCellular) ...[
           Semantics(
             label: mobile.cellularWorking
@@ -396,45 +637,47 @@ class MobileConnectivityMarks extends ConsumerWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                SignalGlyph(
-                  active: signal,
-                  strength: mobile.strength,
-                  scale: 1.25 * scale,
-                  color: color,
-                ),
-                if (wifi == null &&
-                    mobile.cellularWorking &&
-                    mobile.technology.isNotEmpty) ...[
-                  SizedBox(width: 3 * scale),
+                if (technology) ...[
                   Text(
                     mobile.technology,
                     maxLines: 1,
                     softWrap: false,
+                    textScaler: TextScaler.noScaling,
                     style: ShellText.base.copyWith(
                       color: foreground,
-                      fontSize: 11 * scale,
+                      fontSize: 12 * s,
                       height: 1,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
                       letterSpacing: 0,
                     ),
                   ),
+                  SizedBox(width: 2 * s),
                 ],
+                SignalBars(
+                  bars: signal
+                      ? (mobile.strength.clamp(0, 100) / 25).ceil()
+                      : 0,
+                  color: foreground,
+                  scale: s,
+                ),
                 if (!signal)
                   Icon(
                     Icons.priority_high_rounded,
-                    size: 12 * scale,
+                    size: 10 * s,
                     color: foreground,
                   ),
               ],
             ),
           ),
-          if (wifi != null) SizedBox(width: 7 * scale),
+          if (wifi != null) SizedBox(width: 6.5 * s),
         ],
+        // Material's wifi glyph is 22/24 of its box: 16.8 dp wide, as
+        // measured on EvolutionX.
         if (wifi != null)
           WifiStatusIcon(
             active: true,
             strength: wifi.strength,
-            size: 20 * scale,
+            size: 18.3 * s,
             color: color,
           ),
       ],
