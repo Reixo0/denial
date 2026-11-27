@@ -246,6 +246,7 @@ class AppDeck extends ChangeNotifier {
     row: row.value,
     homeward: homeward.value,
     attached: attached.value,
+    fadeHome: homeward.target >= 1,
   );
 
   /// The flight home of [objectId] has reached its icon.
@@ -616,6 +617,7 @@ class DeckGeometry {
     required double row,
     required double homeward,
     required double attached,
+    bool fadeHome = false,
   }) {
     final p = open.clamp(0.0, 1.0);
     final h = homeward.clamp(0.0, 1.0);
@@ -656,6 +658,15 @@ class DeckGeometry {
       lerpDouble(0, windowRadius, p)!,
       switchRadius * apart,
     );
+    // Leaving recents for home, Android fades the cards where they are
+    // (Launcher3's OVERVIEW to NORMAL); coming in from home they slide.
+    if (fadeHome && !landscape) {
+      return WindowPose(
+        app.shift(Offset(aside, 0)),
+        appRadius,
+        opacity: (1 - h / 0.6).clamp(0.0, 1.0),
+      );
+    }
     return WindowPose(app.shift(Offset(away + aside, 0)), appRadius);
   }
 
