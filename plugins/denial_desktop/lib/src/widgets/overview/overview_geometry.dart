@@ -13,6 +13,63 @@ const double overviewPageSpacing = 16.0;
 const double _singlePreviewWidthFraction = 0.66;
 const double _singlePreviewMaxWidth = 840.0;
 
+/// Logical pixels per Android dp on this screen (the phone's 1216 px at
+/// 468 dpi is 415.7 dp wide).
+double overviewDpFor(Size size) {
+  final side = size.shortestSide;
+  if (!side.isFinite || side <= 0) return 1;
+  return math.max(1.0, side / (1216 * 160 / 468));
+}
+
+/// Launcher3's overview_page_spacing, 16 dp, in logical pixels.
+double overviewPageSpacingFor(Size size) => 16 * overviewDpFor(size);
+
+/// The centred recents card, as Launcher3 sizes a phone's task
+/// (BaseContainerInterface.calculateTaskSize): the screen less the status
+/// bar (27.7 dp on this phone, as EvolutionX draws it) and the gesture bar
+/// (24 dp), less the overview actions below (24 dp margin, 48 dp row, the
+/// gesture bar again), and 50 + 16 dp each side for the neighbours; the
+/// screen's shape scaled to fit, at most 0.7, centred. Landscape keeps
+/// Denial's own card.
+Rect overviewCardRectFor(Size size, EdgeInsets padding) {
+  if (size.width > size.height || size.isEmpty) {
+    return centerPreviewRectFor(
+      size,
+      cardSizeFor(
+        constraints: BoxConstraints.tight(size),
+        padding: padding,
+        aspect: viewAspectFor(size),
+      ),
+    );
+  }
+  final dp = overviewDpFor(size);
+  final available = Rect.fromLTRB(
+    66 * dp,
+    27.7 * dp,
+    size.width - 66 * dp,
+    size.height - 24 * dp - (24 + 48 + 24) * dp,
+  );
+  final scale = math.min(
+    overviewAndroidMaxScale,
+    math.min(available.width / size.width, available.height / size.height),
+  );
+  return Rect.fromCenter(
+    center: available.center,
+    width: size.width * scale,
+    height: size.height * scale,
+  );
+}
+
+/// Launcher3's overview_max_scale.
+const double overviewAndroidMaxScale = 0.7;
+
+/// Where the overview actions row sits below [card]: 24 dp under it, 48 dp
+/// tall (overview_actions_top_margin, overview_actions_height).
+Rect overviewActionsRectFor(Size size, Rect card) {
+  final dp = overviewDpFor(size);
+  return Rect.fromLTWH(0, card.bottom + 24 * dp, size.width, 48 * dp);
+}
+
 /// The equal-sized slots used by the landscape recents overview.
 ///
 /// [itemRects] and [previewRectAt] share the exact live-texture bounds used by

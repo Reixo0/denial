@@ -660,9 +660,9 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
   }
 
   /// Opens recents, continuing [releaseVelocity] (logical pixels per second,
-  /// negative upward). Out of an app, the app settles into its card and the
-  /// previous app comes to the centre; from home, the cards slide in from
-  /// beside the screen.
+  /// negative upward). Out of an app, the app settles into its card in the
+  /// centre, the previous app beside it, as on Android; from home, the cards
+  /// slide in from beside the screen.
   void openOverview({double releaseVelocity = 0}) {
     _releaseAppSwitchOrder();
     if (state.overviewVisible) {
@@ -693,12 +693,12 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
         velocity: slides ? -toward : 0,
       );
       _deck.attached.settle(1, ShellSprings.appStrip);
-      // Out of an app the previous app comes to the middle; otherwise the
-      // row settles on the card nearest, never on home.
+      // Out of an app that app stays in the middle; otherwise the row
+      // settles on the card nearest, never on home.
       final last = _deck.length - 1;
       final row = _deck.row;
       final target = front != null && !caught
-          ? (front > 0 ? front - 1 : math.min(last, front + 1))
+          ? front
           : row.target.round().clamp(0, math.max(0, last));
       if (last >= 0 && row.target != target) {
         row.settle(target.toDouble(), ShellSprings.recentsOpen);
@@ -1049,7 +1049,12 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
       case _DeckHold.open:
         final lift =
             -visualDrag.dy / geometry.liftTravel(fromApp: _holdFromApp);
-        _deck.open.hold((_deck.open.grabbedAt + lift).clamp(0.0, 1.0));
+        _deck.open.hold(
+          (_deck.open.grabbedAt + lift).clamp(
+            0.0,
+            _holdFromApp ? geometry.maxLift : 1.0,
+          ),
+        );
       case _DeckHold.homeward:
         final lift = -visualDrag.dy / geometry.liftTravel(fromApp: false);
         _deck.homeward.hold((_deck.homeward.grabbedAt - lift).clamp(0.0, 1.0));

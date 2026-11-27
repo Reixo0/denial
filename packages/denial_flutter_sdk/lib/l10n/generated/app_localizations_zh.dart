@@ -1143,6 +1143,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get overviewNoWindows => '没有窗口';
 
   @override
+  String get overviewScreenshot => 'Screenshot';
+
+  @override
+  String get overviewClear => 'Clear';
+
+  @override
+  String get overviewClearAll => 'Clear all';
+
+  @override
   String percentCompact(int percent) {
     return '$percent%';
   }

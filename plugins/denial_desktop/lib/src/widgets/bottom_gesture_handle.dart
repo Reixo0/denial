@@ -2,6 +2,9 @@ import 'package:denial_desktop/src/state/reference_shell_controller.dart';
 import 'package:denial_desktop/src/state/reference_shell_state.dart';
 import 'package:denial_desktop/src/state/reference_shell_metrics.dart';
 
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/widgets.dart';
@@ -13,9 +16,10 @@ import 'package:denial_flutter_sdk/system_services.dart'
 
 import 'liquid_pill.dart';
 
-/// The home pill at the bottom of the screen. An upward pull arms recents,
-/// with a tap of the haptic motor, and opens it on release; a fast flick
-/// sends an app home or opens recents from home. A downward swipe
+/// The home pill at the bottom of the screen. As in Launcher3, a lift that
+/// pauses arms recents, with a tap of the haptic motor, and opens it on
+/// release; otherwise an upward release sends an app home and a downward one
+/// returns to it. From home a pause or a flick opens recents. A downward swipe
 /// closes recents, and a horizontal swipe moves the row of apps, whose
 /// release sends it to the adjacent app or back. A swipe that starts while
 /// the apps still move takes them from where they are: sideways it holds
@@ -36,18 +40,29 @@ class _BottomGestureHandleState extends ConsumerState<BottomGestureHandle>
   static const double _switchFlickVelocity = 720.0;
   static const double _axisLockRatio = 1.18;
 
-  /// A faster upward fling sends an app home or opens recents from home. A
-  /// slower pull arms recents after [_recentsArmFraction] of the screen and
-  /// stays armed until it comes back below [_recentsDisarmFraction], so a
-  /// finger resting at the threshold does not flicker it.
-  static const double _homeFlickVelocity = 1100.0;
+  /// The pill's own feedback: how far a lift goes for its full stretch.
   static const double _recentsArmFraction = 0.06;
-  static const double _recentsDisarmFraction = 0.045;
+
+  // Launcher3's MotionPauseDetector and end targets, in dp and dp per ms
+  // (motion_pause_detector_*, quickstep_fling_threshold_speed).
+  static const double _speedVerySlow = 0.0285;
+  static const double _speedSomewhatFast = 0.285;
+  static const double _speedFast = 1.4;
+  static const double _rapidDeceleration = 0.6;
+  static const Duration _forcePause = Duration(milliseconds: 300);
+  static const double _pauseMinLiftDp = 36;
+  static const double _flingDp = 0.5;
 
   // The pill follows the drag without rebuilding: its lift moves a retained
   // layer, and only a change of [_armed] rebuilds it.
   late final ValueListenable<Offset> _drag;
   final _lift = ValueNotifier(Offset.zero);
+
+  /// Android hides the handle while an app is lifted from it.
+  final _handleOpacity = ValueNotifier(1.0);
+  late final Animation<double> _handleFade = Animation.fromValueListenable(
+    _handleOpacity,
+  );
   final _armed = ValueNotifier(false);
 
   /// How the pill looks: liquid that follows the finger. It never decides
@@ -56,8 +71,15 @@ class _BottomGestureHandleState extends ConsumerState<BottomGestureHandle>
   bool _overviewVisible = false;
   bool _hasSwitchTarget = false;
   double _recentsArmTravel = double.infinity;
-  double _recentsDisarmTravel = double.infinity;
   bool _recentsArmed = false;
+
+  /// Logical pixels per Android dp.
+  double _dp = 1;
+
+  // The pause detector's state for the current lift.
+  double? _previousVelocity;
+  bool _everPaused = false;
+  Timer? _pauseTimer;
 
   // Keep an independent velocity estimate for compositor-generated pointer
   // streams, where event coalescing can otherwise under-report a short flick.
@@ -83,18 +105,74 @@ class _BottomGestureHandleState extends ConsumerState<BottomGestureHandle>
 
   @override
   void dispose() {
+    _pauseTimer?.cancel();
     _liquid.dispose();
     _drag.removeListener(_dragged);
     _lift.dispose();
+    _handleOpacity.dispose();
     _armed.dispose();
     super.dispose();
   }
 
   void _dragged() {
-    final armed = _recentsArmed;
     _syncPill();
-    if (_recentsArmed != armed) {
-      ref.read(referenceShellProvider.notifier).armRecents(_recentsArmed);
+  }
+
+  /// The lift has passed Launcher3's minimum for a pause (36 dp) on its
+  /// vertical axis, from an app or from home.
+  bool get _pauseAllowed =>
+      !_overviewVisible &&
+      !ref.read(referenceShellProvider.notifier).holdsRow &&
+      -_panTravel.dy >= _pauseMinLiftDp * _dp;
+
+  /// Launcher3's MotionPauseDetector.checkMotionPaused for one move, with
+  /// [velocity] the vertical velocity in dp per ms.
+  void _checkPause(double velocity) {
+    final previous = _previousVelocity;
+    _previousVelocity = velocity;
+    _pauseTimer?.cancel();
+    _pauseTimer = Timer(_forcePause, () => _setPaused(true));
+    if (previous == null) return;
+    final speed = velocity.abs();
+    final previousSpeed = previous.abs();
+    bool paused;
+    if (_recentsArmed) {
+      // Paused until it moves fast again.
+      paused = speed < _speedFast || previousSpeed < _speedFast;
+    } else if ((velocity < 0) != (previous < 0)) {
+      paused = false;
+    } else {
+      paused = speed < _speedVerySlow && previousSpeed < _speedVerySlow;
+      if (!paused && !_everPaused) {
+        // The first pause also counts a rapid slow-down.
+        paused =
+            speed < previousSpeed * _rapidDeceleration &&
+            speed < _speedSomewhatFast;
+      }
+    }
+    _setPaused(paused);
+  }
+
+  void _setPaused(bool paused) {
+    if (paused && !_pauseAllowed) paused = false;
+    if (paused == _recentsArmed) return;
+    _recentsArmed = paused;
+    if (paused && !_everPaused) {
+      _everPaused = true;
+      ref.read(hapticsServiceProvider).pulse();
+    }
+    ref.read(referenceShellProvider.notifier).armRecents(paused);
+    _syncPill();
+  }
+
+  void _resetPause() {
+    _pauseTimer?.cancel();
+    _pauseTimer = null;
+    _previousVelocity = null;
+    _everPaused = false;
+    if (_recentsArmed) {
+      _recentsArmed = false;
+      ref.read(referenceShellProvider.notifier).armRecents(false);
     }
   }
 
@@ -106,16 +184,14 @@ class _BottomGestureHandleState extends ConsumerState<BottomGestureHandle>
     );
     _lift.value = Offset(0, -lift * 8.0);
     final up = -drag.dy;
-    final recents =
-        !_overviewVisible &&
-        up > (_recentsArmed ? _recentsDisarmTravel : _recentsArmTravel);
-    if (recents != _recentsArmed) {
-      _recentsArmed = recents;
-      if (recents) ref.read(hapticsServiceProvider).pulse();
-    }
+    _handleOpacity.value = _overviewVisible
+        ? 1.0
+        : (1 - up / (_pauseMinLiftDp * _dp)).clamp(0.0, 1.0);
+    // Android's handle has no armed look: only closing recents and a
+    // sideways switch show one.
     _armed.value = _overviewVisible
         ? drag.dy > _closeDistance
-        : recents || _horizontalSwitchArmed(drag, hasTarget: _hasSwitchTarget);
+        : _horizontalSwitchArmed(drag, hasTarget: _hasSwitchTarget);
     final progress = _overviewVisible
         ? drag.dy / _closeDistance
         : [
@@ -139,7 +215,7 @@ class _BottomGestureHandleState extends ConsumerState<BottomGestureHandle>
     _hasSwitchTarget = shell.hasSwitchTarget;
     final size = MediaQuery.sizeOf(context);
     _recentsArmTravel = size.height * _recentsArmFraction;
-    _recentsDisarmTravel = size.height * _recentsDisarmFraction;
+    _dp = math.max(1.0, size.shortestSide / (1216 * 160 / 468));
     _syncPill();
     final controller = ref.read(referenceShellProvider.notifier);
 
@@ -161,10 +237,14 @@ class _BottomGestureHandleState extends ConsumerState<BottomGestureHandle>
               behavior: HitTestBehavior.opaque,
               onPanStart: (_) {
                 _beginPanTracking();
+                _resetPause();
                 controller.resetGestureDrag();
               },
               onPanUpdate: (details) {
                 _trackPan(details.delta);
+                _checkPause(
+                  _panVelocity.getVelocity().pixelsPerSecond.dy / _dp / 1000,
+                );
                 controller.updateGestureDrag(details.delta);
                 _liquid.drag(
                   _panTravel,
@@ -172,6 +252,7 @@ class _BottomGestureHandleState extends ConsumerState<BottomGestureHandle>
                 );
               },
               onPanCancel: () {
+                _resetPause();
                 controller.resetGestureDrag();
                 _liquid.release(PillRelease.settle);
               },
@@ -182,9 +263,12 @@ class _BottomGestureHandleState extends ConsumerState<BottomGestureHandle>
                 child: Padding(
                   padding: const EdgeInsets.only(top: 20),
                   child: Center(
-                    child: CompositedTranslation(
-                      translation: _lift,
-                      child: LiquidPill(liquid: _liquid),
+                    child: FadeTransition(
+                      opacity: _handleFade,
+                      child: CompositedTranslation(
+                        translation: _lift,
+                        child: LiquidPill(liquid: _liquid),
+                      ),
                     ),
                   ),
                 ),
@@ -209,6 +293,7 @@ class _BottomGestureHandleState extends ConsumerState<BottomGestureHandle>
       details.velocity.pixelsPerSecond,
     );
     final acted = _resolvePan(controller, drag, velocity);
+    _resetPause();
     _liquid.release(
       acted ? PillRelease.launch : PillRelease.settle,
       velocity: velocity,
@@ -239,27 +324,40 @@ class _BottomGestureHandleState extends ConsumerState<BottomGestureHandle>
           velocity.dx.abs() > _switchFlickVelocity;
     }
 
-    // A fast up-flick sends an app home or opens recents when already home.
-    // A longer pull also opens recents; smaller gestures cancel.
+    // Launcher3's calculateEndTarget: a fling (0.5 dp/ms) up goes home and
+    // down back to the app; slower, a paused lift opens recents, one still
+    // rising past 36 dp goes home, anything else returns to the app. From
+    // home a pause or an upward fling opens recents.
     final hasForeground = currentState.foregroundWindow != null;
-    final armed = _recentsArmed || -drag.dy > _recentsArmTravel;
+    final fling = velocity.dy.abs() > _flingDp * _dp * 1000;
+    final paused = _recentsArmed;
+    final rising = velocity.dy < 0 && -drag.dy >= _pauseMinLiftDp * _dp;
     if (currentState.launchTransitionActive) {
-      if (velocity.dy < -_homeFlickVelocity || armed) {
+      if ((fling && velocity.dy < 0) || paused || rising) {
         controller.goHome(releaseVelocity: velocity.dy);
         return true;
       }
       controller.resetGestureDrag(releaseVelocity: velocity.dy);
       return false;
     }
-    if (velocity.dy < -_homeFlickVelocity) {
-      if (hasForeground) {
-        controller.goHome(releaseVelocity: velocity.dy);
-      } else {
+    if (!hasForeground) {
+      if (paused || (fling && velocity.dy < 0)) {
         controller.openOverview(releaseVelocity: velocity.dy);
+        return true;
       }
-      return true;
-    } else if (armed) {
+      controller.resetGestureDrag(releaseVelocity: velocity.dy);
+      return false;
+    }
+    if (fling) {
+      if (velocity.dy < 0) {
+        controller.goHome(releaseVelocity: velocity.dy);
+        return true;
+      }
+    } else if (paused) {
       controller.openOverview(releaseVelocity: velocity.dy);
+      return true;
+    } else if (rising) {
+      controller.goHome(releaseVelocity: velocity.dy);
       return true;
     }
     controller.resetGestureDrag(releaseVelocity: velocity.dy);

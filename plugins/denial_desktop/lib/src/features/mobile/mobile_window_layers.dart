@@ -8,6 +8,9 @@ import '../../widgets/shade/shade_progress.dart';
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/widgets.dart';
+
+import '../../state/quick_settings.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'mobile_primary_window_stage.dart';
@@ -98,6 +101,16 @@ class MobileAppDeckLayer extends ConsumerWidget {
       onDismissWindow: controller.dismissFromRecents,
       onOpenWindow: controller.openFromRecents,
       onMoveWindowToDesk: deskBeside ? controller.moveToDesk : null,
+      // Android screenshots the task; here the app comes back to the
+      // screen first and is captured once it fills it.
+      onScreenshot: (window) {
+        controller.openFromRecents(window);
+        final settings = ref.read(quickSettingsProvider.notifier);
+        Future<void>.delayed(
+          const Duration(milliseconds: 450),
+          settings.takeScreenshot,
+        );
+      },
     );
   }
 }

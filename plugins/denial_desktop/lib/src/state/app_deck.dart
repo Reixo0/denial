@@ -4,8 +4,7 @@ import 'dart:ui' show lerpDouble;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/physics.dart' show Simulation;
 import 'package:flutter/scheduler.dart';
-import 'package:flutter/widgets.dart'
-    show BoxConstraints, EdgeInsets, Offset, Rect, Size;
+import 'package:flutter/widgets.dart' show EdgeInsets, Offset, Rect, Size;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:motor/motor.dart' as motor;
 
@@ -543,14 +542,7 @@ class DeckGeometry {
     required this.windowRadius,
     required this.switchRadius,
     required this.ltr,
-  }) : card = centerPreviewRectFor(
-         size,
-         cardSizeFor(
-           constraints: BoxConstraints.tight(size),
-           padding: padding,
-           aspect: viewAspectFor(size),
-         ),
-       );
+  }) : card = overviewCardRectFor(size, padding);
 
   static final empty = DeckGeometry(
     size: Size.zero,
@@ -584,7 +576,7 @@ class DeckGeometry {
     size.width + ReferenceShellMetrics.appSwitchGap,
     landscape
         ? size.width + ReferenceShellMetrics.appSwitchGap
-        : card.width + overviewPageSpacing,
+        : card.width + overviewPageSpacingFor(size),
     open.clamp(0.0, 1.0),
   )!;
 
@@ -594,6 +586,12 @@ class DeckGeometry {
   double liftTravel({required bool fromApp}) => fromApp
       ? math.max(1.0, size.height - card.bottom)
       : math.max(1.0, size.height * 0.45);
+
+  /// How far a lift from an app can open the deck: Launcher3 lets the
+  /// card keep shrinking under the finger past its recents size, to the top
+  /// of the screen (SwipeUpAnimationLogic.mDragLengthFactor).
+  double get maxLift =>
+      landscape ? 1.0 : math.max(1.0, size.height / liftTravel(fromApp: true));
 
   /// A horizontal finger travel [dx] as a change of the row, in apps.
   double rowDelta(double dx, double open) => -dx * _sign / strideAt(open);
@@ -638,7 +636,18 @@ class DeckGeometry {
         p,
       )!.shift(Offset(offset * strideAt(0) * (1 - p), 0));
     } else {
-      app = Rect.lerp(screen, card, p)!.shift(Offset(offset * strideAt(p), 0));
+      // Past 1 (a lift beyond the recents card) the card keeps shrinking
+      // along the same line, its bottom under the finger.
+      final lift = open.clamp(0.0, maxLift);
+      final Rect rect;
+      var shrink = 1.0;
+      if (lift <= 1) {
+        rect = Rect.lerp(screen, card, lift)!;
+      } else {
+        (rect, shrink) = _resisted(lift);
+      }
+      // The row shrinks with the card, so its neighbours stay beside it.
+      app = rect.shift(Offset(offset * strideAt(p) * shrink, 0));
     }
     // Sliding apps round their corners as soon as they leave the screen's
     // edges, and square them again as they come to rest.
@@ -648,6 +657,44 @@ class DeckGeometry {
       switchRadius * apart,
     );
     return WindowPose(app.shift(Offset(away + aside, 0)), appRadius);
+  }
+
+  /// The card lifted past its recents size, [lift] > 1, and its scale
+  /// against that size: Launcher3's AnimatorControllerWithResistance with
+  /// RecentsResistanceParams.FROM_APP. The scale keeps its rate down to
+  /// 0.75, then eases (decelerate) to 0.5 as the finger reaches the top,
+  /// about the point that scales the card to the full screen, while the
+  /// card moves up so it would touch the top of the screen when the finger
+  /// does.
+  (Rect, double) _resisted(double lift) {
+    final max = maxLift;
+    final r = max <= 1 ? 0.0 : ((lift - 1) / (max - 1)).clamp(0.0, 1.0);
+    final fullscreen = size.width / card.width;
+    final rate = (fullscreen - 1) / math.max(1.0, size.height - card.bottom);
+    final endScale = 1 - rate * card.bottom;
+    double progressOf(double scale) => (scale - 1) / (endScale - 1);
+    final startResist = progressOf(0.75);
+    final maxResist = progressOf(0.5);
+    final double t;
+    if (r <= startResist) {
+      t = r;
+    } else {
+      final x = (r - startResist) / (1 - startResist);
+      t = startResist + (1 - (1 - x) * (1 - x)) * (maxResist - startResist);
+    }
+    final scale = 1 + t * (endScale - 1);
+    final pivot = Offset(
+      card.center.dx,
+      fullscreen * card.top / (fullscreen - 1),
+    );
+    Rect scaled(double k) => Rect.fromLTRB(
+      pivot.dx + (card.left - pivot.dx) * k,
+      pivot.dy + (card.top - pivot.dy) * k,
+      pivot.dx + (card.right - pivot.dx) * k,
+      pivot.dy + (card.bottom - pivot.dy) * k,
+    );
+    final rise = scaled(0.5).top * r;
+    return (scaled(scale).shift(Offset(0, -rise)), scale);
   }
 
   /// Landscape recents is a grid, newest app first.

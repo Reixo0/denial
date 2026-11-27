@@ -9,13 +9,16 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 import 'package:motor/motor.dart' as motor;
 
+import 'package:denial_flutter_sdk/effects.dart';
 import 'package:denial_flutter_sdk/localization.dart';
 import 'package:denial_flutter_sdk/models.dart';
 import 'package:denial_flutter_sdk/motion.dart';
 import 'package:denial_flutter_sdk/rendering.dart';
 import 'package:denial_flutter_sdk/shell_theme.dart';
 
+import '../phone_scheme.dart';
 import 'overview_card_label.dart';
+import 'overview_geometry.dart';
 import 'overview_chrome.dart';
 
 /// Draws the open apps wherever the [deck] has them, while it presents:
@@ -38,6 +41,7 @@ class AppDeckLayer extends StatefulWidget {
     required this.onDismissWindow,
     required this.onOpenWindow,
     this.onMoveWindowToDesk,
+    this.onScreenshot,
   });
 
   final AppDeck deck;
@@ -62,11 +66,15 @@ class AppDeckLayer extends StatefulWidget {
   /// Moves an app to the monitor beside the phone; none without a monitor.
   final ValueChanged<DenialWindow>? onMoveWindowToDesk;
 
+  /// Android's Screenshot action under the cards: takes the centred app.
+  final ValueChanged<DenialWindow>? onScreenshot;
+
   @override
   State<AppDeckLayer> createState() => _AppDeckLayerState();
 }
 
-class _AppDeckLayerState extends State<AppDeckLayer> {
+class _AppDeckLayerState extends State<AppDeckLayer>
+    with SingleTickerProviderStateMixin {
   /// How far a fling carries the recents row, in seconds of its speed.
   static const double _rowFlingProjection = 0.35;
 
@@ -80,11 +88,27 @@ class _AppDeckLayerState extends State<AppDeckLayer> {
   late final Animation<double> _openAnimation = Animation.fromValueListenable(
     _open,
   );
-  late final Animation<double> _labelOpacity = Animation.fromValueListenable(
-    _open,
-    transformer: const Interval(0.7, 1).transform,
+
+  /// Recents' own look: the blur and scrim behind the cards, the app chips
+  /// and the actions. As in Launcher3 they come with the overview state, on
+  /// release, not while a finger lifts the app.
+  late final AnimationController _chrome = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 300),
+    value: widget.recents ? 1 : 0,
+  );
+  late final Animation<double> _scrimOpacity = CurvedAnimation(
+    parent: _chrome,
+    curve: Curves.easeOut,
+  );
+  late final Animation<double> _labelOpacity = CurvedAnimation(
+    parent: _chrome,
+    curve: const Interval(0.5, 1, curve: Curves.easeOut),
   );
   var _windows = <int, DenialWindow>{};
+
+  /// Fires Clear all for the cards on screen.
+  final _clearAll = ValueNotifier(0);
   final _poses = <int, ValueNotifier<WindowPose>>{};
 
   /// The apps drawn, back to front.
@@ -108,10 +132,16 @@ class _AppDeckLayerState extends State<AppDeckLayer> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     final theme = context.shellTheme;
+    final size = MediaQuery.sizeOf(context);
     final geometry = DeckGeometry(
-      size: MediaQuery.sizeOf(context),
+      size: size,
       padding: MediaQuery.paddingOf(context),
-      windowRadius: theme.windowRadius,
+      // Android rounds a recents task with the display's corner radius
+      // (QuickStepContract.getWindowCornerRadius): 82 px on the Pixel
+      // emulator at this size, 28 dp.
+      windowRadius: size.width > size.height
+          ? theme.windowRadius
+          : 28 * overviewDpFor(size),
       switchRadius: theme.scaledRadius(18),
       ltr: Directionality.of(context) == TextDirection.ltr,
     );
@@ -130,6 +160,9 @@ class _AppDeckLayerState extends State<AppDeckLayer> {
     }
     if (!identical(widget.windows, oldWidget.windows)) _indexWindows();
     if (!widget.recents) _endRowDrag(null);
+    if (widget.recents != oldWidget.recents) {
+      widget.recents ? _chrome.forward() : _chrome.reverse();
+    }
   }
 
   @override
@@ -139,6 +172,8 @@ class _AppDeckLayerState extends State<AppDeckLayer> {
       pose.dispose();
     }
     _open.dispose();
+    _chrome.dispose();
+    _clearAll.dispose();
     super.dispose();
   }
 
@@ -257,6 +292,31 @@ class _AppDeckLayerState extends State<AppDeckLayer> {
     }
   }
 
+  /// Clear all: the cards on screen fly up and away, closing their apps;
+  /// the rest close at once. Recents with no app left goes home.
+  void _clearAllApps() {
+    final shown = _drawn.toSet();
+    for (final window in _windows.values.toList()) {
+      if (!shown.contains(window.objectId)) widget.onDismissWindow(window);
+    }
+    _clearAll.value++;
+  }
+
+  /// The app whose card is in the middle of the row.
+  void _screenshot() {
+    final deck = widget.deck;
+    final onScreenshot = widget.onScreenshot;
+    if (onScreenshot == null || deck.length == 0) return;
+    final row = deck.row.value.round();
+    for (final id in deck.order) {
+      if (deck.slotOf(id).round() == row) {
+        final window = _windows[id];
+        if (window != null) onScreenshot(window);
+        return;
+      }
+    }
+  }
+
   double _nearestCard(double position) =>
       position.roundToDouble().clamp(0.0, math.max(0, widget.deck.length - 1));
 
@@ -300,15 +360,27 @@ class _AppDeckLayerState extends State<AppDeckLayer> {
                 backdrop: backdrop,
                 motion: deck,
                 overlayColor: OverviewScrim.colorOf(context),
-                overlayOpacity: _open,
+                overlayOpacity: _scrimOpacity,
                 child: stack!,
               ),
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  OverviewScrim(
-                    opacity: _openAnimation,
-                    onTap: widget.onCloseRecents,
+                  // Android blurs what is behind recents at depth 0.7 of the
+                  // launcher's 30 dp (about 0.62 of the shade's blur) under
+                  // overviewScrimColorBlur, both growing as recents opens.
+                  AnimatedBuilder(
+                    animation: _scrimOpacity,
+                    builder: (context, scrim) => ShellBackdropBlur(
+                      edgeless: true,
+                      strength: (0.62 * _scrimOpacity.value).clamp(0.0, 1.0),
+                      borderRadius: BorderRadius.zero,
+                      child: scrim!,
+                    ),
+                    child: OverviewScrim(
+                      opacity: _scrimOpacity,
+                      onTap: widget.onCloseRecents,
+                    ),
                   ),
                   if (deck.length == 0)
                     EmptyOverviewState(progress: _openAnimation),
@@ -321,12 +393,48 @@ class _AppDeckLayerState extends State<AppDeckLayer> {
                         key: ValueKey<int>(id),
                         window: window,
                         pose: pose,
-                        labelWidth: geometry.card.width,
+                        dp: overviewDpFor(geometry.size),
+                        ltr: geometry.ltr,
                         labelOpacity: geometry.landscape ? null : _labelOpacity,
                         onOpen: widget.onOpenWindow,
                         onDismissed: widget.onDismissWindow,
                         onMoveToDesk: widget.onMoveWindowToDesk,
+                        onScreenshot: widget.onScreenshot,
+                        clearAll: _clearAll,
                       ),
+                  if (!geometry.landscape &&
+                      deck.length > 0 &&
+                      widget.onScreenshot != null)
+                    Positioned.fromRect(
+                      rect: overviewActionsRectFor(
+                        geometry.size,
+                        geometry.card,
+                      ),
+                      child: FadeTransition(
+                        opacity: _labelOpacity,
+                        // Android's Screenshot, and the owner's Clear all
+                        // beside it, 16 dp apart (overview_actions_button_
+                        // spacing).
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            _OverviewAction(
+                              dp: overviewDpFor(geometry.size),
+                              icon: Icons.crop_free_rounded,
+                              label: context.l10n.overviewScreenshot,
+                              onTap: _screenshot,
+                            ),
+                            SizedBox(width: 16 * overviewDpFor(geometry.size)),
+                            _OverviewAction(
+                              dp: overviewDpFor(geometry.size),
+                              icon: Icons.clear_all_rounded,
+                              label: context.l10n.overviewClearAll,
+                              onTap: _clearAllApps,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -344,18 +452,30 @@ class _DeckCard extends StatefulWidget {
     super.key,
     required this.window,
     required this.pose,
-    required this.labelWidth,
+    required this.dp,
+    required this.ltr,
     required this.labelOpacity,
     required this.onOpen,
     required this.onDismissed,
     this.onMoveToDesk,
+    this.onScreenshot,
+    required this.clearAll,
   });
 
   final DenialWindow window;
   final ValueListenable<WindowPose> pose;
-  final double labelWidth;
 
-  /// The app's icon and name above the card; none without it.
+  /// Takes the app's screenshot, from its chip's menu.
+  final ValueChanged<DenialWindow>? onScreenshot;
+
+  /// Clear all: every card on screen is thrown away when it fires.
+  final Listenable clearAll;
+
+  /// Logical pixels per Android dp.
+  final double dp;
+  final bool ltr;
+
+  /// The app chip over the card; none without it.
   final Animation<double>? labelOpacity;
   final ValueChanged<DenialWindow> onOpen;
   final ValueChanged<DenialWindow> onDismissed;
@@ -365,8 +485,7 @@ class _DeckCard extends StatefulWidget {
   State<_DeckCard> createState() => _DeckCardState();
 }
 
-class _DeckCardState extends State<_DeckCard>
-    with SingleTickerProviderStateMixin {
+class _DeckCardState extends State<_DeckCard> with TickerProviderStateMixin {
   // Android 16 TaskViewDismissTouchController: half the off-screen travel,
   // 25dp undershoot, and BaseSwipeDetector's 1dp/ms release threshold.
   static const double _downwardRubberBandLimit = 25.0;
@@ -385,32 +504,109 @@ class _DeckCardState extends State<_DeckCard>
   bool _leaving = false;
   bool _dismissed = false;
 
+  /// The chip's menu: the chip grows into its header as the menu opens.
+  late final AnimationController _menu = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 250),
+  );
+  late final Animation<double> _menuCurve = CurvedAnimation(
+    parent: _menu,
+    curve: Curves.easeOutCubic,
+    reverseCurve: Curves.easeInCubic,
+  );
+
   @override
   void initState() {
     super.initState();
+    widget.clearAll.addListener(_throwAway);
     _throw = motor.SingleMotionController(
       motion: ShellSprings.cardReturn,
       vsync: this,
       initialValue: 0,
     )..addListener(_checkGone);
-    _pose = _CardPose(widget.pose, _throw);
+    _pose = _CardPose(widget.pose, _throw, dp: widget.dp, ltr: widget.ltr);
   }
 
   @override
   void didUpdateWidget(covariant _DeckCard oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.pose != oldWidget.pose) _pose.base = widget.pose;
+    if (widget.clearAll != oldWidget.clearAll) {
+      oldWidget.clearAll.removeListener(_throwAway);
+      widget.clearAll.addListener(_throwAway);
+    }
+    _pose
+      ..dp = widget.dp
+      ..ltr = widget.ltr;
   }
 
   @override
   void dispose() {
+    widget.clearAll.removeListener(_throwAway);
+    _menu.dispose();
     _pose.dispose();
     _throw.dispose();
     super.dispose();
   }
 
+  /// Throws the card up and away, closing its app (Clear, Clear all).
+  void _throwAway() {
+    if (_leaving) return;
+    _menu.reverse();
+    _leaving = true;
+    _pose.length = math.max(
+      1.0,
+      _pose.base.value.rect.bottom + _offscreenMargin,
+    );
+    _exit = -_pose.length;
+    _throw
+      ..motion = ShellSprings.cardDismiss
+      ..animateTo(_exit, withVelocity: -_dismissFlingVelocity);
+  }
+
+  void _closeMenu() => _menu.reverse();
+
+  void _toggleMenu() {
+    if (_leaving) return;
+    if (_menu.isDismissed || _menu.status == AnimationStatus.reverse) {
+      _menu.forward();
+    } else {
+      _menu.reverse();
+    }
+  }
+
+  List<({IconData icon, String label, VoidCallback onTap})> _menuItems(
+    BuildContext context,
+  ) {
+    final l10n = context.l10n;
+    final onScreenshot = widget.onScreenshot;
+    final onMoveToDesk = widget.onMoveToDesk;
+    return [
+      if (onScreenshot != null)
+        (
+          icon: Icons.crop_free_rounded,
+          label: l10n.overviewScreenshot,
+          onTap: () {
+            _closeMenu();
+            onScreenshot(widget.window);
+          },
+        ),
+      if (onMoveToDesk != null)
+        (
+          icon: Icons.desktop_windows_rounded,
+          label: l10n.moveToMonitor,
+          onTap: () {
+            _closeMenu();
+            onMoveToDesk(widget.window);
+          },
+        ),
+      (icon: Icons.close_rounded, label: l10n.overviewClear, onTap: _throwAway),
+    ];
+  }
+
   void _startDrag(DragStartDetails details) {
     if (_leaving) return;
+    _menu.reverse();
     _throw.stop(canceled: true);
     _pose.length = math.max(
       1.0,
@@ -487,7 +683,6 @@ class _DeckCardState extends State<_DeckCard>
   @override
   Widget build(BuildContext context) {
     final labelOpacity = widget.labelOpacity;
-    final onMoveToDesk = widget.onMoveToDesk;
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -507,28 +702,6 @@ class _DeckCardState extends State<_DeckCard>
             ),
           ),
         ),
-        if (labelOpacity != null)
-          Positioned(
-            left: 0,
-            top: 0,
-            width: widget.labelWidth,
-            height: OverviewCardLabel.height,
-            child: IgnorePointer(
-              child: CompositedTranslation(
-                translation: _pose.label,
-                devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
-                child: FadeTransition(
-                  opacity: labelOpacity,
-                  child: OverviewCardLabel(
-                    window: widget.window,
-                    trailingSpace: onMoveToDesk == null
-                        ? 0
-                        : _MoveToDeskButton.size + OverviewCardLabel.gap,
-                  ),
-                ),
-              ),
-            ),
-          ),
         _PoseHitRegion(
           pose: _pose,
           child: GestureDetector(
@@ -542,33 +715,73 @@ class _DeckCardState extends State<_DeckCard>
             onVerticalDragCancel: _settleBack,
           ),
         ),
-        if (labelOpacity != null && onMoveToDesk != null)
-          // The translation spans the deck, so a tap on the button is tested
-          // where the label is drawn, not at the label's untranslated slot.
+        // While the menu is open a tap anywhere else only closes it.
+        AnimatedBuilder(
+          animation: _menu,
+          builder: (context, _) => _menu.isDismissed
+              ? const SizedBox.shrink()
+              : GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _closeMenu,
+                  onVerticalDragStart: (_) => _closeMenu(),
+                ),
+        ),
+        if (labelOpacity != null)
+          // The translation spans the deck, so taps on the chip and its menu
+          // are tested where they are drawn.
           Positioned.fill(
             child: CompositedTranslation(
               translation: _pose.label,
               devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
-              child: Stack(
-                children: [
-                  Positioned(
-                    left: 0,
-                    top: 0,
-                    width: widget.labelWidth,
-                    height: OverviewCardLabel.height,
-                    child: FadeTransition(
-                      opacity: labelOpacity,
-                      child: Align(
-                        alignment: AlignmentDirectional.centerEnd,
-                        child: _MoveToDeskButton(
-                          onTap: () {
-                            if (!_leaving) onMoveToDesk(widget.window);
-                          },
-                        ),
-                      ),
-                    ),
+              child: FadeTransition(
+                opacity: labelOpacity,
+                child: AnimatedBuilder(
+                  animation: _menuCurve,
+                  builder: (context, _) => _chipAndMenu(context),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _chipAndMenu(BuildContext context) {
+    final dp = widget.dp;
+    final open = _menuCurve.value;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Positioned(
+          left: 0,
+          top: 0,
+          width: OverviewCardLabel.boxWidthDp * dp,
+          height: OverviewCardLabel.boxHeightDp * dp,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _toggleMenu,
+            child: OverviewCardLabel(
+              window: widget.window,
+              dp: dp,
+              expansion: open,
+            ),
+          ),
+        ),
+        if (open > 0)
+          Positioned(
+            left: 0,
+            top: (OverviewCardLabel.boxHeightDp + OverviewTaskMenu.gapDp) * dp,
+            child: IgnorePointer(
+              ignoring: _menu.status != AnimationStatus.completed,
+              child: Opacity(
+                opacity: open,
+                child: ClipRect(
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    heightFactor: open,
+                    child: OverviewTaskMenu(dp: dp, items: _menuItems(context)),
                   ),
-                ],
+                ),
               ),
             ),
           ),
@@ -579,7 +792,7 @@ class _DeckCardState extends State<_DeckCard>
 
 /// The deck's pose of a card, thrown up and shrinking as it leaves.
 class _CardPose extends ChangeNotifier implements ValueListenable<WindowPose> {
-  _CardPose(this._base, this._throw) {
+  _CardPose(this._base, this._throw, {required this.dp, required this.ltr}) {
     _base.addListener(_changed);
     _throw.addListener(_changed);
     _changed();
@@ -591,7 +804,11 @@ class _CardPose extends ChangeNotifier implements ValueListenable<WindowPose> {
   /// How far the card travels to leave the screen.
   double length = 1;
 
-  /// Where the card's label goes: above its top edge.
+  /// Logical pixels per Android dp.
+  double dp;
+  bool ltr;
+
+  /// Where the card's app chip goes: inside its top start corner.
   final label = ValueNotifier(Offset.zero);
 
   ValueListenable<WindowPose> get base => _base;
@@ -623,9 +840,11 @@ class _CardPose extends ChangeNotifier implements ValueListenable<WindowPose> {
 
   void _changed() {
     final rect = value.rect;
+    final inset = OverviewCardLabel.insetDp * dp;
+    final box = OverviewCardLabel.boxWidthDp * dp;
     label.value = Offset(
-      rect.left,
-      rect.top - OverviewCardLabel.gap - OverviewCardLabel.height,
+      ltr ? rect.left + inset : rect.right - inset - box,
+      rect.top + inset,
     );
     notifyListeners();
   }
@@ -674,35 +893,56 @@ class _RenderPoseHitRegion extends RenderProxyBox {
   }
 }
 
-/// Sends a card's app to the monitor beside the phone.
-class _MoveToDeskButton extends StatelessWidget {
-  const _MoveToDeskButton({required this.onTap});
+/// One of Android's overview actions (OverviewActionButton.Blur): a 48 dp
+/// pill in customColorSurfaceEffect1 with a 24 dp icon, 8 dp, and 14 sp
+/// text at weight 600, 16 dp in from each side.
+class _OverviewAction extends StatelessWidget {
+  const _OverviewAction({
+    required this.dp,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
-  static const double size = 40;
-
+  final double dp;
+  final IconData icon;
+  final String label;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final dark = ShellTheme.of(context).brightness == Brightness.dark;
-    final ink = dark ? const Color(0xFFF5F5F7) : const Color(0xFF1C1C1E);
+    final scheme = phoneSchemeOf(context);
     return Semantics(
       button: true,
-      label: context.l10n.moveToMonitor,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
         child: Container(
-          width: size,
-          height: size,
+          height: 48 * dp,
+          padding: EdgeInsets.symmetric(horizontal: 16 * dp),
           decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: dark ? const Color(0x73000000) : const Color(0x8CFFFFFF),
-            border: Border.all(
-              color: dark ? const Color(0x24FFFFFF) : const Color(0x1F000000),
-            ),
+            color: scheme.surfaceEffect1,
+            borderRadius: BorderRadius.circular(28 * dp),
           ),
-          child: Icon(Icons.desktop_windows_rounded, size: 20, color: ink),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 24 * dp, color: scheme.onSurface),
+              SizedBox(width: 8 * dp),
+              Text(
+                label,
+                maxLines: 1,
+                textScaler: TextScaler.noScaling,
+                style: TextStyle(
+                  color: scheme.onSurface,
+                  fontSize: 14 * dp * phoneTextScale,
+                  fontWeight: FontWeight.w600,
+                  height: 1,
+                  decoration: TextDecoration.none,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -1682,6 +1682,18 @@
   "@overviewNoWindows": {
     "description": "English UI text for overviewNoWindows."
   },
+  "overviewScreenshot": "Screenshot",
+  "@overviewScreenshot": {
+    "description": "Recents action that screenshots the centred app."
+  },
+  "overviewClear": "Clear",
+  "@overviewClear": {
+    "description": "Recents card menu item that closes the app."
+  },
+  "overviewClearAll": "Clear all",
+  "@overviewClearAll": {
+    "description": "Recents action that closes every app."
+  },
   "percentCompact": "{percent}%",
   "@percentCompact": {
     "description": "English UI text for percentCompact.",

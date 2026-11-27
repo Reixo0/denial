@@ -8,12 +8,14 @@ import 'package:denial_flutter_sdk/rendering.dart';
 class OverviewScrim extends StatelessWidget {
   const OverviewScrim({super.key, required this.opacity, required this.onTap});
 
-  /// The scrim over the scene behind recents. Translucent cards draw it over
-  /// their cached glass too, so it must match what they cover.
-  static Color colorOf(BuildContext context) {
-    final scrim = context.shellColors.overviewScrim;
-    return scrim.withValues(alpha: scrim.a * 0.5);
-  }
+  /// The scrim over the scene behind recents: Launcher3's
+  /// overviewScrimColorBlur, black at 0.5 (white at 0.5 in a light theme).
+  /// Translucent cards draw it over their cached glass too, so it must match
+  /// what they cover.
+  static Color colorOf(BuildContext context) =>
+      context.shellColors.brightness == Brightness.dark
+      ? const Color(0x80000000)
+      : const Color(0x80FFFFFF);
 
   final Animation<double> opacity;
   final VoidCallback onTap;

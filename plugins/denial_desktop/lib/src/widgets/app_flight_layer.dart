@@ -75,14 +75,7 @@ class _AppFlightLayerState extends ConsumerState<AppFlightLayer>
   Rect get _full => Offset.zero & _size;
 
   /// The foreground app's recents card, where a held launch shrinks to.
-  Rect get _card => centerPreviewRectFor(
-    _size,
-    cardSizeFor(
-      constraints: BoxConstraints.tight(_size),
-      padding: _padding,
-      aspect: viewAspectFor(_size),
-    ),
-  );
+  Rect get _card => overviewCardRectFor(_size, _padding);
 
   @override
   void initState() {

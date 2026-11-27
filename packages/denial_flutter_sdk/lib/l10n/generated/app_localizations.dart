@@ -2118,6 +2118,24 @@ abstract class AppLocalizations {
   /// **'No windows'**
   String get overviewNoWindows;
 
+  /// Recents action that screenshots the centred app.
+  ///
+  /// In en, this message translates to:
+  /// **'Screenshot'**
+  String get overviewScreenshot;
+
+  /// Recents card menu item that closes the app.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear'**
+  String get overviewClear;
+
+  /// Recents action that closes every app.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear all'**
+  String get overviewClearAll;
+
   /// English UI text for percentCompact.
   ///
   /// In en, this message translates to:
