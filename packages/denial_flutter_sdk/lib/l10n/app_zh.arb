@@ -1245,6 +1245,8 @@
   "simPinLater": "稍后",
   "simPukRequired": "SIM 卡需要 PUK。请联系运营商。",
   "simLocked": "SIM 卡已锁定",
+  "keyguardNoSim": "无 SIM 卡",
+  "keyguardNoService": "无服务",
   "simPinRetries": "剩余 {count} 次尝试",
   "@simPinRetries": {
     "placeholders": {

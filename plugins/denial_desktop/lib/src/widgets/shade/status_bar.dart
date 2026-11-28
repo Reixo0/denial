@@ -10,6 +10,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:denial_flutter_sdk/localization.dart';
 import 'package:denial_flutter_sdk/models.dart';
 import 'package:denial_flutter_sdk/state.dart';
+import 'package:denial_flutter_sdk/system_services.dart'
+    show MobileNetworkSnapshot, MobileSimPresence, mobileNetworkProvider;
 import 'package:denial_flutter_sdk/shell_color_scheme.dart';
 import 'package:denial_flutter_sdk/shell_theme.dart';
 import 'package:denial_flutter_sdk/tokens.dart';
@@ -74,6 +76,111 @@ class _StatusGeometry {
         ),
       ),
     ];
+  }
+}
+
+/// Android's KeyguardStatusBarView on the lock screen: the carrier on the
+/// left and the status icons where the status bar has them, on the status
+/// bar's row. The carrier starts at keyguard_carrier_text_margin (16 dp),
+/// which the status bar's 16 dp content inset already covers, so 4 dp
+/// before the status bar's clock would start; it is drawn in the status bar
+/// clock's style (TextAppearance.StatusBar.Default at text_size_small_material,
+/// 14 sp). The lock screen fades it ([opacity]).
+class KeyguardStatusBar extends ConsumerWidget {
+  const KeyguardStatusBar({super.key, required this.color});
+
+  final Color color;
+
+  static const double _carrierStart = 16;
+  static const double _iconAreaMargin = 16;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final geometry = _StatusGeometry.of(context);
+    final dp = geometry.dp;
+    final top = geometry.topPadding;
+    final height = 2 * _StatusGeometry._centre * dp;
+    return Stack(
+      fit: StackFit.expand,
+      clipBehavior: Clip.none,
+      children: [
+        PositionedDirectional(
+          top: top,
+          height: height,
+          start: _carrierStart * dp,
+          end: _StatusGeometry._side * dp,
+          child: Row(
+            children: [
+              Expanded(
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: _KeyguardCarrier(color: color, dp: dp),
+                ),
+              ),
+              // status_icon_area's system_icons_super_container_margin_start.
+              SizedBox(width: _iconAreaMargin * dp),
+              _StatusCluster(color: color, dp: dp),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Android's CarrierText on the keyguard: the network's name, or why there
+/// is none (showMissingSim).
+class _KeyguardCarrier extends ConsumerWidget {
+  const _KeyguardCarrier({required this.color, required this.dp});
+
+  final Color color;
+  final double dp;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
+    final network = ref.watch(mobileNetworkProvider).value;
+    final text = _carrierText(
+      network,
+      noSim: l10n.keyguardNoSim,
+      locked: l10n.simLocked,
+      noService: l10n.keyguardNoService,
+    );
+    if (text.isEmpty) return const SizedBox.shrink();
+    return Transform.translate(
+      offset: Offset(0, statusTextDrop * statusTextSize * dp),
+      child: Text(
+        text,
+        maxLines: 1,
+        softWrap: false,
+        overflow: TextOverflow.ellipsis,
+        textScaler: TextScaler.noScaling,
+        style: ShellText.statusClock.copyWith(
+          color: color,
+          fontSize: statusTextSize * dp,
+          height: 1,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0,
+        ),
+      ),
+    );
+  }
+
+  static String _carrierText(
+    MobileNetworkSnapshot? network, {
+    required String noSim,
+    required String locked,
+    required String noService,
+  }) {
+    // No modem (or none yet): Android shows no carrier either.
+    if (network == null || network.modemPath == null) return '';
+    if (network.simPresence == MobileSimPresence.absent) return noSim;
+    if (network.locked) return locked;
+    if (network.simPresence == MobileSimPresence.unknown) return '';
+    if (network.registered && network.operatorName.isNotEmpty) {
+      return network.operatorName;
+    }
+    return noService;
   }
 }
 

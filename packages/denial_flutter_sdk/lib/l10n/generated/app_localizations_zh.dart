@@ -4108,6 +4108,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get simLocked => 'SIM 卡已锁定';
 
   @override
+  String get keyguardNoSim => '无 SIM 卡';
+
+  @override
+  String get keyguardNoService => '无服务';
+
+  @override
   String simPinRetries(int count) {
     return '剩余 $count 次尝试';
   }

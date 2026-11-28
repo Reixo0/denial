@@ -5761,6 +5761,14 @@
   "simPinLater": "Later",
   "simPukRequired": "SIM requires a PUK. Contact your carrier.",
   "simLocked": "SIM locked",
+  "keyguardNoSim": "No SIM",
+  "@keyguardNoSim": {
+    "description": "Lock screen carrier text when no SIM card is in the phone (Android's keyguard_missing_sim_message_short)."
+  },
+  "keyguardNoService": "No service",
+  "@keyguardNoService": {
+    "description": "Lock screen carrier text when the SIM is not registered on a network."
+  },
   "simPinRetries": "{count} attempts remaining",
   "@simPinRetries": {
     "placeholders": {

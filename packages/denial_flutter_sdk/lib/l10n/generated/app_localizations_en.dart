@@ -4303,6 +4303,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get simLocked => 'SIM locked';
 
   @override
+  String get keyguardNoSim => 'No SIM';
+
+  @override
+  String get keyguardNoService => 'No service';
+
+  @override
   String simPinRetries(int count) {
     return '$count attempts remaining';
   }

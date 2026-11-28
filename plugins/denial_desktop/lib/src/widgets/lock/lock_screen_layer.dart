@@ -54,12 +54,14 @@ import '../phone_scheme.dart' show phoneSchemeOf;
 import '../shade/quick_settings_panel.dart' show PixelShadeViewport;
 import '../shade/notification_shade_list.dart' show LockShadeHandover;
 import '../notification_pull_expand.dart' show RemoteNotificationPull;
-import '../shade/shade_progress.dart' show shadeExpansionProvider;
+import '../shade/shade_progress.dart'
+    show shadeExpansionProvider, shadeProgressProvider;
+import '../shade/shade_expansion_motion.dart' show androidDuration;
+import '../shade/status_bar.dart' show KeyguardStatusBar;
 import '../../state/unlock_then.dart';
 
 import 'package:denial_flutter_sdk/rendering.dart';
 
-import '../shade/status_glyphs.dart';
 
 import 'sim_pin_lock.dart';
 import '../../state/phone_desk.dart';

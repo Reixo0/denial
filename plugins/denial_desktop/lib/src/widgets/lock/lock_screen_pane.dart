@@ -487,14 +487,17 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
                 ],
                 // The status icons stay put like a status bar while the face
                 // slides.
-                if (lockSettings.showSystemStatus)
+                if (lockSettings.showSystemStatus && widget.desktop)
                   _AmbientHidden(
                     opacity: _ambientHidden,
-                    child: _LockStatusIcons(
-                      power: power,
-                      cpu: cpu,
-                      gpus: gpus,
-                      desktop: widget.desktop,
+                    child: _LockStatusIcons(cpu: cpu, gpus: gpus),
+                  )
+                else if (lockSettings.showSystemStatus)
+                  _AmbientHidden(
+                    opacity: _ambientHidden,
+                    child: _KeyguardStatusBarFade(
+                      face: _face,
+                      bouncer: credentialShown,
                     ),
                   ),
                 // The sensor mark and the swipe pill stay put and fade as the

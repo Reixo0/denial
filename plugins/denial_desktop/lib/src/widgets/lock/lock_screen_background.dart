@@ -122,73 +122,112 @@ class _LockFillPainter extends CustomPainter {
   }
 }
 
-class _LockStatusIcons extends StatelessWidget {
-  const _LockStatusIcons({
-    required this.power,
-    required this.cpu,
-    required this.gpus,
-    required this.desktop,
-  });
+/// The keyguard status bar as KeyguardStatusBarViewController shows it:
+/// gone while the bouncer is up (with the bouncer revamp, from the first
+/// move of a swipe up), back over ANIMATION_DURATION_STANDARD with
+/// LINEAR_OUT_SLOW_IN when it goes (animateKeyguardStatusBarIn), and faded
+/// out over the first half of a pull to the shade (alphaQsExpansion).
+class _KeyguardStatusBarFade extends ConsumerStatefulWidget {
+  const _KeyguardStatusBarFade({required this.face, required this.bouncer});
 
-  final ShellPowerStatus power;
-  final LoadSeries cpu;
-  final List<GpuLoad> gpus;
-  final bool desktop;
+  /// The lock face; it moves up as the bouncer comes.
+  final ValueListenable<Offset> face;
+
+  /// The credential is up.
+  final bool bouncer;
+
+  @override
+  ConsumerState<_KeyguardStatusBarFade> createState() =>
+      _KeyguardStatusBarFadeState();
+}
+
+class _KeyguardStatusBarFadeState extends ConsumerState<_KeyguardStatusBarFade>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _shown = AnimationController(
+    vsync: this,
+    value: _hidden ? 0 : 1,
+  );
+
+  static const Curve _linearOutSlowIn = Cubic(0, 0, 0.2, 1);
+
+  bool get _hidden => widget.bouncer || widget.face.value.dy < 0;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.face.addListener(_follow);
+  }
+
+  @override
+  void didUpdateWidget(covariant _KeyguardStatusBarFade oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.face != widget.face) {
+      oldWidget.face.removeListener(_follow);
+      widget.face.addListener(_follow);
+    }
+    _follow();
+  }
+
+  void _follow() {
+    final target = _hidden ? 0.0 : 1.0;
+    if (_shown.value == target || (_shown.isAnimating && _target == target)) {
+      return;
+    }
+    _target = target;
+    if (target == 0) {
+      // The bouncer covers it within a few frames.
+      _shown.animateTo(0, duration: androidDuration(100), curve: Curves.linear);
+    } else {
+      _shown.animateTo(
+        1,
+        duration: androidDuration(360),
+        curve: _linearOutSlowIn,
+      );
+    }
+  }
+
+  double? _target;
+
+  @override
+  void dispose() {
+    widget.face.removeListener(_follow);
+    _shown.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final topPadding = MediaQuery.paddingOf(context).top;
-    if (desktop) {
-      return Positioned(
-        top: math.max(24.0, topPadding + 18.0),
-        right: 34,
-        child: _DesktopLockStatusBar(cpu: cpu, gpus: gpus),
-      );
-    }
-    // The operator sits opposite the icons, as far in from the left edge as
-    // the battery is from the right.
-    return Positioned(
-      top: math.max(22.0, topPadding + 18.0),
-      left: 28,
-      right: 28,
-      child: Opacity(
-        opacity: 0.92,
-        child: Row(
-          children: [
-            const Expanded(child: _LockOperatorName()),
-            const SizedBox(width: 16),
-            StatusIconCluster(battery: power.batteryStatus),
-          ],
-        ),
-      ),
+    final shade = ref.watch(shadeProgressProvider);
+    final bar = const KeyguardStatusBar(
+      color: ShellMediaColors.lightForeground,
+    );
+    return AnimatedBuilder(
+      animation: Listenable.merge([_shown, shade]),
+      child: RepaintBoundary(child: bar),
+      builder: (context, bar) {
+        final opacity =
+            _shown.value * (1 - math.min(1.0, shade.value * 2)).clamp(0.0, 1.0);
+        if (opacity <= 0) return const SizedBox.shrink();
+        return Opacity(opacity: opacity, child: bar);
+      },
     );
   }
 }
 
-class _LockOperatorName extends ConsumerWidget {
-  const _LockOperatorName();
+/// The desktop lock screen's load readout, top right.
+class _LockStatusIcons extends StatelessWidget {
+  const _LockStatusIcons({required this.cpu, required this.gpus});
+
+  final LoadSeries cpu;
+  final List<GpuLoad> gpus;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final name = ref.watch(
-      mobileNetworkProvider.select(
-        (discovery) => discovery.isLoading || discovery.hasError
-            ? ''
-            : discovery.value?.operatorName ?? '',
-      ),
-    );
-    return Text(
-      name,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      softWrap: false,
-      style: ShellText.base.copyWith(
-        color: context.shellColors.textPrimary,
-        fontSize: 15,
-        height: 1,
-        fontWeight: FontWeight.w600,
-        letterSpacing: 0,
-      ),
+  Widget build(BuildContext context) {
+    final topPadding = MediaQuery.paddingOf(context).top;
+    return Positioned(
+      top: math.max(24.0, topPadding + 18.0),
+      right: 34,
+      child: _DesktopLockStatusBar(cpu: cpu, gpus: gpus),
     );
   }
 }

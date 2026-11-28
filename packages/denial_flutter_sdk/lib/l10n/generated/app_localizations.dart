@@ -7643,6 +7643,18 @@ abstract class AppLocalizations {
   /// **'SIM locked'**
   String get simLocked;
 
+  /// Lock screen carrier text when no SIM card is in the phone (Android's keyguard_missing_sim_message_short).
+  ///
+  /// In en, this message translates to:
+  /// **'No SIM'**
+  String get keyguardNoSim;
+
+  /// Lock screen carrier text when the SIM is not registered on a network.
+  ///
+  /// In en, this message translates to:
+  /// **'No service'**
+  String get keyguardNoService;
+
   /// No description provided for @simPinRetries.
   ///
   /// In en, this message translates to:

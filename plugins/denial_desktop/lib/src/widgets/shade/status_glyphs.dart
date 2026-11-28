@@ -572,26 +572,6 @@ class _BatteryRingPainter extends CustomPainter {
       oldDelegate.stroke != stroke;
 }
 
-class StatusIconCluster extends StatelessWidget {
-  const StatusIconCluster({super.key, required this.battery, this.color});
-
-  final BatteryStatus battery;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        PrivacyUsageMarks(color: color),
-        MobileConnectivityMarks(color: color, scale: 1.2),
-        const SizedBox(width: 12),
-        BatteryIconMark(status: battery, scale: 1.18, color: color),
-      ],
-    );
-  }
-}
-
 class MobileConnectivityMarks extends ConsumerWidget {
   const MobileConnectivityMarks({super.key, this.color, this.scale = 1});
   final Color? color;
