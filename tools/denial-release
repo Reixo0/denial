@@ -614,8 +614,8 @@ source_audit() {
 
   if jq -e '
       .schema_version == 1
-      and .flutter.repository == "https://github.com/denialwm/flutter.git"
-      and .flutter.branch == "denial/3.47.5"
+      and .flutter.repository == "https://github.com/Reixo0/flutter.git"
+      and .flutter.branch == "nx809j/3.47.5"
       and (.flutter.revision | test("^[0-9a-f]{40}$"))
       and (.flutter.upstream_revision | test("^[0-9a-f]{40}$"))
       and .skia.repository == "https://github.com/denialwm/skia.git"

@@ -47,7 +47,7 @@ case "$package_name" in
     {
       printf '%s\n' \
         'Upstream-Name: Denial Flutter Engine' \
-        'Source: https://github.com/denialwm/flutter' \
+        'Source: https://github.com/Reixo0/flutter' \
         'Upstream-Contact: Doctor Logix <doctor.logix@gmail.com>' \
         '' \
         'This file contains verbatim copies of the Flutter Engine license and' \

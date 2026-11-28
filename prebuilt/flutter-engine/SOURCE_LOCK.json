@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "flutter": {
-    "repository": "https://github.com/denialwm/flutter.git",
-    "branch": "denial/3.47.5",
-    "revision": "37ec4361f038c15c1ad1ca92ee8b9b5ec8f4f52c",
+    "repository": "https://github.com/Reixo0/flutter.git",
+    "branch": "nx809j/3.47.5",
+    "revision": "b428710e2eda949d0c206878e6d95ecb9f99b032",
     "upstream_revision": "6a19cca56475dbfba1478ee68d7bd0c2ef891da1"
   },
   "skia": {
