@@ -62,6 +62,11 @@ abstract final class LockShadeHandover {
   static bool get returned => _returned;
   static bool _returned = false;
 
+  /// A finger is pulling from the lock screen: the shade can reach open
+  /// under it, but the cards stay in the handover until it lets go
+  /// (DragDownHelper: goToLockedShade runs on ACTION_UP).
+  static final ValueNotifier<bool> held = ValueNotifier<bool>(false);
+
   /// Follows the shade's expansion.
   static void follow(double p) {
     if (p <= 0) {
@@ -77,7 +82,7 @@ abstract final class LockShadeHandover {
       _returned = false;
       covering.value = true;
     }
-    if (p >= 1) _active = false;
+    if (p >= 1 && !held.value) _active = false;
   }
 
   /// How far the cards have gone from the lock screen's place.

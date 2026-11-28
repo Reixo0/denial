@@ -326,7 +326,35 @@ class ShadeExpansion {
   /// This drag has moved the panel (the shell was told).
   bool _started = false;
 
+  /// A pull from the lock screen: the panel opens over this distance, not
+  /// [panelTravel] (LockscreenShadeTransitionController: the QS, scrims,
+  /// shelf and stack all complete at lockscreen_shade_full_transition_distance).
+  double? _dragTravel;
+
+  /// How far the finger has gone down in this drag, past the panel's end
+  /// too (DragDownHelper's dragDownAmount).
+  double _pulled = 0;
+
+  /// The shell is settling a lock screen pull it was just told about.
+  bool _settlingLockPull = false;
+
   bool get dragging => _dragging;
+
+  /// A finger is down where a pull can start. The shade gets ready while it
+  /// is still closed and hidden (on stage, its tickers on), so the first
+  /// frame of a pull only has to move it.
+  final ValueNotifier<bool> touched = ValueNotifier<bool>(false);
+  final Set<int> _touches = <int>{};
+
+  void touchDown(int pointer) {
+    _touches.add(pointer);
+    touched.value = true;
+  }
+
+  void touchUp(int pointer) {
+    _touches.remove(pointer);
+    touched.value = _touches.isNotEmpty;
+  }
 
   /// Android resets the quick settings each time the shade closes.
   void _collapseWhenClosed() {
@@ -348,14 +376,18 @@ class ShadeExpansion {
   /// settings with it. [fingers] are on the bar already (the drag starts
   /// with the first one's touch) and [barHeight] is how far down it reaches.
   /// [qsAllowed] lets a downward drag on the open shade expand the quick
-  /// settings.
+  /// settings. [travel] is how far the finger opens the panel, for a pull
+  /// from the lock screen.
   bool beginDrag({
     bool fromStatusBar = false,
     Set<int> fingers = const <int>{},
     double barHeight = 0,
     bool qsAllowed = true,
+    double? travel,
   }) {
     if (_dragging) return false;
+    _dragTravel = travel;
+    _pulled = 0;
     if (panel.isAnimating) _springBack();
     panel.stop();
     if (!pullsBoth.value) qs.stop();
@@ -412,8 +444,9 @@ class ShadeExpansion {
     _moving ??= _choose(dy);
     switch (_moving) {
       case _Moving.panel:
+        _pulled += dy;
         final was = panel.value;
-        final next = (was + dy / panelTravel).clamp(0.0, 1.0);
+        final next = (was + dy / (_dragTravel ?? panelTravel)).clamp(0.0, 1.0);
         if (next == was) return;
         if (was <= 0 || !_started) {
           _started = true;
@@ -447,8 +480,8 @@ class ShadeExpansion {
 
   /// The finger left at [velocity] logical px/s (down is positive).
   ///
-  /// [openPast]: a pull from the lock screen opens once it has gone that
-  /// far, whatever its speed, and springs back short of it
+  /// [openPast]: a pull from the lock screen opens once the finger has
+  /// gone that far, whatever its speed, and springs back short of it
   /// (DragDownHelper: keyguard_drag_down_min_distance; "drag down is always
   /// an open").
   /// Returns whether the shade opens; null when the drag moved nothing.
@@ -459,8 +492,10 @@ class ShadeExpansion {
     _unwatchFingers();
     final moving = _moving;
     final started = _started;
+    final lockPull = _dragTravel != null;
     _moving = null;
     _started = false;
+    _dragTravel = null;
     bool? opens;
     switch (moving) {
       case _Moving.quickSettings:
@@ -470,9 +505,14 @@ class ShadeExpansion {
         );
       case _Moving.panel:
         final open = openPast != null
-            ? panel.value * panelTravel >= openPast
+            ? _pulled >= openPast
             : _expands(panel.value, velocity, panelTravel);
-        if (started) onDragEnd?.call(open, velocity);
+        _settlingLockPull = lockPull;
+        try {
+          if (started) onDragEnd?.call(open, velocity);
+        } finally {
+          _settlingLockPull = false;
+        }
         opens = started && open;
       case null:
         break;
@@ -492,6 +532,18 @@ class ShadeExpansion {
   TickerFuture settlePanel(bool open, {double velocity = 0}) {
     final target = open ? 1.0 : 0.0;
     if (!open) _closeBoth();
+    if (_settlingLockPull) {
+      // Released on the lock screen: no fling. It goes to the locked shade
+      // (ANIMATION_DURATION_GO_TO_FULL_SHADE) or springs back
+      // (SPRING_BACK_ANIMATION_LENGTH_MS), both FAST_OUT_SLOW_IN.
+      return panel.animateTo(
+        target,
+        duration: reduceMotion
+            ? Duration.zero
+            : androidDuration(open ? 448 : 375),
+        curve: Curves.fastOutSlowIn,
+      );
+    }
     // A fling open aims past the end by its overshoot.
     final overshoots =
         open &&
@@ -591,6 +643,7 @@ class ShadeExpansion {
   }
 
   void dispose() {
+    touched.dispose();
     _unwatchFingers();
     panel.dispose();
     qs.dispose();

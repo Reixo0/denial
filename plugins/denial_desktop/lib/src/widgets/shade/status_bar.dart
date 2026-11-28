@@ -149,9 +149,18 @@ class _ShadeStatusBarState extends ConsumerState<ShadeStatusBar> {
         builder: (context, strip) =>
             IgnorePointer(ignoring: progress.value >= 0.99, child: strip),
         child: Listener(
-          onPointerDown: (event) => _pointers.add(event.pointer),
-          onPointerUp: (event) => _pointers.remove(event.pointer),
-          onPointerCancel: (event) => _pointers.remove(event.pointer),
+          onPointerDown: (event) {
+            _pointers.add(event.pointer);
+            expansion.touchDown(event.pointer);
+          },
+          onPointerUp: (event) {
+            _pointers.remove(event.pointer);
+            expansion.touchUp(event.pointer);
+          },
+          onPointerCancel: (event) {
+            _pointers.remove(event.pointer);
+            expansion.touchUp(event.pointer);
+          },
           child: ShadeDragDetector(
             behavior: HitTestBehavior.opaque,
             onStart: (_) => _owns = expansion.beginDrag(

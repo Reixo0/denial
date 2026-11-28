@@ -53,6 +53,7 @@ class _SystemShadeLayerState extends ConsumerState<SystemShadeLayer>
       ..value = ref.read(referenceShellProvider).quickSettingsVisible ? 1 : 0
       ..addListener(_updateVisibility);
     _expansion.depth.addListener(_updateVisibility);
+    _expansion.touched.addListener(_updateVisibility);
     _mountedPanel = _panel.value > 0;
     _offstage = !_mountedPanel;
     _active = _mountedPanel;
@@ -101,7 +102,8 @@ class _SystemShadeLayerState extends ConsumerState<SystemShadeLayer>
   void _updateVisibility() {
     // The blur goes away after the shade has.
     final active = _panel.value > 0;
-    final offstage = !active && _expansion.blur.value <= 0;
+    final offstage =
+        !active && _expansion.blur.value <= 0 && !_expansion.touched.value;
     if (offstage == _offstage && active == _active) return;
     setState(() {
       _offstage = offstage;

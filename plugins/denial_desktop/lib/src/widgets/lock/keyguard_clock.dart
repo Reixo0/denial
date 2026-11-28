@@ -21,6 +21,11 @@ class _KeyguardGeometry {
   /// let go (keyguard_drag_down_min_distance).
   static const double dragDownMinDistance = 100;
 
+  /// How far a pull from the lock screen takes to open the shade: the QS,
+  /// scrims, shelf and stack all finish over it
+  /// (lockscreen_shade_full_transition_distance).
+  static const double fullTransitionDistance = 80;
+
   /// The status bar's height: Android centres its row 13.85 dp down.
   static const double statusBarHeight = 2 * 13.85;
 

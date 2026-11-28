@@ -149,6 +149,7 @@ class _MobileNotificationHistoryState
     _clearAll = NotificationClearAll(this);
     widget.scroll?.attach(_scroll);
     widget.progress.addListener(_observeProgress);
+    LockShadeHandover.held.addListener(_observeProgress);
   }
 
   /// Android closes the shade 200 ms after the rows have left.
@@ -618,6 +619,7 @@ class _MobileNotificationHistoryState
   void dispose() {
     _seenTimer?.cancel();
     widget.progress.removeListener(_observeProgress);
+    LockShadeHandover.held.removeListener(_observeProgress);
     widget.scroll?.detach(_scroll);
     _clearAll.dispose();
     _magnetic.dispose();
