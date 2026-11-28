@@ -14,6 +14,7 @@ import 'package:denial_flutter_sdk/rendering.dart' show AppIconImage;
 import 'package:denial_flutter_sdk/system_services.dart';
 
 import '../../state/reference_shell_controller.dart';
+import '../../state/unlock_then.dart';
 import '../notification_media.dart';
 import '../notification_open.dart';
 
@@ -225,8 +226,11 @@ class _PixelMediaCardState extends ConsumerState<PixelMediaCard>
   void _open() {
     final entry = ref.read(mediaCardProvider)?.playback.desktopEntry ?? '';
     if (entry.isEmpty) return;
-    ref.read(referenceShellProvider.notifier).closeQuickSettings();
-    openDesktopEntry(ref, entry);
+    // Over the lock screen the app opens after the unlock.
+    ref.read(unlockThenProvider.notifier).run(() {
+      ref.read(referenceShellProvider.notifier).closeQuickSettings();
+      openDesktopEntry(ref, entry);
+    });
   }
 
   @override

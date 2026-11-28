@@ -247,7 +247,10 @@ class ReferenceShellState {
   /// first, then the shade, then recents, then the foreground app.
   MobileBackTarget get backTarget {
     if (locked || lockLayerVisible || launchTransitionActive) {
-      return MobileBackTarget.none;
+      // Back closes the shade over the lock screen and does nothing else.
+      return quickSettingsEngaged && !launchTransitionActive
+          ? MobileBackTarget.shade
+          : MobileBackTarget.none;
     }
     if (edgePanelVisible) {
       return MobileBackTarget.keyboard;

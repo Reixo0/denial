@@ -244,6 +244,22 @@ class DesktopNotificationsController extends Notifier<DesktopNotificationsState>
     );
   }
 
+  /// Marks one notification seen, as Android does once its heads-up has
+  /// shown for a while.
+  void markRead(int notificationId) {
+    final history = state.history;
+    final index = history.indexWhere(
+      (record) => record.notification.id == notificationId && record.unread,
+    );
+    if (index < 0) return;
+    state = state.copyWith(
+      history: List<DesktopNotificationRecord>.unmodifiable(
+        List<DesktopNotificationRecord>.of(history)
+          ..[index] = history[index].copyWith(unread: false),
+      ),
+    );
+  }
+
   void markAllRead() {
     if (state.unreadCount == 0) {
       return;

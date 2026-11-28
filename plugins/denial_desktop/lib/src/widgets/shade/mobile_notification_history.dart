@@ -1,5 +1,8 @@
+import 'dart:async' show Timer;
+
 import 'package:denial_desktop/src/state/notification_groups.dart';
 import 'package:denial_desktop/src/state/reference_shell_controller.dart';
+import 'package:denial_desktop/src/state/unlock_then.dart';
 
 import 'package:flutter/material.dart' show Icons;
 import 'package:flutter/services.dart';
@@ -19,6 +22,7 @@ import 'package:denial_flutter_sdk/shell_theme.dart';
 import 'package:denial_flutter_sdk/tokens.dart' show ShellText;
 
 import '../notification_banner.dart';
+import '../notification_open.dart' show openNotificationFromShade;
 import '../notification_rows.dart';
 import '../phone_scheme.dart';
 import 'notification_footer.dart';
@@ -30,6 +34,7 @@ import 'quick_settings_panel.dart' show PixelShadeViewport;
 import 'shade_dismiss_gesture.dart';
 import 'shade_expansion.dart';
 import 'shade_expansion_motion.dart' show androidDuration;
+import 'shade_launch.dart' show openPhoneSettingsFromShade;
 import 'shade_stack_layout.dart' show ShadeListScroll;
 
 /// A separate scrollable notification stack for the notification page.
@@ -94,7 +99,39 @@ class _MobileNotificationHistoryState
       count: () => _rowCount,
       progress: widget.progress,
       topPadding: () => widget.topPadding,
+      keyguard: _keyguardEnd,
+      lastKept: _lastKept,
     );
+  }
+
+  /// Opening over the lock screen: 1 while the stack still ends as the lock
+  /// screen's, down to 0 once the shade is open ([NotificationShelfGeometry.keyguard]).
+  late final AnimationController _keyguardEnd = AnimationController(
+    vsync: this,
+  );
+
+  /// The rows and groups of the last build.
+  List<NotificationHistoryRow> _rows = const <NotificationHistoryRow>[];
+  List<DesktopNotificationGroup> _groups = const <DesktopNotificationGroup>[];
+
+  /// The last row the lock screen shows as a card, read when needed: the
+  /// lock screen tells which after it has laid out, maybe after this built.
+  int? _lastKept() {
+    final kept = LockShadeHandover.kept;
+    if (kept.isEmpty) return null;
+    int? last;
+    for (final (index, row) in _rows.indexed) {
+      final shows = switch (row) {
+        NotificationGroupRow(:final group) => kept.contains(group.key),
+        NotificationRow(:final record) => _groups.any(
+          (group) =>
+              kept.contains(group.key) && identical(group.newest, record),
+        ),
+        NotificationGroupHeaderRow() => false,
+      };
+      if (shows) last = index;
+    }
+    return last;
   }
 
   Animation<double>? _motionProgress;
@@ -143,6 +180,20 @@ class _MobileNotificationHistoryState
   }
 
   void _observeProgress() {
+    final p = widget.progress.value;
+    LockShadeHandover.follow(p);
+    if (LockShadeHandover.active) {
+      if (_keyguardEnd.value != 1) _keyguardEnd.value = 1;
+    } else if (p <= 0) {
+      if (_keyguardEnd.value != 0) _keyguardEnd.value = 0;
+    } else if (p >= 1 && _keyguardEnd.value > 0 && !_keyguardEnd.isAnimating) {
+      // In the locked shade: the rest come out of the shelf.
+      _keyguardEnd.animateTo(
+        0,
+        duration: androidDuration(448),
+        curve: Curves.fastOutSlowIn,
+      );
+    }
     if (widget.closed && widget.progress.value <= 0) {
       if (!_armed) _collapseOnClose();
       _armed = true;
@@ -172,17 +223,24 @@ class _MobileNotificationHistoryState
     });
   }
 
+  /// Android's isShadeFullyExpanded.
+  bool get _fullyOpen => widget.active && widget.progress.value >= 0.999;
+
   void _scheduleAcknowledgement() {
+    // The seen time starts over each time the shade opens fully.
+    if (!_fullyOpen) {
+      _seenTimer?.cancel();
+      _seenTimer = null;
+    }
     if (_acknowledgeScheduled || !widget.active || widget.progress.value <= 0) {
       return;
     }
     _acknowledgeScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _acknowledgeScheduled = false;
-      if (!mounted ||
-          !widget.active ||
-          widget.progress.value <= 0 ||
-          ref.read(referenceShellProvider).lockLayerVisible) {
+      // Over the lock screen too: Android counts what the locked shade
+      // showed as seen.
+      if (!mounted || !widget.active || widget.progress.value <= 0) {
         return;
       }
       final state = ref.read(desktopNotificationsProvider);
@@ -192,9 +250,19 @@ class _MobileNotificationHistoryState
       for (final id in state.bannerQueue) {
         controller.hideBanner(id);
       }
-      if (widget.progress.value >= 1) controller.markAllRead();
+      // LockScreenMinimalismCoordinator: what the shade showed fully open
+      // for SHADE_VISIBLE_SEEN_TIMEOUT (0.25 s) has been seen.
+      if (!_fullyOpen) return;
+      _seenTimer ??= Timer(const Duration(milliseconds: 250), () {
+        _seenTimer = null;
+        if (mounted && _fullyOpen) {
+          ref.read(desktopNotificationsProvider.notifier).markAllRead();
+        }
+      });
     });
   }
+
+  Timer? _seenTimer;
 
   /// Everything that moves a card on screen without repainting it, for the
   /// cached glass slices: the shade, the entrance, scrolling, and row layout
@@ -202,7 +270,13 @@ class _MobileNotificationHistoryState
   Listenable _motionFor(Animation<double> progress) {
     if (!identical(progress, _motionProgress)) {
       _motionProgress = progress;
-      _motion = Listenable.merge([progress, _scroll, _rowMotion, _magnetic]);
+      _motion = Listenable.merge([
+        progress,
+        _scroll,
+        _rowMotion,
+        _magnetic,
+        _keyguardEnd,
+      ]);
     }
     return _motion!;
   }
@@ -222,10 +296,12 @@ class _MobileNotificationHistoryState
     final groups = preview == NotificationPreviewMode.hidden
         ? const <DesktopNotificationGroup>[]
         : state.groups;
-    // Locked, groups stay folded and history only shows.
-    final expandedGroups = locked
-        ? const <String>{}
-        : ref.watch(expandedNotificationGroupsProvider);
+    // Locked, the shade's rows work as on an unlocked phone (Android's
+    // SHADE_LOCKED is not on the keyguard): they swipe away, groups open,
+    // and Clear all shows. Whatever opens something asks for the unlock
+    // first and then carries on from the shade.
+    final expandedGroups = ref.watch(expandedNotificationGroupsProvider);
+    final unlockThen = ref.read(unlockThenProvider.notifier);
     // Android's sections: alerting notifications first, then the silent
     // ones (Droidloom passes Android's low importance as low urgency) under
     // their heading, each section its own stack.
@@ -241,23 +317,31 @@ class _MobileNotificationHistoryState
       groups.where(silent).toList(),
       const <String>{},
     );
-    void open(DesktopNotificationRecord record) {
-      if (openNotification(ref, record.notification.id)) {
-        ref.read(referenceShellProvider.notifier).closeQuickSettings();
-      }
-    }
+    // The app grows out of the row (startActivityDismissingKeyguard with
+    // the row's launch animation, after the unlock on a locked phone).
+    void open(DesktopNotificationRecord record) => unlockThen.run(
+      () => openNotificationFromShade(ref, record.notification.id),
+    );
 
-    void control(DesktopNotificationRecord record, String control) {
-      controller.invokeControl(record.notification.id, control);
-      // The app's settings open over the apps.
-      if (control == 'x-denial-settings') {
-        ref.read(referenceShellProvider.notifier).closeQuickSettings();
-      }
-    }
+    // An app's action may open it, so a locked phone unlocks first
+    // (StatusBarRemoteInputCallback asks for the unlock for activities;
+    // Denial cannot tell them apart).
+    void action(DesktopNotificationRecord record, String key) => unlockThen.run(
+      () => controller.invokeAction(record.notification.id, key),
+    );
+
+    void control(DesktopNotificationRecord record, String control) =>
+        unlockThen.run(() {
+          controller.invokeControl(record.notification.id, control);
+          // The app's settings open over the apps.
+          if (control == 'x-denial-settings') {
+            ref.read(referenceShellProvider.notifier).closeQuickSettings();
+          }
+        });
 
     // One notification inside an open group's card.
     Widget member(DesktopNotificationRecord record) {
-      final clearable = !locked && record.notification.clearable;
+      final clearable = record.notification.clearable;
       return MagneticSingleSwipeRow(
         key: ValueKey<Object>(('member', record.notification.id)),
         clearable: clearable,
@@ -265,11 +349,9 @@ class _MobileNotificationHistoryState
         child: PixelNotificationCard(
           notification: record.notification,
           embedded: true,
-          interactive: !locked,
           previewMode: preview,
           onOpen: () => open(record),
-          onAction: (key) =>
-              controller.invokeAction(record.notification.id, key),
+          onAction: (key) => action(record, key),
           onDismiss: clearable
               ? () => controller.dismissFromHistory(record.notification.id)
               : null,
@@ -280,6 +362,8 @@ class _MobileNotificationHistoryState
 
     final rows = <NotificationHistoryRow>[...alertingRows, ...silentRows];
     final silentStart = silentRows.isEmpty ? -1 : alertingRows.length;
+    _rows = rows;
+    _groups = groups;
     _magnetic.syncSections([
       for (var i = 0; i < rows.length; i++)
         if (rows[i] is! NotificationGroupHeaderRow)
@@ -353,24 +437,17 @@ class _MobileNotificationHistoryState
                                             motion: _motionFor(widget.progress),
                                             child: NotificationFooter(
                                               clearAll: _clearAll,
-                                              onSettings: () {
-                                                ref
-                                                    .read(
-                                                      referenceShellProvider
-                                                          .notifier,
-                                                    )
-                                                    .closeQuickSettings();
-                                                ref
-                                                    .read(
-                                                      denialBridgeProvider,
-                                                    )
-                                                    .launchApplication(const <
-                                                      String
-                                                    >[
-                                                      'denial-phone-settings',
-                                                      'notifications',
-                                                    ]);
-                                              },
+                                              onSettings: () => ref
+                                                  .read(
+                                                    unlockThenProvider.notifier,
+                                                  )
+                                                  .run(
+                                                    () =>
+                                                        openPhoneSettingsFromShade(
+                                                          ref,
+                                                          'notifications',
+                                                        ),
+                                                  ),
                                               onCleared: _closeAfterClear,
                                             ),
                                           ),
@@ -421,7 +498,7 @@ class _MobileNotificationHistoryState
                                     roundTop: roundTop,
                                     roundBottom: roundBottom,
                                     preview: preview,
-                                    interactive: !locked,
+                                    interactive: true,
                                     onDismiss: () => controller
                                         .dismissGroupFromHistory(group.key),
                                     expanded: expandedGroups.contains(
@@ -457,16 +534,13 @@ class _MobileNotificationHistoryState
                                     roundTop: roundTop,
                                     roundBottom: roundBottom,
                                     preview: preview,
-                                    interactive: !locked,
+                                    interactive: true,
                                     onDismiss: () =>
                                         controller.dismissFromHistory(
                                           record.notification.id,
                                         ),
                                     onOpen: () => open(record),
-                                    onAction: (key) => controller.invokeAction(
-                                      record.notification.id,
-                                      key,
-                                    ),
+                                    onAction: (key) => action(record, key),
                                     onControl: (value) =>
                                         control(record, value),
                                   ),
@@ -486,7 +560,7 @@ class _MobileNotificationHistoryState
                                 )),
                                 clearAll: _clearAll,
                                 index: index,
-                                clearable: clearable && !locked,
+                                clearable: clearable,
                                 child: entry,
                               );
                               return index == silentStart
@@ -506,9 +580,7 @@ class _MobileNotificationHistoryState
                                     )
                                   : slide;
                             },
-                            childCount:
-                                rows.length +
-                                (rows.isNotEmpty && !locked ? 1 : 0),
+                            childCount: rows.length + (rows.isNotEmpty ? 1 : 0),
                             findChildIndexCallback: (key) =>
                                 key is ValueKey &&
                                     indices.containsKey(key.value)
@@ -544,12 +616,14 @@ class _MobileNotificationHistoryState
 
   @override
   void dispose() {
+    _seenTimer?.cancel();
     widget.progress.removeListener(_observeProgress);
     widget.scroll?.detach(_scroll);
     _clearAll.dispose();
     _magnetic.dispose();
     _scroll.dispose();
     _rowMotion.dispose();
+    _keyguardEnd.dispose();
     super.dispose();
   }
 }

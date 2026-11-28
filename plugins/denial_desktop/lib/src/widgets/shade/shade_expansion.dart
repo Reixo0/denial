@@ -446,8 +446,14 @@ class ShadeExpansion {
   }
 
   /// The finger left at [velocity] logical px/s (down is positive).
-  void endDrag(double velocity) {
-    if (!_dragging) return;
+  ///
+  /// [openPast]: a pull from the lock screen opens once it has gone that
+  /// far, whatever its speed, and springs back short of it
+  /// (DragDownHelper: keyguard_drag_down_min_distance; "drag down is always
+  /// an open").
+  /// Returns whether the shade opens; null when the drag moved nothing.
+  bool? endDrag(double velocity, {double? openPast}) {
+    if (!_dragging) return null;
     _dragging = false;
     _updateDepth();
     _unwatchFingers();
@@ -455,6 +461,7 @@ class ShadeExpansion {
     final started = _started;
     _moving = null;
     _started = false;
+    bool? opens;
     switch (moving) {
       case _Moving.quickSettings:
         flingQs(
@@ -462,12 +469,16 @@ class ShadeExpansion {
           velocity: velocity,
         );
       case _Moving.panel:
-        final open = _expands(panel.value, velocity, panelTravel);
+        final open = openPast != null
+            ? panel.value * panelTravel >= openPast
+            : _expands(panel.value, velocity, panelTravel);
         if (started) onDragEnd?.call(open, velocity);
+        opens = started && open;
       case null:
         break;
     }
     if (pullsBoth.value) _finishPullBoth();
+    return opens;
   }
 
   /// PanelViewController.flingExpands: past Android's minimum fling speed
@@ -514,6 +525,20 @@ class ShadeExpansion {
       _springBack();
     }
     return panel.animateTo(target, duration: duration, curve: fling.curve);
+  }
+
+  /// The app a launch out of the shade opened covers it: the shade goes at
+  /// once, blur and all (ShadeController.instantCollapseShade).
+  void collapseNow() {
+    _catchUp.stop();
+    pullsBoth.value = false;
+    _bothScale = 1;
+    overshoot.value = 0;
+    overscroll.value = 0;
+    qs.value = 0;
+    panel.value = 0;
+    engaged.value = 0;
+    depth.value = 0;
   }
 
   void _springBack() {

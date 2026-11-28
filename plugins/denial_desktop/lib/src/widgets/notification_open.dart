@@ -8,6 +8,7 @@ import 'package:denial_flutter_sdk/state.dart';
 
 import '../state/notification_groups.dart';
 import '../state/reference_shell_controller.dart';
+import 'shade/shade_launch.dart';
 
 /// Opens what a notification belongs to. Its default action asks the app
 /// itself; without one, the app its desktop entry names is focused or
@@ -37,6 +38,57 @@ bool openNotification(WidgetRef ref, int notificationId) {
     notifications.dismiss(notificationId);
   }
   return true;
+}
+
+/// Opens what a notification in the shade belongs to, its app growing out
+/// of the row that was tapped (Android's NotificationTransitionAnimator-
+/// Controller); as [openNotification] otherwise, the shade closing.
+Future<void> openNotificationFromShade(WidgetRef ref, int notificationId) {
+  final notifications = ref.read(desktopNotificationsProvider.notifier);
+  final notification = ref
+      .read(desktopNotificationsProvider)
+      .active[notificationId];
+  if (notification == null) return Future<void>.value();
+  final hasDefault = notification.actions.any(
+    (action) => action.key == 'default',
+  );
+  final shell = ref.read(referenceShellProvider.notifier);
+  final launcher = ref.read(appLauncherProvider);
+  final repository = ref.read(desktopAppsRepositoryProvider);
+  return launchEntryFromShade(
+    ref,
+    desktopEntry: notification.desktopEntry,
+    start: (requestId, running) async {
+      if (hasDefault) return notifications.invokeDefaultAction(notificationId);
+      if (notification.desktopEntry.isEmpty) return false;
+      final bool started;
+      if (requestId != null) {
+        // A running app was brought forward by the launch itself.
+        final app = running != null
+            ? null
+            : await repository.loadApplication(notification.desktopEntry);
+        started =
+            running != null ||
+            (app != null &&
+                await launcher.launch(app, launchRequestId: requestId));
+      } else {
+        await _openApp(
+          notification.desktopEntry,
+          repository: repository,
+          launcher: launcher,
+          shell: shell,
+          windows: shell.state.allOpenAppWindows,
+        );
+        started = true;
+      }
+      if (notification.resident) {
+        notifications.hideBanner(notificationId);
+      } else {
+        notifications.dismiss(notificationId);
+      }
+      return started;
+    },
+  );
 }
 
 /// Focuses or starts the app [desktopEntry] names (the media player's tap).

@@ -158,7 +158,9 @@ class _AppFlightLayerState extends ConsumerState<AppFlightLayer>
         );
       }
     }
-    if (request == null || _size.isEmpty) return;
+    // A launch out of the shade grows out of its view above the shade
+    // (ShadeLaunchLayer), not out of an icon here.
+    if (request == null || request.fromShade || _size.isEmpty) return;
     final flight =
         _flightFor(request.requestId) ?? _rejoin(request) ?? _launch(request);
     if (window != null && flight.window?.objectId != window.objectId) {

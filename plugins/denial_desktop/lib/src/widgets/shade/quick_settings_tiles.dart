@@ -12,6 +12,7 @@ import 'package:denial_flutter_sdk/system_services.dart';
 import '../phone_scheme.dart';
 import 'qs_tile_bounce.dart';
 import 'shade_expansion_motion.dart' show androidDuration;
+import 'shade_launch.dart' show LaunchSource;
 
 /// Android 17 quick-settings geometry, in dp (the shade lays itself out in
 /// Android's units; see `PixelShadeViewport`).
@@ -167,13 +168,28 @@ class _QuickTileState extends State<QuickTile> {
                   HapticFeedback.heavyImpact();
                   (widget.onSettings ?? details)!();
                 },
-          child: tile,
+          child: LaunchSource(
+            color: _pressedOver(
+              widget.active && !widget.wide
+                  ? scheme.primary
+                  : scheme.surfaceEffect1,
+              scheme,
+            ),
+            radius: BorderRadius.circular(
+              widget.active ? 24 : PixelQs.tileHeight / 2,
+            ),
+            child: tile,
+          ),
         ),
       ),
     );
   }
 
-  Widget _small(ColorScheme scheme, double dim, QsBounceableController? bounce) {
+  Widget _small(
+    ColorScheme scheme,
+    double dim,
+    QsBounceableController? bounce,
+  ) {
     final active = widget.active;
     final icon = Icon(
       widget.icon,
@@ -619,23 +635,14 @@ class _PixelBrightnessSliderState extends State<PixelBrightnessSlider>
           );
           return GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onHorizontalDragStart: (d) => _update(
-              d.localPosition.dx,
-              width,
-              reduceMotion: reduceMotion,
-            ),
-            onHorizontalDragUpdate: (d) => _update(
-              d.localPosition.dx,
-              width,
-              reduceMotion: reduceMotion,
-            ),
+            onHorizontalDragStart: (d) =>
+                _update(d.localPosition.dx, width, reduceMotion: reduceMotion),
+            onHorizontalDragUpdate: (d) =>
+                _update(d.localPosition.dx, width, reduceMotion: reduceMotion),
             onHorizontalDragEnd: (_) => _end(),
             onHorizontalDragCancel: _end,
-            onTapDown: (d) => _update(
-              d.localPosition.dx,
-              width,
-              reduceMotion: reduceMotion,
-            ),
+            onTapDown: (d) =>
+                _update(d.localPosition.dx, width, reduceMotion: reduceMotion),
             onTapUp: (_) => _end(),
             onTapCancel: _end,
             child: SizedBox(
@@ -930,16 +937,20 @@ class _RoundButtonState extends State<_RoundButton> {
         onTapUp: (_) => _press(false),
         onTapCancel: () => _press(false),
         onTap: widget.onPressed,
-        child: Container(
-          width: _size,
-          height: _size,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-          child: Opacity(
-            opacity: enabled ? 1 : 0.38,
-            child: Icon(
-              widget.icon,
-              size: phoneIconSize,
-              color: widget.iconColor,
+        child: LaunchSource(
+          color: color,
+          radius: BorderRadius.circular(_size / 2),
+          child: Container(
+            width: _size,
+            height: _size,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            child: Opacity(
+              opacity: enabled ? 1 : 0.38,
+              child: Icon(
+                widget.icon,
+                size: phoneIconSize,
+                color: widget.iconColor,
+              ),
             ),
           ),
         ),

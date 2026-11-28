@@ -13,6 +13,7 @@ import 'package:denial_flutter_sdk/settings.dart';
 import 'package:denial_flutter_sdk/state.dart';
 
 import '../../state/flashlight.dart';
+import '../../state/unlock_then.dart';
 import '../../state/quick_settings.dart';
 import '../../state/reference_shell_presentation.dart';
 import '../../state/reference_shell_profile.dart';
@@ -41,6 +42,7 @@ import 'shade_card_blur.dart';
 import 'pixel_media_card.dart';
 import 'shade_dismiss_gesture.dart';
 import 'shade_expansion.dart';
+import 'shade_launch.dart' show openPhoneSettingsFromShade;
 import 'shade_expansion_motion.dart';
 import 'shade_stack_layout.dart';
 import 'status_glyphs.dart';
@@ -536,12 +538,24 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
     super.dispose();
   }
 
-  void _openSettingsPage(String page) {
-    ref.read(referenceShellProvider.notifier).closeQuickSettings();
-    ref.read(denialBridgeProvider).launchApplication(<String>[
-      'denial-phone-settings',
-      page,
-    ]);
+  /// Settings grows out of what was pressed: a tile held, or a dialog's
+  /// button (which closes the shade as before).
+  void _openSettingsPage(String page) =>
+      _unlocked(() => openPhoneSettingsFromShade(ref, page));
+
+  /// Runs [action] now, or on a locked phone once it is unlocked: what the
+  /// lock protects (Android's postQSRunnableDismissingKeyguard). Simple
+  /// toggles (Bluetooth, flashlight, rotation, Do Not Disturb, the power
+  /// profile) work over the lock screen, as on Android.
+  void _unlocked(VoidCallback action) =>
+      ref.read(unlockThenProvider.notifier).run(action);
+
+  /// A dialog over a locked phone asks for the unlock instead.
+  bool _askUnlock() {
+    final gate = ref.read(unlockThenProvider.notifier);
+    if (!gate.locked) return false;
+    gate.run();
+    return true;
   }
 
   /// Every tile this phone can show, for the grid and the editor.
@@ -594,20 +608,23 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
               !network.radioChanging,
           busy: network.radioChanging,
           wide: wide,
-          onTap: networkController.toggleWireless,
-          onDetails: (origin) => showQuickSettingsDialog(
-            ref,
-            keyName: 'wifi-details',
-            debugLabel: 'Wi-Fi details',
-            origin: origin,
-            builder: (close) => QuickSettingsWifiDialog(
-              onClose: close,
-              onOpenSettings: () {
-                close();
-                _openSettingsPage('wifi');
-              },
-            ),
-          ),
+          // Android's Internet tile asks for the unlock.
+          onTap: () => _unlocked(networkController.toggleWireless),
+          onDetails: (origin) => _askUnlock()
+              ? null
+              : showQuickSettingsDialog(
+                  ref,
+                  keyName: 'wifi-details',
+                  debugLabel: 'Wi-Fi details',
+                  origin: origin,
+                  builder: (close) => QuickSettingsWifiDialog(
+                    onClose: close,
+                    onOpenSettings: () {
+                      close();
+                      _openSettingsPage('wifi');
+                    },
+                  ),
+                ),
         ),
       ),
       QsTileSpec(
@@ -629,19 +646,21 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
           busy: bluetooth.powerChanging,
           wide: wide,
           onTap: bluetoothController.togglePower,
-          onDetails: (origin) => showQuickSettingsDialog(
-            ref,
-            keyName: 'bluetooth-details',
-            debugLabel: 'Bluetooth details',
-            origin: origin,
-            builder: (close) => QuickSettingsBluetoothDialog(
-              onClose: close,
-              onOpenSettings: () {
-                close();
-                _openSettingsPage('bluetooth');
-              },
-            ),
-          ),
+          onDetails: (origin) => _askUnlock()
+              ? null
+              : showQuickSettingsDialog(
+                  ref,
+                  keyName: 'bluetooth-details',
+                  debugLabel: 'Bluetooth details',
+                  origin: origin,
+                  builder: (close) => QuickSettingsBluetoothDialog(
+                    onClose: close,
+                    onOpenSettings: () {
+                      close();
+                      _openSettingsPage('bluetooth');
+                    },
+                  ),
+                ),
         ),
       ),
       QsTileSpec(
@@ -727,7 +746,9 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
             enabled: !recording.busy,
             busy: recording.busy,
             wide: wide,
-            onTap: () => ref.read(screenRecordingProvider.notifier).toggle(),
+            onTap: () => _unlocked(
+              () => ref.read(screenRecordingProvider.notifier).toggle(),
+            ),
           ),
         ),
       QsTileSpec(
@@ -752,10 +773,10 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
             title: l10n.shellPresentationDesktop,
             active: presentation == ReferenceShellProfile.desktop,
             wide: wide,
-            onTap: () {
+            onTap: () => _unlocked(() {
               ref.read(referenceShellProvider.notifier).closeQuickSettings();
               ref.read(referenceShellPresentationProvider.notifier).toggle();
-            },
+            }),
           ),
         ),
     ];
@@ -777,12 +798,9 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
     ];
   }
 
-  void _openSettings() {
-    ref.read(referenceShellProvider.notifier).closeQuickSettings();
-    ref.read(denialBridgeProvider).launchApplication(const <String>[
-      'denial-phone-settings',
-    ]);
-  }
+  /// The gear: Settings grows out of it (FooterActionsViewModel's
+  /// startActivity with the button's expandable).
+  void _openSettings() => _unlocked(() => openPhoneSettingsFromShade(ref));
 
   @override
   Widget build(BuildContext context) {
@@ -930,7 +948,9 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
                         child: Align(
                           alignment: AlignmentDirectional.centerEnd,
                           child: _EditButton(
-                            onTap: ref.read(qsEditingProvider.notifier).start,
+                            onTap: () => _unlocked(
+                              ref.read(qsEditingProvider.notifier).start,
+                            ),
                           ),
                         ),
                       ),
@@ -968,14 +988,18 @@ class _PixelShadeState extends ConsumerState<_PixelShade>
                                 (apps) => apps.value?.length ?? 0,
                               ),
                             ),
-                            onActiveApps: (origin) => showQuickSettingsDialog(
-                              ref,
-                              keyName: 'active-apps',
-                              debugLabel: 'Active apps',
-                              origin: origin,
-                              builder: (close) =>
-                                  QuickSettingsActiveAppsDialog(onClose: close),
-                            ),
+                            onActiveApps: (origin) => _askUnlock()
+                                ? null
+                                : showQuickSettingsDialog(
+                                    ref,
+                                    keyName: 'active-apps',
+                                    debugLabel: 'Active apps',
+                                    origin: origin,
+                                    builder: (close) =>
+                                        QuickSettingsActiveAppsDialog(
+                                          onClose: close,
+                                        ),
+                                  ),
                           ),
                         ),
                       ),

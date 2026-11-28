@@ -159,6 +159,24 @@ String localizedTime(BuildContext context, DateTime value) {
   );
 }
 
+/// The hour and minute a lock screen clock shows, as Android's does: two
+/// digits each and no day half, the hour in 12- or 24-hour time ("hh" or
+/// "HH").
+(String, String) localizedClockDigits(BuildContext context, DateTime value) {
+  final twentyFourHour =
+      context
+          .dependOnInheritedWidgetOfExactType<_ClockFormat>()
+          ?.twentyFourHour ??
+      true;
+  final hour = twentyFourHour
+      ? value.hour
+      : (value.hour % 12 == 0 ? 12 : value.hour % 12);
+  return (
+    hour.toString().padLeft(2, '0'),
+    value.minute.toString().padLeft(2, '0'),
+  );
+}
+
 String localizedShortDate(BuildContext context, DateTime value) {
   final l10n = context.l10n;
   final weekday = localizedWeekday(l10n, value.weekday);

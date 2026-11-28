@@ -11,6 +11,7 @@ import 'package:denial_flutter_sdk/rendering.dart';
 import 'package:denial_flutter_sdk/state.dart' show denialBridgeProvider;
 
 import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
@@ -21,8 +22,10 @@ import '../../widgets/app_flight_layer.dart';
 import '../../widgets/back_gesture_layer.dart';
 import '../../widgets/bottom_gesture_handle.dart';
 import '../../widgets/edge_panel_layer.dart';
+import '../../widgets/shade/shade_launch.dart';
 import '../../widgets/shade/shade_progress.dart';
 import '../../widgets/shade/system_shade_layer.dart';
+import '../../state/unlock_then.dart';
 import 'mobile_launcher_layer.dart';
 import 'mobile_window_layers.dart';
 
@@ -211,9 +214,33 @@ class _MobileSceneWallpaperState extends ConsumerState<_MobileSceneWallpaper> {
   }
 }
 
-/// Gesture and shade chrome for the stock mobile shell.
+/// Gesture chrome for the stock mobile shell, under the lock screen.
 class MobileShellChrome extends ConsumerWidget {
   const MobileShellChrome({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ValueListenableBuilder<FrostedBackdrop?>(
+      valueListenable: ref.watch(mobileWallpaperGlassProvider),
+      builder: (context, backdrop, chrome) => WindowBackdropCache(
+        backdrop: backdrop,
+        motion: const AlwaysStoppedAnimation<double>(0),
+        child: chrome!,
+      ),
+      child: const Stack(
+        fit: StackFit.expand,
+        children: [BottomGestureHandle()],
+      ),
+    );
+  }
+}
+
+/// The status bar and notification shade, with the Back gesture that
+/// closes them, over the apps and the lock screen alike: on Android the
+/// shade pulls down over the lock screen too. The Back gesture is off
+/// while locked unless the shade is open.
+class MobileShellShade extends ConsumerWidget {
+  const MobileShellShade({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -230,11 +257,89 @@ class MobileShellChrome extends ConsumerWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          const BottomGestureHandle(),
-          SystemShadeLayer(ignoring: launchActive),
+          // The shade's layers are positioned in a stack of their own.
+          Positioned.fill(
+            child: _ShadeUnderCredential(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [SystemShadeLayer(ignoring: launchActive)],
+              ),
+            ),
+          ),
+          // A launch out of the shade grows over it.
+          const ShadeLaunchLayer(),
           const MobileBackGestureLayer(),
         ],
       ),
+    );
+  }
+}
+
+/// The credential over the locked shade: as Android's bouncer comes up, the
+/// shade blurs at once and fades out under it (about 200 ms on the
+/// emulator), and comes back as quickly when the credential is dismissed or
+/// the phone unlocks. Back still reaches the credential through the layer
+/// above.
+class _ShadeUnderCredential extends ConsumerStatefulWidget {
+  const _ShadeUnderCredential({required this.child});
+
+  final Widget child;
+
+  @override
+  ConsumerState<_ShadeUnderCredential> createState() =>
+      _ShadeUnderCredentialState();
+}
+
+class _ShadeUnderCredentialState extends ConsumerState<_ShadeUnderCredential>
+    with SingleTickerProviderStateMixin {
+  static const double _blurSigma = 30;
+
+  late final AnimationController _hidden = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 200),
+    reverseDuration: const Duration(milliseconds: 120),
+    value: ref.read(unlockThenProvider).overShade ? 1 : 0,
+  );
+
+  @override
+  void dispose() {
+    _hidden.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.listen<bool>(unlockThenProvider.select((state) => state.overShade), (
+      _,
+      over,
+    ) {
+      if (over) {
+        _hidden.forward();
+      } else {
+        _hidden.reverse();
+      }
+    });
+    // One tree at every value, so the shade keeps its state.
+    return AnimatedBuilder(
+      animation: _hidden,
+      child: widget.child,
+      builder: (context, child) {
+        final t = _hidden.value;
+        // The blur is whole within the first fifth, as Android's is in a
+        // frame.
+        final sigma = _blurSigma * (t * 5).clamp(0.0, 1.0);
+        return IgnorePointer(
+          ignoring: t > 0,
+          child: Opacity(
+            opacity: 1 - t,
+            child: ImageFiltered(
+              enabled: sigma > 0,
+              imageFilter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+              child: child,
+            ),
+          ),
+        );
+      },
     );
   }
 }

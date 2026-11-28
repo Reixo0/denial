@@ -43,3 +43,24 @@ Verify the retained files from `roboto_flex/` with:
 ```sh
 sha256sum --check --strict RobotoFlex.sha256
 ```
+
+# Google Sans Flex font asset
+
+`google_sans_flex/` holds the Google Sans Flex variable TTF, which the lock
+screen clock uses as Android's does (weight 600, width 100, roundness 100).
+`GoogleSansFlex.ttf`, `OFL.txt` and `TRADEMARKS.md` are byte-identical to
+`ofl/googlesansflex/` in
+[google/fonts](https://github.com/google/fonts/tree/fa826bb2a3e26df8c1bee99351fc0d039aeed7d2/ofl/googlesansflex)
+at commit `fa826bb2a3e26df8c1bee99351fc0d039aeed7d2`, where the font is named
+`GoogleSansFlex[ROND,opsz,slnt,wdth,wght].ttf`. It is bundled unmodified;
+"Google Sans Flex" is a Google trademark (see `TRADEMARKS.md`).
+
+- License: SIL Open Font License 1.1
+- Upstream project:
+  [googlefonts/googlesans-flex](https://github.com/googlefonts/googlesans-flex)
+
+Verify the retained files from `google_sans_flex/` with:
+
+```sh
+sha256sum --check --strict GoogleSansFlex.sha256
+```

@@ -60,7 +60,8 @@ abstract final class _QsDialog {
 
   // AOSP DialogTransitionAnimator LAUNCH_SPRING_PARAMS & COLLAPSE_SPRING_PARAMS,
   // scaled by androidAnimatorScale.
-  static const double _scaleFactor = androidAnimatorScale * androidAnimatorScale;
+  static const double _scaleFactor =
+      androidAnimatorScale * androidAnimatorScale;
   static final SpringDescription launchX = SpringDescription.withDampingRatio(
     mass: 1,
     stiffness: 700 / _scaleFactor,
@@ -127,7 +128,11 @@ class _QsDialogFrameState extends State<_QsDialogFrame>
     vsync: this,
     value: 0,
   );
-  late final Listenable _motion = Listenable.merge(<Listenable>[_x, _y, _scale]);
+  late final Listenable _motion = Listenable.merge(<Listenable>[
+    _x,
+    _y,
+    _scale,
+  ]);
   bool _started = false;
   bool _closing = false;
 
@@ -242,9 +247,12 @@ class _QsDialogFrameState extends State<_QsDialogFrame>
     if (_closing) {
       return ((p - 0.6) / 0.4).clamp(0.0, 1.0);
     }
-    return const Cubic(0, 0, 0.2, 1).transform(
-      ((p - 0.45) / 0.5).clamp(0.0, 1.0),
-    );
+    return const Cubic(
+      0,
+      0,
+      0.2,
+      1,
+    ).transform(((p - 0.45) / 0.5).clamp(0.0, 1.0));
   }
 
   @override
@@ -274,10 +282,8 @@ class _QsDialogFrameState extends State<_QsDialogFrame>
               child: AnimatedBuilder(
                 animation: _scale,
                 child: widget.builder(_close),
-                builder: (context, child) => Opacity(
-                  opacity: _contentOpacity(),
-                  child: child,
-                ),
+                builder: (context, child) =>
+                    Opacity(opacity: _contentOpacity(), child: child),
               ),
             ),
           );
@@ -379,16 +385,7 @@ class _RenderMorphingDialogBox extends RenderProxyBox {
     required Listenable motion,
     required Color surfaceColor,
     required double radius,
-  }) : this._raw(
-         origin,
-         insets,
-         x,
-         y,
-         scale,
-         motion,
-         surfaceColor,
-         radius,
-       );
+  }) : this._raw(origin, insets, x, y, scale, motion, surfaceColor, radius);
 
   _RenderMorphingDialogBox._raw(
     this._origin,
@@ -503,7 +500,8 @@ class _RenderMorphingDialogBox extends RenderProxyBox {
     return result.addWithPaintOffset(
       offset: _endRect.topLeft,
       position: position,
-      hitTest: (result, transformed) => child.hitTest(result, position: transformed),
+      hitTest: (result, transformed) =>
+          child.hitTest(result, position: transformed),
     );
   }
 

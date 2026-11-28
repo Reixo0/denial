@@ -8,7 +8,8 @@ import 'package:flutter/widgets.dart';
 
 import 'package:denial_flutter_sdk/effects.dart' show logicalFromOutputPixels;
 
-import 'notification_shade_list.dart' show AndroidStackExpansion;
+import 'notification_shade_list.dart'
+    show AndroidStackExpansion, LockShadeHandover;
 import 'notification_shelf.dart' show NotificationShelfGeometry;
 import 'shade_card_blur.dart';
 import 'shade_expansion_motion.dart' show AospShadeInterpolation;
@@ -398,11 +399,21 @@ class RenderShadeStack extends RenderBox
   Animation<double> get panel => _panel;
   set panel(Animation<double> value) {
     if (identical(value, _panel)) return;
-    if (attached) _panel.removeListener(markNeedsPaint);
+    if (attached) {
+      _panel
+        ..removeListener(markNeedsPaint)
+        ..removeListener(_followHandover);
+    }
     _panel = value;
-    if (attached) _panel.addListener(markNeedsPaint);
+    if (attached) {
+      _panel
+        ..addListener(_followHandover)
+        ..addListener(markNeedsPaint);
+    }
     markNeedsPaint();
   }
+
+  void _followHandover() => LockShadeHandover.follow(_panel.value);
 
   Animation<double> _qs;
   Animation<double> get qs => _qs;
@@ -585,7 +596,9 @@ class RenderShadeStack extends RenderBox
   @override
   void attach(PipelineOwner owner) {
     super.attach(owner);
-    _panel.addListener(markNeedsPaint);
+    _panel
+      ..addListener(_followHandover)
+      ..addListener(markNeedsPaint);
     _qs.addListener(markNeedsPaint);
     _overshoot.addListener(markNeedsPaint);
     _overscroll.addListener(markNeedsPaint);
@@ -599,7 +612,9 @@ class RenderShadeStack extends RenderBox
 
   @override
   void detach() {
-    _panel.removeListener(markNeedsPaint);
+    _panel
+      ..removeListener(_followHandover)
+      ..removeListener(markNeedsPaint);
     _qs.removeListener(markNeedsPaint);
     _overshoot.removeListener(markNeedsPaint);
     _overscroll.removeListener(markNeedsPaint);
@@ -832,7 +847,13 @@ class RenderShadeStack extends RenderBox
           // The list rises to its place by itself (NotificationShadeList).
           y = restTop - _stackTop + past;
           // AOSP hides the stack until a two-finger pull is fully open.
-          alpha = both ? 0 : AndroidStackExpansion.alpha(p);
+          // Over the lock screen its cards stay whole; the list fades the
+          // others itself.
+          alpha = both
+              ? 0
+              : LockShadeHandover.active
+              ? 1
+              : AndroidStackExpansion.alpha(p);
           clip = _ShadeClip.inPanel;
           hittable = e <= 0.01;
         case null:
@@ -967,16 +988,14 @@ class RenderShadeStack extends RenderBox
     }
   }
 
-  final _cardEdgeClip = LayerHandle<ClipRRectLayer>();
-  final _cardShapeClip = LayerHandle<ClipPathLayer>();
-  final _cardTransform = LayerHandle<TransformLayer>();
-  final _cardFilter = LayerHandle<BackdropFilterLayer>();
+  /// One set of cards' layers: every card, or while the shade opens over
+  /// the lock screen, the lock screen's cards and the rest apart.
+  final _cardPasses = <_CardLayers>[_CardLayers(), _CardLayers()];
 
-  void _dropCardLayers() {
-    _cardEdgeClip.layer = null;
-    _cardShapeClip.layer = null;
-    _cardTransform.layer = null;
-    _cardFilter.layer = null;
+  void _dropCardLayers([int from = 0]) {
+    for (final pass in _cardPasses.skip(from)) {
+      pass.drop();
+    }
   }
 
   /// Android's notification card and shelf blur: each card shows what is
@@ -997,29 +1016,24 @@ class RenderShadeStack extends RenderBox
       _dropCardLayers();
       return;
     }
-    final shapes = Path();
-    for (final card in _cards) {
-      card.addTo(shapes, this);
-    }
-    final bounds = shapes.getBounds();
-    if (bounds.isEmpty) {
-      _dropCardLayers();
-      return;
-    }
-
     final p = panel.value.clamp(0.0, 1.0);
     final blurFrac = _blur.value.clamp(0.0, 1.0);
     final mirrorFade = 1 - _brightnessMirror.value.clamp(0.0, 1.0);
-    final cardAlpha =
+    final fading =
         (AospShadeInterpolation.contentAlpha(p) * mirrorFade * blurFrac).clamp(
           0.0,
           1.0,
         );
-    if (cardAlpha <= 0) {
-      _dropCardLayers();
-      return;
-    }
-
+    // Opening over the lock screen, its cards are whole from the start;
+    // the rest wait in the shelf.
+    final passes = <(bool Function(RenderShadeCard), double)>[
+      (
+        (_) => true,
+        LockShadeHandover.active
+            ? (mirrorFade * blurFrac).clamp(0.0, 1.0)
+            : fading,
+      ),
+    ];
     // From the output's pixels, where the filter is defined, to here.
     final toHere = Matrix4.tryInvert(getTransformTo(null));
     if (toHere == null) {
@@ -1027,66 +1041,80 @@ class RenderShadeStack extends RenderBox
       return;
     }
     final here = toHere..multiply(logicalFromOutputPixels(blur.output));
-    // The fade is part of the filter, not an opacity layer around it: a
-    // backdrop filter inside a saveLayer can read that empty layer instead
-    // of the screen (the phone drew the cards black while they faded in).
     final blurred = blur.filterAt(blurFrac, 1 - _pushback * blurFrac);
-    final faded = cardAlpha >= 1;
-    final filter = (_cardFilter.layer ??= BackdropFilterLayer())
-      ..filter = faded
-          ? blurred
-          : ui.ImageFilter.compose(
-              outer: ui.ColorFilter.matrix(<double>[
-                1, 0, 0, 0, 0, //
-                0, 1, 0, 0, 0, //
-                0, 0, 1, 0, 0, //
-                0, 0, 0, cardAlpha, 0, //
-              ]),
-              inner: blurred,
-            )
-      ..blendMode = faded ? BlendMode.src : BlendMode.srcOver
-      ..backdropKey = blur.backdropKey;
+    for (final (index, (takes, cardAlpha)) in passes.indexed) {
+      final layers = _cardPasses[index];
+      final shapes = Path();
+      for (final card in _cards) {
+        if (takes(card)) card.addTo(shapes, this);
+      }
+      final bounds = shapes.getBounds();
+      if (bounds.isEmpty || cardAlpha <= 0) {
+        layers.drop();
+        continue;
+      }
+      // The fade is part of the filter, not an opacity layer around it: a
+      // backdrop filter inside a saveLayer can read that empty layer instead
+      // of the screen (the phone drew the cards black while they faded in).
+      final faded = cardAlpha >= 1;
+      final filter = (layers.filter.layer ??= BackdropFilterLayer())
+        ..filter = faded
+            ? blurred
+            : ui.ImageFilter.compose(
+                outer: ui.ColorFilter.matrix(<double>[
+                  1, 0, 0, 0, 0, //
+                  0, 1, 0, 0, 0, //
+                  0, 0, 1, 0, 0, //
+                  0, 0, 0, cardAlpha, 0, //
+                ]),
+                inner: blurred,
+              )
+        ..blendMode = faded ? BlendMode.src : BlendMode.srcOver
+        ..backdropKey = blur.backdropKey;
 
-    _cardEdgeClip.layer = context.pushClipRRect(
-      true,
-      offset,
-      Offset.zero & size,
-      _edge,
-      (context, offset) {
-        _cardShapeClip.layer = context.pushClipPath(
-          true,
-          offset,
-          bounds,
-          shapes,
-          (context, offset) {
-            // The opacity layer used to carry the offset; now the matrix
-            // does (pushTransform would wrap it around the matrix instead).
-            _cardTransform.layer = context.pushTransform(
-              true,
-              Offset.zero,
-              Matrix4.translationValues(offset.dx, offset.dy, 0)
-                ..multiply(here),
-              (context, _) => context.pushLayer(filter, (_, _) {}, Offset.zero),
-              oldLayer: _cardTransform.layer,
-            );
-            // The shade's tint over its blur, as over the cards' blur.
-            context.canvas.drawRect(
-              bounds.shift(offset),
-              Paint()
-                ..color = _shadeColor.withValues(
-                  alpha:
-                      _shadeColor.a *
-                      AospShadeInterpolation.scrimAlpha(p) *
-                      mirrorFade *
-                      cardAlpha,
-                ),
-            );
-          },
-          oldLayer: _cardShapeClip.layer,
-        );
-      },
-      oldLayer: _cardEdgeClip.layer,
-    );
+      layers.edgeClip.layer = context.pushClipRRect(
+        true,
+        offset,
+        Offset.zero & size,
+        _edge,
+        (context, offset) {
+          layers.shapeClip.layer = context.pushClipPath(
+            true,
+            offset,
+            bounds,
+            shapes,
+            (context, offset) {
+              // The opacity layer used to carry the offset; now the matrix
+              // does (pushTransform would wrap it around the matrix instead).
+              layers.transform.layer = context.pushTransform(
+                true,
+                Offset.zero,
+                Matrix4.translationValues(offset.dx, offset.dy, 0)
+                  ..multiply(here),
+                (context, _) =>
+                    context.pushLayer(filter, (_, _) {}, Offset.zero),
+                oldLayer: layers.transform.layer,
+              );
+              // The shade's tint over its blur, as over the cards' blur.
+              context.canvas.drawRect(
+                bounds.shift(offset),
+                Paint()
+                  ..color = _shadeColor.withValues(
+                    alpha:
+                        _shadeColor.a *
+                        AospShadeInterpolation.scrimAlpha(p) *
+                        mirrorFade *
+                        cardAlpha,
+                  ),
+              );
+            },
+            oldLayer: layers.shapeClip.layer,
+          );
+        },
+        oldLayer: layers.edgeClip.layer,
+      );
+    }
+    _dropCardLayers(passes.length);
   }
 
   void _paintPanel(PaintingContext context, Offset offset) {
@@ -1125,5 +1153,19 @@ class RenderShadeStack extends RenderBox
     transform
       ..translateByDouble(data.place.dx, data.place.dy, 0, 1)
       ..scaleByDouble(data.scale, data.scale, 1, 1);
+  }
+}
+
+class _CardLayers {
+  final edgeClip = LayerHandle<ClipRRectLayer>();
+  final shapeClip = LayerHandle<ClipPathLayer>();
+  final transform = LayerHandle<TransformLayer>();
+  final filter = LayerHandle<BackdropFilterLayer>();
+
+  void drop() {
+    edgeClip.layer = null;
+    shapeClip.layer = null;
+    transform.layer = null;
+    filter.layer = null;
   }
 }

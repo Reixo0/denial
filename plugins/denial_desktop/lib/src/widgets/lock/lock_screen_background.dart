@@ -292,97 +292,36 @@ class _DesktopPerformanceMetric extends StatelessWidget {
   }
 }
 
+/// The desktop lock screen's clock, date and status, left of the middle.
+/// The phone draws Android's clock instead (_KeyguardClock).
 class _LockClockBlock extends StatelessWidget {
   const _LockClockBlock({
     required this.clock,
-    required this.desktop,
     required this.scale,
     required this.showSystemStatus,
-    this.caption,
-    this.parts = const {
-      HomeClockPart.time,
-      HomeClockPart.date,
-      HomeClockPart.status,
-    },
   });
 
   final HomeClockInfo clock;
-  final bool desktop;
   final double scale;
   final bool showSystemStatus;
-
-  /// A line over the date.
-  final String? caption;
-
-  /// Mobile draws the time under the wallpaper's subject and the date and
-  /// battery row over it, as two blocks with the same layout.
-  final Set<HomeClockPart> parts;
 
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
-    final top = desktop
-        ? math.max(72.0, size.height * 0.22)
-        : math.max(48.0, size.height * 0.25 - 96.0);
-    final horizontalInset = desktop ? math.max(48.0, size.width * 0.065) : 0.0;
-    final height = desktop
-        ? math.min(280.0, size.height * 0.36)
-        : math.min(250.0, size.height * 0.34);
-
-    // Mobile stretches the time upward with the date on top, painted above
-    // the block, which reserves room for them.
-    final reserve = desktop ? 0.0 : height;
     return Positioned(
-      left: horizontalInset,
-      right: desktop ? size.width * 0.48 : 0,
-      top: top - reserve,
-      height: height + reserve,
-      child: Padding(
-        padding: EdgeInsets.only(top: reserve),
-        child: Transform.scale(
-          alignment: Alignment.center,
-          scale: scale,
-          child: Padding(
-            padding: desktop
-                ? EdgeInsets.zero
-                : const EdgeInsets.symmetric(horizontal: 24),
-            child: RepaintBoundary(
-              child: HomeClockWidget(
-                clock: clock,
-                showStatus: showSystemStatus,
-                timeStretch: desktop ? 1.0 : 2.0,
-                detailsAbove: !desktop,
-                dateColor: desktop
-                    ? ShellMediaColors.lightForegroundSecondary
-                    : ShellMediaColors.lightForeground,
-                caption: caption,
-                parts: parts,
-              ),
-            ),
+      left: math.max(48.0, size.width * 0.065),
+      right: size.width * 0.48,
+      top: math.max(72.0, size.height * 0.22),
+      height: math.min(280.0, size.height * 0.36),
+      child: Transform.scale(
+        alignment: Alignment.center,
+        scale: scale,
+        child: RepaintBoundary(
+          child: HomeClockWidget(
+            clock: clock,
+            showStatus: showSystemStatus,
+            dateColor: ShellMediaColors.lightForegroundSecondary,
           ),
-        ),
-      ),
-    );
-  }
-}
-
-/// The lock glyph centred near the top of the mobile face.
-class _LockGlyph extends StatelessWidget {
-  const _LockGlyph();
-
-  static const double _size = 26.0;
-
-  @override
-  Widget build(BuildContext context) {
-    return Positioned(
-      left: 0,
-      right: 0,
-      top: MediaQuery.sizeOf(context).height / 16 - _size / 2,
-      child: const Center(
-        child: Icon(
-          Icons.lock_rounded,
-          size: _size,
-          color: ShellMediaColors.lightForeground,
         ),
       ),
     );
@@ -815,94 +754,391 @@ class _LockDepthForegroundState extends ConsumerState<_LockDepthForeground> {
   }
 }
 
-/// The phone's notifications under the clock, as many as fit, newest first,
-/// unless the lock screen settings hide them. They slide with the face and
-/// let drags through to the swipe; a tap asks for the PIN, then opens.
+/// The phone's notifications under the small clock, unless the lock screen
+/// settings hide them. Android's compact lock screen
+/// (LockScreenMinimalismCoordinator, on by default): the top ongoing and
+/// the newest unseen notification keep their rows (the shade's template,
+/// collapsed and opaque); everything else, and any row that does not fit
+/// above the lock icon, waits as an icon on the shelf. They slide with the
+/// face and let drags through to the swipe; a tap asks for the PIN, then
+/// opens.
 class _LockNotifications extends ConsumerWidget {
-  const _LockNotifications({required this.scale, required this.onOpen});
-
-  /// The clock's scale, which moves its lower edge.
-  final double scale;
+  const _LockNotifications({required this.onOpen});
 
   /// The tapped group's key.
   final ValueChanged<String> onOpen;
 
-  static const int _shown = 3;
+  /// LOCK_SCREEN_NOTIFICATION_MINIMALISM's default; a lock screen setting
+  /// later.
+  static const bool compact = true;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(desktopNotificationsProvider);
-    final notifications = ref.read(desktopNotificationsProvider.notifier);
-    if (state.lockPreview == NotificationPreviewMode.hidden) {
+    if (state.lockPreview == NotificationPreviewMode.hidden ||
+        state.groups.isEmpty) {
+      LockShadeHandover.lockTop = null;
+      LockShadeHandover.kept = const <String>{};
       return const SizedBox.shrink();
     }
-    // The shade's history: a notification stays after its popup is gone.
-    // A stacked group is one card with its app and count.
-    final groups = state.groups.take(_shown).toList(growable: false);
-    if (groups.isEmpty) {
-      return const SizedBox.shrink();
+    final groups = state.groups;
+    return ValueListenableBuilder<bool>(
+      valueListenable: LockShadeHandover.covering,
+      builder: (context, covering, _) =>
+          _build(context, groups, state.lockPreview, covering),
+    );
+  }
+
+  /// The groups that had rows when the shade came over the lock screen.
+  static List<String>? _frozen;
+
+  Widget _build(
+    BuildContext context,
+    List<DesktopNotificationGroup> groups,
+    NotificationPreviewMode preview,
+    bool covering,
+  ) {
+    var rows = _rows(groups);
+    if (covering) {
+      // The lock screen's stack is the shade's while it is open: it does
+      // not refilter what was seen until it is back (filtering is off while
+      // the shade is open).
+      final frozen = _frozen ??= [for (final group in rows) group.key];
+      rows = [
+        for (final group in groups)
+          if (frozen.contains(group.key)) group,
+      ];
+    } else {
+      _frozen = null;
     }
-    // The same block _LockClockBlock lays the mobile time out in.
-    final size = MediaQuery.sizeOf(context);
-    final clockTop = math.max(48.0, size.height * 0.25 - 96.0);
-    final clockHeight = math.min(250.0, size.height * 0.34);
-    final clockBottom = clockTop + clockHeight * (1 + scale) / 2;
-    final metrics = MobileUiMetrics.of(context);
-    final padding = MediaQuery.viewPaddingOf(context);
+    final geometry = _KeyguardGeometry(MediaQuery.sizeOf(context));
+    final dp = geometry.dp;
+    // The stack ends keyguard_lock_padding above the lock icon.
+    final bottom =
+        (_KeyguardGeometry.lockIconFromBottom +
+            _KeyguardGeometry.lockIconSize / 2 +
+            _KeyguardGeometry.lockPadding) *
+        dp;
     return Positioned(
-      left: padding.left,
-      right: padding.right,
-      top: clockBottom + metrics.visual(24),
-      // The fingerprint ring and the swipe pill keep the lower part.
-      bottom: size.height * 0.3,
-      child: ClipRect(
-        child: SingleChildScrollView(
-          physics: const NeverScrollableScrollPhysics(),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              for (final group in groups)
-                Padding(
-                  key: ValueKey(group.key),
-                  padding: EdgeInsets.fromLTRB(
-                    metrics.visual(MobileNotificationCard.horizontalMargin),
-                    0,
-                    metrics.visual(MobileNotificationCard.horizontalMargin),
-                    metrics.visual(MobileNotificationMetrics.rowSpacing),
-                  ),
-                  // Swiped aside, it leaves the history; a swipe up
-                  // still opens the phone.
-                  child: Dismissible(
-                    key: ValueKey(group.key),
-                    direction: group.clearable
-                        ? DismissDirection.horizontal
-                        : DismissDirection.none,
-                    confirmDismiss: (_) async {
-                      // The controller drops the rows when it can.
-                      notifications.dismissGroupFromHistory(group.key);
-                      return false;
-                    },
-                    child: _LockNotificationPress(
-                      onTap: () {
-                        ref.read(hapticsServiceProvider).pulse();
-                        onOpen(group.key);
-                      },
-                      child: MobileNotificationCard(
-                        notification: group.newest.notification,
-                        group: group,
-                        interactive: false,
-                        previewMode: state.lockPreview,
-                      ),
-                    ),
-                  ),
-                ),
-            ],
+      left: 0,
+      right: 0,
+      top: geometry.notificationsTop,
+      bottom: bottom,
+      // The shade draws these cards while it is over the lock screen, from
+      // this place; they come back as it leaves (keyguard alpha), or at
+      // once when the shade sprang back with them still here.
+      child: AnimatedOpacity(
+        opacity: covering ? 0 : 1,
+        duration: covering || LockShadeHandover.returned
+            ? Duration.zero
+            : const Duration(milliseconds: 200),
+        child: PixelShadeViewport(
+          child: _LockNotificationStack(
+            groups: groups,
+            rows: rows,
+            preview: preview,
+            onOpen: onOpen,
           ),
         ),
       ),
     );
   }
+
+  List<DesktopNotificationGroup> _rows(List<DesktopNotificationGroup> groups) {
+    final List<DesktopNotificationGroup> rows;
+    if (compact) {
+      // LockScreenMinimalismCoordinator: of the alerting notifications
+      // (importance DEFAULT and up), the top rich ongoing one (a call; the
+      // colourised and promoted kinds don't reach Denial) and the top one
+      // not seen yet keep a row.
+      bool alerting(DesktopNotificationRecord record) =>
+          record.notification.urgency != DesktopNotificationUrgency.low;
+      bool richOngoing(DesktopNotificationRecord record) =>
+          !record.notification.clearable &&
+          (record.notification.category.startsWith('call') ||
+              record.notification.urgency ==
+                  DesktopNotificationUrgency.critical);
+      final ongoing = groups
+          .where(
+            (group) => group.members.any(
+              (record) => alerting(record) && richOngoing(record),
+            ),
+          )
+          .firstOrNull;
+      final unseen = groups
+          .where(
+            (group) =>
+                !identical(group, ongoing) &&
+                group.members.any(
+                  (record) =>
+                      record.unread && alerting(record) && !richOngoing(record),
+                ),
+          )
+          .firstOrNull;
+      rows = [
+        for (final group in groups)
+          if (identical(group, ongoing) || identical(group, unseen)) group,
+      ];
+    } else {
+      rows = groups;
+    }
+    return rows;
+  }
+}
+
+/// The stack itself, in dp. Rows differ in height, so it lays out all of
+/// them, then drops rows from the end until they and the shelf fit; it
+/// stays hidden until it has, and starts over when the notifications or
+/// its room change.
+class _LockNotificationStack extends ConsumerStatefulWidget {
+  const _LockNotificationStack({
+    required this.groups,
+    required this.rows,
+    required this.preview,
+    required this.onOpen,
+  });
+
+  /// Every group, in the shade's order.
+  final List<DesktopNotificationGroup> groups;
+
+  /// The groups that may show as rows, in the same order.
+  final List<DesktopNotificationGroup> rows;
+  final NotificationPreviewMode preview;
+  final ValueChanged<String> onOpen;
+
+  @override
+  ConsumerState<_LockNotificationStack> createState() =>
+      _LockNotificationStackState();
+}
+
+class _LockNotificationStackState
+    extends ConsumerState<_LockNotificationStack> {
+  final GlobalKey _column = GlobalKey();
+  List<String> _keys = const <String>[];
+  double _room = -1;
+  int _fit = 0;
+  bool _settled = false;
+
+  /// Tells the shade where this stack is and which cards it shows, for
+  /// opening over it (LockShadeHandover).
+  void _publish(List<DesktopNotificationGroup> shown) {
+    if (!mounted) return;
+    final box = _column.currentContext?.findRenderObject();
+    if (box is! RenderBox || !box.hasSize || !box.attached) return;
+    LockShadeHandover.locked = true;
+    LockShadeHandover.lockTop = box.localToGlobal(Offset.zero).dy;
+    LockShadeHandover.kept = {for (final group in shown) group.key};
+  }
+
+  @override
+  void dispose() {
+    LockShadeHandover.locked = false;
+    LockShadeHandover.lockTop = null;
+    LockShadeHandover.kept = const <String>{};
+    super.dispose();
+  }
+
+  void _measure() {
+    if (!mounted || _settled) return;
+    final box = _column.currentContext?.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return;
+    setState(() {
+      if (box.size.height > _room + 0.5 && _fit > 0) {
+        _fit--;
+      } else {
+        _settled = true;
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final notifications = ref.read(desktopNotificationsProvider.notifier);
+    final rows = widget.rows;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final keys = [
+          for (final group in rows) group.key,
+          '|',
+          for (final group in widget.groups) group.key,
+        ];
+        if (!listEquals(keys, _keys) || constraints.maxHeight != _room) {
+          _keys = keys;
+          _room = constraints.maxHeight;
+          _fit = rows.length;
+          _settled = false;
+        }
+        if (!_settled) {
+          WidgetsBinding.instance.addPostFrameCallback((_) => _measure());
+        }
+        final fit = math.min(_fit, rows.length);
+        final shown = rows.take(fit).toSet();
+        if (_settled) {
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => _publish(shown.toList()),
+          );
+        }
+        final shelf = [
+          for (final group in widget.groups)
+            if (!shown.contains(group)) group,
+        ];
+        final column = Column(
+          key: _column,
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (var i = 0; i < fit; i++)
+              Padding(
+                key: ValueKey(rows[i].key),
+                padding: EdgeInsets.fromLTRB(
+                  PixelNotificationMetrics.margin,
+                  i == 0 ? 0 : PixelNotificationMetrics.divider,
+                  PixelNotificationMetrics.margin,
+                  0,
+                ),
+                child: _row(
+                  rows[i],
+                  notifications,
+                  roundTop: i == 0,
+                  roundBottom: i == fit - 1,
+                ),
+              ),
+            if (shelf.isNotEmpty)
+              Padding(
+                padding: EdgeInsets.only(
+                  top: fit == 0 ? 0 : PixelNotificationMetrics.divider,
+                ),
+                child: _LockNotificationShelf(groups: shelf),
+              ),
+          ],
+        );
+        return ClipRect(
+          child: OverflowBox(
+            alignment: Alignment.topCenter,
+            minHeight: 0,
+            maxHeight: double.infinity,
+            child: Opacity(opacity: _settled ? 1 : 0, child: column),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _row(
+    DesktopNotificationGroup group,
+    DesktopNotificationsController notifications, {
+    required bool roundTop,
+    required bool roundBottom,
+  }) {
+    // Swiped aside, it leaves the history; a swipe up still opens the
+    // phone.
+    return Dismissible(
+      key: ValueKey(group.key),
+      direction: group.clearable
+          ? DismissDirection.horizontal
+          : DismissDirection.none,
+      confirmDismiss: (_) async {
+        // The controller drops the rows when it can.
+        notifications.dismissGroupFromHistory(group.key);
+        return false;
+      },
+      child: Listener(
+        // A pull that starts here opens this card in the shade.
+        onPointerDown: (_) => LockShadeHandover.pressed = group.stacked
+            ? group.key
+            : lockPullKey(group.newest.notification),
+        onPointerUp: (_) => LockShadeHandover.pressed = null,
+        onPointerCancel: (_) => LockShadeHandover.pressed = null,
+        child: _LockNotificationPress(
+          onTap: () {
+            ref.read(hapticsServiceProvider).pulse();
+            widget.onOpen(group.key);
+          },
+          child: PixelNotificationCard(
+            notification: group.newest.notification,
+            group: group,
+            interactive: false,
+            opaque: true,
+            groupLines: 2,
+            previewMode: widget.preview,
+            roundTop: roundTop,
+            roundBottom: roundBottom,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// NotificationShelf on the compact lock screen: a pill at the start, on
+/// the rows' opaque colour, holding the icons of what has no row
+/// (notification_shelf_height 48 dp, shelf_icon_container_padding 13 dp,
+/// the status bar's 22 dp icon slots; measured on the emulator).
+class _LockNotificationShelf extends StatelessWidget {
+  const _LockNotificationShelf({required this.groups});
+
+  final List<DesktopNotificationGroup> groups;
+
+  static const double height = 48;
+  static const double padding = 13;
+  static const double slot = 22;
+  static const double glyph = 16;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = phoneSchemeOf(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final room =
+            constraints.maxWidth -
+            2 * PixelNotificationMetrics.margin -
+            2 * padding;
+        final fits = math.max(1, (room / slot).floor());
+        return Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: Padding(
+            padding: const EdgeInsetsDirectional.only(
+              start: PixelNotificationMetrics.margin,
+            ),
+            child: Container(
+              height: height,
+              padding: const EdgeInsets.symmetric(horizontal: padding),
+              decoration: ShapeDecoration(
+                color: scheme.surfaceContainer,
+                shape: const StadiumBorder(),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final group in groups.take(fits))
+                    SizedBox.square(
+                      dimension: slot,
+                      child: Center(
+                        child: SizedBox.square(
+                          dimension: glyph,
+                          child: _shelfIcon(
+                            group.newest.notification,
+                            scheme.onSurface,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _shelfIcon(DesktopNotification notification, Color color) =>
+      switch (notification.smallIcon) {
+        final small? => NotificationSmallIcon(image: small, color: color),
+        null => ClipOval(
+          child: NotificationAppIcon(notification: notification),
+        ),
+      };
 }
 
 /// The card gives under the finger and springs back as the face leaves for

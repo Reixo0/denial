@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -58,6 +60,64 @@ class NotificationExpandMotion extends ChangeNotifier {
   }
 }
 
+/// A pull of one notification that another gesture drives: the lock
+/// screen's drag down (LockscreenShadeTransitionController.handleExpansion).
+/// The card it started on grows with the finger, by half its travel
+/// (RUBBERBAND_FACTOR_EXPANDABLE); let go, it opens fully if the shade
+/// opens (goToLockedShade's expandView) and folds back if it springs back
+/// (cancelChildExpansion, 375 ms).
+class RemoteNotificationPull extends ChangeNotifier {
+  RemoteNotificationPull._();
+
+  static final RemoteNotificationPull instance = RemoteNotificationPull._();
+
+  /// RUBBERBAND_FACTOR_EXPANDABLE.
+  static const double rubberband = 0.5;
+
+  /// Which notification: [NotificationPullExpand.pullKey].
+  Object? get key => _key;
+  Object? _key;
+
+  /// How far the finger has gone.
+  double get drag => _drag;
+  double _drag = 0;
+
+  /// The finger is still on.
+  bool get held => _held;
+  bool _held = false;
+
+  /// Let go: whether the shade opens with it.
+  bool? get opens => _opens;
+  bool? _opens;
+
+  void begin(Object key) {
+    _key = key;
+    _drag = 0;
+    _held = true;
+    _opens = null;
+    notifyListeners();
+  }
+
+  void move(double drag) {
+    if (!_held) return;
+    _drag = math.max(0, drag);
+    notifyListeners();
+  }
+
+  void end({required bool opens}) {
+    if (!_held) return;
+    _held = false;
+    _opens = opens;
+    notifyListeners();
+  }
+
+  void _clear() {
+    _key = null;
+    _held = false;
+    _opens = null;
+  }
+}
+
 /// Opens and closes a notification: Android's ExpandHelper (a downward pull
 /// grows it with the finger, 1:1; let go, it settles open when it grew and
 /// the finger was not moving up, else closes again, on FlingAnimationUtils'
@@ -69,8 +129,13 @@ class NotificationPullExpand extends StatefulWidget {
     required this.onOpen,
     required this.builder,
     this.onStart,
+    this.pullKey,
     super.key,
   });
+
+  /// Matches [RemoteNotificationPull.key] when a pull from the lock screen
+  /// started on this notification.
+  final Object? pullKey;
 
   /// Whether it can be pulled.
   final bool enabled;
@@ -99,6 +164,67 @@ class _NotificationPullExpandState extends State<NotificationPullExpand>
   void Function(double value)? _follow;
 
   void _onTick() => _follow?.call(_run.value);
+
+  @override
+  void initState() {
+    super.initState();
+    RemoteNotificationPull.instance.addListener(_remote);
+    // The pull may have started before this row was built.
+    Future<void>.microtask(() {
+      if (mounted) _remote();
+    });
+  }
+
+  void _remote() {
+    final pull = RemoteNotificationPull.instance;
+    if (widget.pullKey == null || pull.key != widget.pullKey) return;
+    if (pull.held) {
+      if (!_motion._active) {
+        if (_motion._open) return;
+        _run.stop();
+        _follow = null;
+        setState(() {
+          _motion._set(() {
+            _motion
+              .._active = true
+              .._byHand = true
+              .._pulled = 0
+              ..range = 0;
+          });
+        });
+        widget.onStart?.call();
+      }
+      if (!_held) return;
+      final limit = _motion.range > 0 ? _motion.range : double.infinity;
+      _motion._set(
+        () => _motion._pulled = (pull.drag * RemoteNotificationPull.rubberband)
+            .clamp(0.0, limit),
+      );
+      return;
+    }
+    final opens = pull.opens;
+    if (opens == null) return;
+    pull._clear();
+    if (!_held) return;
+    final range = _motion.range;
+    final current = _motion._pulled.clamp(0.0, range);
+    final target = opens ? range : 0.0;
+    if (target == current) {
+      _finish(opens);
+      return;
+    }
+    // ANIMATION_DURATION_GO_TO_FULL_SHADE, or the spring back.
+    _follow = (value) => _motion._set(
+      () => _motion._pulled =
+          current + (target - current) * Curves.fastOutSlowIn.transform(value),
+    );
+    _run
+      ..duration = androidDuration(opens ? 448 : 375)
+      ..value = 0;
+    _run.forward().whenComplete(() {
+      if (mounted) _finish(opens);
+    });
+  }
 
   @override
   void didUpdateWidget(NotificationPullExpand oldWidget) {
@@ -146,6 +272,7 @@ class _NotificationPullExpandState extends State<NotificationPullExpand>
 
   @override
   void dispose() {
+    RemoteNotificationPull.instance.removeListener(_remote);
     _run.dispose();
     _motion.dispose();
     super.dispose();

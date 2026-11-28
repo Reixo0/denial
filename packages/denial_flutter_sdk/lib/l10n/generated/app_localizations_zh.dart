@@ -797,6 +797,22 @@ class AppLocalizationsZh extends AppLocalizations {
   String get lockHideOnScreenKeyboard => '隐藏屏幕键盘';
 
   @override
+  String get lockIndicationCharged => '已充满';
+
+  @override
+  String lockIndicationCharging(int percent) {
+    return '$percent% • 正在充电';
+  }
+
+  @override
+  String lockIndicationChargingRapidly(int percent) {
+    return '$percent% • 正在快速充电';
+  }
+
+  @override
+  String get lockIndicationSwipeUp => '向上滑动即可打开';
+
+  @override
   String get lockKeyboardBackspace => '退格';
 
   @override

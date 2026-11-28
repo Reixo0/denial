@@ -11,10 +11,8 @@ import 'shade_expansion_motion.dart' show androidAnimatorScale, androidDuration;
 enum _MagneticState { idle, pulling, detached }
 
 class _RowMagneticState {
-  _RowMagneticState(
-    TickerProvider vsync,
-    VoidCallback onTick,
-  ) : catchup = AnimationController.unbounded(vsync: vsync, value: 0),
+  _RowMagneticState(TickerProvider vsync, VoidCallback onTick)
+    : catchup = AnimationController.unbounded(vsync: vsync, value: 0),
       neighborFollow = AnimationController.unbounded(vsync: vsync, value: 1),
       topRound = AnimationController(vsync: vsync, value: 0),
       bottomRound = AnimationController(vsync: vsync, value: 0) {
@@ -69,11 +67,7 @@ class _RowMagneticState {
       topRound.animateTo(t, duration: duration, curve: Curves.fastOutSlowIn);
     }
     if ((bottomRound.value - b).abs() > 0.005) {
-      bottomRound.animateTo(
-        b,
-        duration: duration,
-        curve: Curves.fastOutSlowIn,
-      );
+      bottomRound.animateTo(b, duration: duration, curve: Curves.fastOutSlowIn);
     }
   }
 
@@ -205,11 +199,7 @@ class MagneticNotificationSwipeManager extends ChangeNotifier {
     }
   }
 
-  void updateDrag(
-    int index,
-    double deltaDx, {
-    required bool reduceMotion,
-  }) {
+  void updateDrag(int index, double deltaDx, {required bool reduceMotion}) {
     if (_disposed || _activeIndex != index || deltaDx == 0) return;
     _rawDx += deltaDx;
 
@@ -245,7 +235,11 @@ class MagneticNotificationSwipeManager extends ChangeNotifier {
         _setDetachedRoundness(index, reduceMotion: reduceMotion);
       } else {
         _applyCoupledPull(index, _rawDx);
-        _updatePreDetachRoundness(index, animate: false, reduceMotion: reduceMotion);
+        _updatePreDetachRoundness(
+          index,
+          animate: false,
+          reduceMotion: reduceMotion,
+        );
       }
     } else if (_state == _MagneticState.detached) {
       if (_rawDx.abs() <= attachThresholdDp) {
@@ -321,11 +315,7 @@ class MagneticNotificationSwipeManager extends ChangeNotifier {
 
   /// Finishes the horizontal drag. Returns the dismiss slide direction (`-1` or
   /// `1`) if the row should dismiss, or `null` if it snaps back to rest.
-  double? endDrag(
-    int index,
-    double velocityDx, {
-    required bool reduceMotion,
-  }) {
+  double? endDrag(int index, double velocityDx, {required bool reduceMotion}) {
     if (_disposed || _activeIndex != index) return null;
     final state = _state;
     final rawDx = _rawDx;
@@ -495,15 +485,35 @@ class MagneticNotificationSwipeManager extends ChangeNotifier {
       if (row == null && !_sameSection(index, targetIdx)) continue;
       final target = _row(targetIdx);
       if (!_sameSection(index, targetIdx) && k != 0) {
-        target.setRoundTarget(0, 0, animate: animate, reduceMotion: reduceMotion);
+        target.setRoundTarget(
+          0,
+          0,
+          animate: animate,
+          reduceMotion: reduceMotion,
+        );
         continue;
       }
       if (k == -3) {
-        target.setRoundTarget(0, r, animate: animate, reduceMotion: reduceMotion);
+        target.setRoundTarget(
+          0,
+          r,
+          animate: animate,
+          reduceMotion: reduceMotion,
+        );
       } else if (k == 3) {
-        target.setRoundTarget(r, 0, animate: animate, reduceMotion: reduceMotion);
+        target.setRoundTarget(
+          r,
+          0,
+          animate: animate,
+          reduceMotion: reduceMotion,
+        );
       } else {
-        target.setRoundTarget(r, r, animate: animate, reduceMotion: reduceMotion);
+        target.setRoundTarget(
+          r,
+          r,
+          animate: animate,
+          reduceMotion: reduceMotion,
+        );
       }
     }
   }
@@ -512,26 +522,14 @@ class MagneticNotificationSwipeManager extends ChangeNotifier {
     for (var k = -3; k <= 3; k++) {
       final row = _rows[index + k];
       if (k == 0) {
-        _row(index).setRoundTarget(
-          1,
-          1,
-          animate: true,
-          reduceMotion: reduceMotion,
-        );
+        _row(index)
+            .setRoundTarget(1, 1, animate: true, reduceMotion: reduceMotion);
       } else if (k == -1 && _sameSection(index, index - 1)) {
-        _row(index - 1).setRoundTarget(
-          0,
-          1,
-          animate: true,
-          reduceMotion: reduceMotion,
-        );
+        _row(index - 1)
+            .setRoundTarget(0, 1, animate: true, reduceMotion: reduceMotion);
       } else if (k == 1 && _sameSection(index, index + 1)) {
-        _row(index + 1).setRoundTarget(
-          1,
-          0,
-          animate: true,
-          reduceMotion: reduceMotion,
-        );
+        _row(index + 1)
+            .setRoundTarget(1, 0, animate: true, reduceMotion: reduceMotion);
       } else {
         row?.setRoundTarget(0, 0, animate: true, reduceMotion: reduceMotion);
       }
@@ -968,12 +966,9 @@ class _MagneticSingleSwipeRowState extends State<MagneticSingleSwipeRow>
       onHorizontalDragStart: (_) => _onDragStart(),
       onHorizontalDragUpdate: (d) =>
           _onDragUpdate(d.delta.dx, reduceMotion: reduceMotion),
-      onHorizontalDragEnd: (d) => _onDragEnd(
-        d.velocity.pixelsPerSecond.dx,
-        reduceMotion: reduceMotion,
-      ),
-      onHorizontalDragCancel: () =>
-          _onDragEnd(0, reduceMotion: reduceMotion),
+      onHorizontalDragEnd: (d) =>
+          _onDragEnd(d.velocity.pixelsPerSecond.dx, reduceMotion: reduceMotion),
+      onHorizontalDragCancel: () => _onDragEnd(0, reduceMotion: reduceMotion),
       child: content,
     );
   }

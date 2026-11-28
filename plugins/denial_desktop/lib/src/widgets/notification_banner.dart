@@ -41,6 +41,7 @@ import 'shade/shade_backdrop_scene.dart';
 import 'shade/shade_expansion_motion.dart' show androidDuration;
 import 'shade/shade_progress.dart' show shadeExpansionProvider;
 import '../state/phone_desk.dart';
+import 'shade/shade_launch.dart' show LaunchSource;
 
 part 'notification_card.dart';
 part 'notification_reveal.dart';
@@ -74,10 +75,31 @@ class NotificationBannerLayer extends ConsumerWidget {
       final shadeVisible = ref.watch(
         referenceShellProvider.select((state) => state.quickSettingsEngaged),
       );
+      // On the lock screen a heads-up is not pinned (HeadsUpManagerImpl
+      // shouldHeadsUpBecomePinned): it shows in the lock screen's own stack
+      // instead, and does not pop up after the unlock. Only a critical one,
+      // such as a ringing call (a full-screen intent on Android), still
+      // pops up.
+      final shown = locked
+          ? [
+              for (final notification in notifications)
+                if (notification.urgency == DesktopNotificationUrgency.critical)
+                  notification,
+            ]
+          : notifications;
+      if (locked && shown.length != notifications.length) {
+        final quiet = [
+          for (final notification in notifications)
+            if (!shown.contains(notification)) notification.id,
+        ];
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          for (final id in quiet) {
+            controller.hideBanner(id);
+          }
+        });
+      }
       return MobileNotificationBannerView(
-        notification: shadeVisible || notifications.isEmpty
-            ? null
-            : notifications.first,
+        notification: shadeVisible || shown.isEmpty ? null : shown.first,
         previewMode: previewMode,
         interactive: !locked,
         onHide: controller.hideBanner,

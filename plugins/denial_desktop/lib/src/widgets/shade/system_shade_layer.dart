@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'quick_settings_panel.dart';
 import 'shade_expansion.dart';
+import 'shade_launch.dart';
 import 'shade_progress.dart';
 import 'status_bar.dart';
 
@@ -62,6 +63,31 @@ class _SystemShadeLayerState extends ConsumerState<SystemShadeLayer>
 
   late final ShadeBack _back;
 
+  /// A launch out of the shade keeps it on screen until the app covers it.
+  late final ShadeLaunch _launch = ref.read(shadeLaunchProvider)
+    ..addListener(_launchChanged);
+
+  bool get _held =>
+      _launch.holding ||
+      (ref.read(referenceShellProvider).launchRequest?.fromShade ?? false);
+
+  void _launchChanged() {
+    if (!mounted) return;
+    setState(() {});
+    if (_launch.holding) return;
+    final state = ref.read(referenceShellProvider);
+    final closed =
+        !state.quickSettingsVisible && !state.quickSettingsDragActive;
+    if (_launch.takeCovered() && closed) {
+      _expansion.collapseNow();
+    } else {
+      _onShadeChanged((
+        state.quickSettingsVisible,
+        state.quickSettingsDragActive,
+      ));
+    }
+  }
+
   /// Closes what is open over the quick tiles; false when nothing is.
   bool _onBack() {
     if (_panel.value <= 0) return false;
@@ -90,6 +116,7 @@ class _SystemShadeLayerState extends ConsumerState<SystemShadeLayer>
       _sharedProgress.parent = const AlwaysStoppedAnimation(0.0);
     }
     if (_back.handler == _onBack) _back.handler = null;
+    _launch.removeListener(_launchChanged);
     final handle = ref.read(shadeExpansionProvider);
     if (identical(handle.current, _expansion)) handle.current = null;
     _expansion.dispose();
@@ -98,6 +125,8 @@ class _SystemShadeLayerState extends ConsumerState<SystemShadeLayer>
 
   void _onShadeChanged((bool, bool) signal) {
     final (visible, dragActive) = signal;
+    // Held under a launch out of it.
+    if (!visible && !dragActive && _held) return;
     final shell = ref.read(referenceShellProvider.notifier);
     if (visible && shell.takeNotificationPageRequest()) {
       // Opened for its notifications: the quick tiles, not the full QS.
@@ -122,12 +151,16 @@ class _SystemShadeLayerState extends ConsumerState<SystemShadeLayer>
       ..screenTravel = ReferenceShellMetrics.quickSettingsPanelExtent(size)
       ..dp = PixelShadeViewport.scaleFor(size)
       ..reduceMotion = MediaQuery.disableAnimationsOf(context);
-    final closed = ref.watch(
-      referenceShellProvider.select(
-        (state) =>
-            !state.quickSettingsVisible && !state.quickSettingsDragActive,
-      ),
-    );
+    final closed =
+        ref.watch(
+          referenceShellProvider.select(
+            (state) =>
+                !state.quickSettingsVisible &&
+                !state.quickSettingsDragActive &&
+                !(state.launchRequest?.fromShade ?? false),
+          ),
+        ) &&
+        !_launch.holding;
     ref.listen<(bool, bool)>(
       referenceShellProvider.select(
         (state) => (state.quickSettingsVisible, state.quickSettingsDragActive),

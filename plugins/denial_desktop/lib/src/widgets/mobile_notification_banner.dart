@@ -35,6 +35,24 @@ class _MobileNotificationBannerViewState
   static const double _sideMargin = 16;
 
   Timer? _timeout;
+
+  /// HEADS_UP_SEEN_TIMEOUT: a heads-up shown 0.75 s has been seen, so the
+  /// lock screen keeps it on the shelf.
+  Timer? _seen;
+
+  void _armSeen() {
+    _seen?.cancel();
+    final notification = widget.notification;
+    if (notification == null) return;
+    _seen = Timer(const Duration(milliseconds: 750), () {
+      if (mounted) {
+        ref
+            .read(desktopNotificationsProvider.notifier)
+            .markRead(notification.id);
+      }
+    });
+  }
+
   bool _ready = false;
 
   /// Where the finger has carried the card, in dp: sideways to dismiss it,
@@ -93,6 +111,7 @@ class _MobileNotificationBannerViewState
   }
 
   void _armTimeout() {
+    _armSeen();
     _timeout?.cancel();
     final notification = widget.notification;
     // A critical banner, such as a call ringing, stays until it is closed.
@@ -395,6 +414,7 @@ class _MobileNotificationBannerViewState
       ref.read(shadeExpansionProvider).current?.endDrag(0);
     }
     _timeout?.cancel();
+    _seen?.cancel();
     _flyOff?.cancel();
     super.dispose();
   }

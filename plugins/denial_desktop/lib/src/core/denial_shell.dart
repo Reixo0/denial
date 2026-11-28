@@ -323,14 +323,21 @@ class _ProfileScene extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             ShellPopupHost(
-              child: ShellSecureStage(
-                useConfiguredLockAnimation:
-                    policyProfile == ReferenceShellProfile.desktop,
-                scene: Stack(
-                  fit: StackFit.expand,
-                  children: [scene.content, ...scene.overlays],
-                ),
-                chrome: scene.chrome,
+              // The shade's dialogs open over it.
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  ShellSecureStage(
+                    useConfiguredLockAnimation:
+                        policyProfile == ReferenceShellProfile.desktop,
+                    scene: Stack(
+                      fit: StackFit.expand,
+                      children: [scene.content, ...scene.overlays],
+                    ),
+                    chrome: scene.chrome,
+                  ),
+                  ?scene.overLock,
+                ],
               ),
             ),
             const MobileSystemOverlayLayer(),

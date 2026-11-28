@@ -70,3 +70,6 @@ flutter:
   - family: RobotoFlex
     fonts:
     - asset: assets/fonts/roboto_flex/RobotoFlex.ttf
+  - family: GoogleSansFlex
+    fonts:
+    - asset: assets/fonts/google_sans_flex/GoogleSansFlex.ttf

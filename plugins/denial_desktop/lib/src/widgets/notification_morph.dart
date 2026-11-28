@@ -291,6 +291,7 @@ class RenderNotificationMorph extends RenderBox
     _toExpanded = toExpanded;
     _byHand = byHand;
     _extent = extent;
+    if (morphing) _place();
   }
 
   final _clip = LayerHandle<ClipRectLayer>();
@@ -378,6 +379,7 @@ class RenderNotificationMorph extends RenderBox
     _byHand = motion.byHand;
     size = constraints.constrain(Size(width, collapsedHeight + motion.grown));
     _extent = size.height;
+    _place();
   }
 
   /// CrossFadeHelper: the fades take 210 of the 360 ms.
@@ -393,7 +395,23 @@ class RenderNotificationMorph extends RenderBox
   Offset _placeOf(RenderMorphPart part) =>
       MatrixUtils.transformPoint(part.getTransformTo(this), Offset.zero);
 
+  /// Sets where each part is drawn and how strongly, after layout. A part
+  /// whose look changed repaints itself: parts can sit under a repaint
+  /// boundary of their own (a row's launch snapshot), which this one's paint
+  /// would not reach.
   void _place() {
+    final before = <RenderMorphPart, (Offset, double, double)>{
+      for (final part in _moved) part: (part._shift, part._scale, part._alpha),
+    };
+    _arrange();
+    for (final part in _moved) {
+      if (before[part] != (part._shift, part._scale, part._alpha)) {
+        part.markNeedsPaint();
+      }
+    }
+  }
+
+  void _arrange() {
     final shown = _toExpanded ? _into : _from;
     final hidden = _toExpanded ? _from : _into;
     final amount = _amount.clamp(0.0, 1.0);
@@ -536,7 +554,6 @@ class RenderNotificationMorph extends RenderBox
       if (resting != null) context.paintChild(resting, offset);
       return;
     }
-    _place();
     _clip.layer = context.pushClipRect(
       needsCompositing,
       offset,

@@ -62,6 +62,8 @@ class PixelNotificationCard extends StatefulWidget {
     this.roundTop = true,
     this.roundBottom = true,
     this.headsUp = false,
+    this.opaque = false,
+    this.groupLines = 3,
     this.group,
     this.onExpandGroup,
     this.onOpen,
@@ -88,6 +90,15 @@ class PixelNotificationCard extends StatefulWidget {
   /// on the opaque surfaceContainer (ActivatableNotificationView's
   /// mOpaqueColor; #151b20 on EvolutionX).
   final bool headsUp;
+
+  /// On the opaque surfaceContainer without being a heads-up: the lock
+  /// screen's rows (on the emulator #17191f over a bright wallpaper).
+  final bool opaque;
+
+  /// How many of a folded group's notifications show as lines; the lock
+  /// screen shows NotificationChildrenContainer's
+  /// NUMBER_OF_CHILDREN_WHEN_COLLAPSED (2).
+  final int groupLines;
 
   /// A folded group this card stands for; a tap runs [onExpandGroup].
   final DesktopNotificationGroup? group;
@@ -313,8 +324,13 @@ class _PixelNotificationCardState extends State<PixelNotificationCard>
           titlePart,
         ],
         if (group != null)
-          for (final record in group.members.take(3))
-            _PixelGroupLine(notification: record.notification, full: full)
+          for (final record in group.members.take(widget.groupLines))
+            _PixelGroupLine(
+              notification: record.notification,
+              full: full,
+              // The card's content column is already indented.
+              indented: false,
+            )
         else if (conversation && expanded)
           ..._messages(messages, title, strong, plain)
         else if (conversation)
@@ -434,7 +450,7 @@ class _PixelNotificationCardState extends State<PixelNotificationCard>
     // system_surface_effect_1_dark`).
     var background = widget.embedded
         ? const Color(0x00000000)
-        : widget.headsUp
+        : widget.headsUp || widget.opaque
         ? scheme.surfaceContainer
         : scheme.surfaceEffect1;
     if (_pressed) {
@@ -490,19 +506,26 @@ class _PixelNotificationCardState extends State<PixelNotificationCard>
         onLongPressStart: canGuts && !_guts
             ? (details) => _openGuts(details.localPosition)
             : null,
-        child: AnimatedContainer(
-          duration: androidDuration(120),
-          decoration: BoxDecoration(color: background, borderRadius: radius),
-          child: AnimatedSize(
-            // Opening and closing move the height themselves.
-            duration: _sizing ? androidDuration(360) : Duration.zero,
-            curve: Curves.fastOutSlowIn,
-            alignment: Alignment.topCenter,
-            child: _buildGutsTransition(
-              notification: notification,
-              appName: appName,
-              pullable: pullable,
-              layout: layout,
+        child: LaunchSource(
+          color: background,
+          radius: radius,
+          // The row grows around its content (ExpandableNotificationRow's
+          // launch): it keeps its size.
+          scales: false,
+          child: AnimatedContainer(
+            duration: androidDuration(120),
+            decoration: BoxDecoration(color: background, borderRadius: radius),
+            child: AnimatedSize(
+              // Opening and closing move the height themselves.
+              duration: _sizing ? androidDuration(360) : Duration.zero,
+              curve: Curves.fastOutSlowIn,
+              alignment: Alignment.topCenter,
+              child: _buildGutsTransition(
+                notification: notification,
+                appName: appName,
+                pullable: pullable,
+                layout: layout,
+              ),
             ),
           ),
         ),
@@ -521,6 +544,11 @@ class _PixelNotificationCardState extends State<PixelNotificationCard>
     Widget buildContent() => NotificationPullExpand(
       enabled: pullable,
       open: _expanded,
+      // A lone notification in the shade (the lock screen's cards are not
+      // interactive).
+      pullKey: widget.interactive && !widget.embedded && widget.group == null
+          ? lockPullKey(notification)
+          : null,
       onStart: () {
         _press(false);
         setState(() => _sizing = false);
@@ -859,10 +887,17 @@ class _PixelExpandPill extends StatelessWidget {
 /// A member of a folded group: its title and text on one line
 /// (notification_2025_hybrid.xml).
 class _PixelGroupLine extends StatelessWidget {
-  const _PixelGroupLine({required this.notification, required this.full});
+  const _PixelGroupLine({
+    required this.notification,
+    required this.full,
+    this.indented = true,
+  });
 
   final DesktopNotification notification;
   final bool full;
+
+  /// Starts at the content's start (72 dp) on its own.
+  final bool indented;
 
   @override
   Widget build(BuildContext context) {
@@ -880,10 +915,12 @@ class _PixelGroupLine extends StatelessWidget {
         ? messages.last.text
         : plainNotificationBody(notification.body);
     return Padding(
-      padding: const EdgeInsetsDirectional.only(
-        start: PixelNotificationMetrics.contentStart,
-        end: PixelNotificationMetrics.margin,
-      ),
+      padding: indented
+          ? const EdgeInsetsDirectional.only(
+              start: PixelNotificationMetrics.contentStart,
+              end: PixelNotificationMetrics.margin,
+            )
+          : EdgeInsets.zero,
       child: Row(
         children: <Widget>[
           Flexible(
@@ -1429,6 +1466,7 @@ class PixelNotificationGroupCard extends StatelessWidget {
         child: NotificationPullExpand(
           enabled: interactive,
           open: open,
+          pullKey: interactive ? group.key : null,
           onOpen: (value) {
             if (value != open) onOpen(value);
           },
@@ -1834,3 +1872,8 @@ class _GutsRevealClipper extends CustomClipper<Path> {
       oldClipper.revealSize != revealSize ||
       oldClipper.invert != invert;
 }
+
+/// What a pull from the lock screen names a lone notification by
+/// ([RemoteNotificationPull.key]); a stacked group goes by its key.
+Object lockPullKey(DesktopNotification notification) =>
+    ('notification', notification.id);

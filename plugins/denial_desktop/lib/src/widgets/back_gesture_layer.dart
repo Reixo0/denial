@@ -90,10 +90,12 @@ class _MobileBackGestureLayerState extends ConsumerState<MobileBackGestureLayer>
         (state) => (
           enabled: state.backTarget != MobileBackTarget.none,
           keyboard: state.edgePanelVisible,
+          // Home under the lock screen takes no Back.
+          locked: state.locked || state.lockLayerVisible,
         ),
       ),
     );
-    final homeBack = ref.watch(homeBackProvider) != null;
+    final homeBack = !shell.locked && ref.watch(homeBackProvider) != null;
     final size = MediaQuery.sizeOf(context);
     _dp = math.max(1.0, size.shortestSide / (1216 * 160 / 468));
     final strips = ReferenceShellMetrics.backGestureRects(
@@ -382,8 +384,12 @@ class _MobileBackGestureLayerState extends ConsumerState<MobileBackGestureLayer>
       if (onBack != null) {
         onBack();
       } else if (!ref.read(referenceShellProvider.notifier).navigateBack()) {
-        // Nothing of the system's to go back from: home's own, if open.
-        ref.read(homeBackProvider)?.call();
+        // Nothing of the system's to go back from: home's own, if open
+        // and not under the lock screen.
+        final shell = ref.read(referenceShellProvider);
+        if (!shell.locked && !shell.lockLayerVisible) {
+          ref.read(homeBackProvider)?.call();
+        }
       }
     }
   }

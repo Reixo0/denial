@@ -13,9 +13,14 @@ class DenialShellScene {
     required this.content,
     this.chrome = const SizedBox.shrink(),
     this.overlays = const <Widget>[],
+    this.overLock,
   });
 
   final Widget content;
   final Widget chrome;
   final List<Widget> overlays;
+
+  /// Chrome over the lock screen as well as the apps: on the phone, the
+  /// notification shade, which opens over the lock screen as on Android.
+  final Widget? overLock;
 }

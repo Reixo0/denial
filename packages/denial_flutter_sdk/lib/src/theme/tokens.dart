@@ -99,6 +99,11 @@ abstract final class ShellText {
   /// stretched time.
   static const String variableFontFamily =
       'packages/denial_flutter_sdk/RobotoFlex';
+
+  /// Android's clock face (Google Sans Flex), set on its axes: the lock
+  /// screen clock uses weight 600, width 100 and roundness 100.
+  static const String clockFontFamily =
+      'packages/denial_flutter_sdk/GoogleSansFlex';
   static const List<String> fallbackFontFamilies = <String>[
     'Source Han Sans CN',
     'Noto Sans CJK SC',

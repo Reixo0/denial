@@ -60,6 +60,7 @@ class DenialShellApp extends StatelessWidget {
         mobile: const DenialShellScene(
           content: MobileApplicationScene(),
           chrome: MobileShellChrome(),
+          overLock: MobileShellShade(),
           overlays: <Widget>[
             NotificationBannerLayer(mobile: true),
             MobileWallpaperSelectorLayer(),

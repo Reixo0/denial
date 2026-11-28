@@ -98,6 +98,14 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
   Curve _motionCurve = Curves.linear;
   double _height = 0.0;
   bool _dragging = false;
+
+  /// The drag went down first: it pulls the shade over the lock screen, as
+  /// on Android, instead of moving the face.
+  bool _pullsShade = false;
+
+  /// How far the finger has pulled the shade from the lock screen.
+  double _pulled = 0;
+  bool _directionKnown = false;
   final TextEditingController _responseController = TextEditingController();
   final FocusNode _responseFocus = FocusNode(
     debugLabel: 'lock-authentication-response',
@@ -135,6 +143,20 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
   /// The opacity of everything the always-on picture leaves out.
   late Animation<double> _ambientHidden = ReverseAnimation(widget.ambient);
 
+  /// Mobile: the clock goes small while notifications show, as Android's.
+  late final AnimationController _clockSmall = AnimationController(
+    vsync: this,
+    duration: _KeyguardClockSwitch.duration,
+  );
+  bool? _clockSmallTarget;
+
+  /// Mobile: "Swipe up to open" for a while after a tap on the face.
+  final ValueNotifier<bool> _swipeHint = ValueNotifier<bool>(false);
+  Timer? _swipeHintTimer;
+
+  /// KeyguardIndicationController's DEFAULT_HIDE_DELAY_MS.
+  static const Duration _swipeHintDuration = Duration(milliseconds: 3500);
+
   @override
   void initState() {
     super.initState();
@@ -169,7 +191,38 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
     _motion.dispose();
     _face.dispose();
     _credentialReveal.dispose();
+    _clockSmall.dispose();
+    _swipeHintTimer?.cancel();
+    _swipeHint.dispose();
     super.dispose();
+  }
+
+  /// The first frame takes the clock's size as it is; later changes
+  /// animate after the frame.
+  void _syncClockSize(bool small) {
+    if (small == _clockSmallTarget) return;
+    final first = _clockSmallTarget == null;
+    _clockSmallTarget = small;
+    if (first || MediaQuery.disableAnimationsOf(context)) {
+      _clockSmall.value = small ? 1.0 : 0.0;
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || small != _clockSmallTarget) return;
+      if (small) {
+        _clockSmall.forward();
+      } else {
+        _clockSmall.reverse();
+      }
+    });
+  }
+
+  void _showSwipeHint() {
+    _swipeHint.value = true;
+    _swipeHintTimer?.cancel();
+    _swipeHintTimer = Timer(_swipeHintDuration, () {
+      if (mounted) _swipeHint.value = false;
+    });
   }
 
   bool _pinMode(AuthenticationState authentication) =>
@@ -269,6 +322,18 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
         _beginIfIdle(next);
       });
     }
+    // The shade over the lock screen asked for the unlock.
+    if (widget.authenticationEnabled && !widget.desktop) {
+      ref.listen<int>(
+        unlockThenProvider.select((state) => state.request),
+        (_, _) => _showAuthentication(),
+      );
+      // Back on the credential over the shade.
+      ref.listen<int>(
+        unlockThenProvider.select((state) => state.cancel),
+        (_, _) => _cancelAuthentication(),
+      );
+    }
     // A pending SIM PIN comes first and needs no swipe.
     final simPending =
         widget.authenticationEnabled && ref.watch(simPinPendingProvider);
@@ -324,6 +389,19 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
       locale: ref.watch(clockLocaleProvider),
       power: power,
     );
+    if (!widget.desktop) {
+      // _LockNotifications shows them under the small clock.
+      _syncClockSize(
+        widget.authenticationEnabled &&
+            ref.watch(
+              desktopNotificationsProvider.select(
+                (state) =>
+                    state.lockPreview != NotificationPreviewMode.hidden &&
+                    state.groups.isNotEmpty,
+              ),
+            ),
+      );
+    }
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -343,6 +421,8 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
           behavior: HitTestBehavior.opaque,
           onTap: widget.authenticationEnabled && widget.desktop
               ? _showAuthentication
+              : allowsSwipe
+              ? _showSwipeHint
               : null,
           onDoubleTap: allowsSwipe ? _blankDisplays : null,
           onPanStart: allowsSwipe ? (_) => _beginGesture() : null,
@@ -365,19 +445,19 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    _LockClockBlock(
-                      clock: clock,
-                      desktop: widget.desktop,
-                      scale: lockSettings.clockScale,
-                      showSystemStatus: lockSettings.showSystemStatus,
-                      parts: widget.desktop
-                          ? const {
-                              HomeClockPart.time,
-                              HomeClockPart.date,
-                              HomeClockPart.status,
-                            }
-                          : const {HomeClockPart.time},
-                    ),
+                    if (widget.desktop)
+                      _LockClockBlock(
+                        clock: clock,
+                        scale: lockSettings.clockScale,
+                        showSystemStatus: lockSettings.showSystemStatus,
+                      )
+                    else
+                      _KeyguardClock(
+                        layer: _KeyguardClockLayer.largeTime,
+                        small: _clockSmall,
+                        doze: widget.ambient,
+                        clockScale: lockSettings.clockScale,
+                      ),
                   ],
                 ),
               ),
@@ -409,6 +489,14 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
               if (!widget.desktop && widget.authenticationEnabled) ...[
                 _AmbientHidden(
                   opacity: _ambientHidden,
+                  child: _KeyguardBottomArea(
+                    face: _face,
+                    fadeDistance: _dragDistance(size.height) * _unlockThreshold,
+                    hint: _swipeHint,
+                  ),
+                ),
+                _AmbientHidden(
+                  opacity: _ambientHidden,
                   child: _LockSwipePill(
                     face: _face,
                     fadeDistance: _dragDistance(size.height) * _unlockThreshold,
@@ -429,42 +517,23 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    if (!widget.desktop) ...[
-                      _LockClockBlock(
-                        clock: clock,
-                        desktop: false,
-                        scale: lockSettings.clockScale,
-                        showSystemStatus: lockSettings.showSystemStatus,
+                    if (!widget.desktop)
+                      _KeyguardClock(
+                        layer: _KeyguardClockLayer.overlay,
+                        small: _clockSmall,
+                        doze: widget.ambient,
+                        clockScale: lockSettings.clockScale,
                         // The phone is dark but the desk keeps the session.
                         caption: widget.ambientOnly
                             ? context.l10n.lockDesktopModeEnabled
                             : null,
-                        parts: const {HomeClockPart.date},
                       ),
-                      _AmbientHidden(
-                        opacity: _ambientHidden,
-                        child: _LockClockBlock(
-                          clock: clock,
-                          desktop: false,
-                          scale: lockSettings.clockScale,
-                          showSystemStatus: lockSettings.showSystemStatus,
-                          parts: const {HomeClockPart.status},
-                        ),
-                      ),
-                    ],
                     if (!widget.desktop && widget.authenticationEnabled) ...[
                       _AmbientHidden(
                         opacity: widget.pulse
                             ? kAlwaysCompleteAnimation
                             : _ambientHidden,
-                        child: _LockNotifications(
-                          scale: lockSettings.clockScale,
-                          onOpen: _openAfterUnlock,
-                        ),
-                      ),
-                      _AmbientHidden(
-                        opacity: _ambientHidden,
-                        child: const _LockGlyph(),
+                        child: _LockNotifications(onOpen: _openAfterUnlock),
                       ),
                     ],
                     if (widget.desktop &&
@@ -560,10 +629,33 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
 
     _motion.stop();
     _dragging = true;
+    _directionKnown = false;
+    _pullsShade = false;
   }
 
   void _updateGesture(Offset delta, double height) {
     if (!_dragging || widget.unlockProgress.value > 0.0) {
+      return;
+    }
+    if (!_directionKnown) {
+      _directionKnown = true;
+      final shade = ref.read(shadeExpansionProvider).current;
+      _pullsShade =
+          delta.dy > 0.0 &&
+          _face.value.dy >= 0.0 &&
+          shade != null &&
+          shade.beginDrag();
+      // Pulled from a card, that card grows with the finger.
+      _pulled = 0;
+      final card = LockShadeHandover.pressed;
+      if (_pullsShade && card != null) {
+        RemoteNotificationPull.instance.begin(card);
+      }
+    }
+    if (_pullsShade) {
+      _pulled += delta.dy;
+      RemoteNotificationPull.instance.move(_pulled);
+      ref.read(shadeExpansionProvider).current?.dragBy(delta.dy);
       return;
     }
 
@@ -579,6 +671,20 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
     }
 
     _dragging = false;
+    if (_pullsShade) {
+      _pullsShade = false;
+      final opens = ref
+          .read(shadeExpansionProvider)
+          .current
+          ?.endDrag(
+            velocity,
+            openPast:
+                _KeyguardGeometry.dragDownMinDistance *
+                _KeyguardGeometry(MediaQuery.sizeOf(context)).dp,
+          );
+      RemoteNotificationPull.instance.end(opens: opens ?? false);
+      return;
+    }
     final progress = (-_face.value.dy / _dragDistance(height))
         .clamp(0.0, 1.0)
         .toDouble();
@@ -615,9 +721,21 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
   }
 
   /// A tapped notification opens once the session unlocks; the face leaves
-  /// for the PIN as on a swipe.
+  /// for the PIN as on a swipe. A stacked group instead opens in the shade
+  /// over the lock screen, without the unlock (Android's goToLockedShade
+  /// with the row expanded).
   void _openAfterUnlock(String groupKey) {
     if (widget.unlockProgress.value > 0.0 || _authenticationVisible) return;
+    final group = ref
+        .read(desktopNotificationsProvider)
+        .groups
+        .where((candidate) => candidate.key == groupKey)
+        .firstOrNull;
+    if (group != null && group.stacked) {
+      ref.read(expandedNotificationGroupsProvider.notifier).expand(groupKey);
+      ref.read(referenceShellProvider.notifier).openNotificationShade();
+      return;
+    }
     ref.read(lockNotificationOpenProvider.notifier).request(groupKey);
     _showAuthentication();
   }
@@ -635,6 +753,7 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
 
   void _cancelAuthentication() {
     ref.read(lockNotificationOpenProvider.notifier).clear();
+    ref.read(unlockThenProvider.notifier).drop();
     _responseController.clear();
     _responseFocus.unfocus();
     _beginWhenIdle = false;
@@ -658,6 +777,12 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
     }
 
     _dragging = false;
+    if (_pullsShade) {
+      _pullsShade = false;
+      ref.read(shadeExpansionProvider).current?.endDrag(0.0);
+      RemoteNotificationPull.instance.end(opens: false);
+      return;
+    }
     _animateFaceTo(0.0, curve: Motion.standard);
   }
 

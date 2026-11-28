@@ -1157,6 +1157,32 @@
   "@lockHideOnScreenKeyboard": {
     "description": "English UI text for lockHideOnScreenKeyboard."
   },
+  "lockIndicationCharged": "Charged",
+  "@lockIndicationCharged": {
+    "description": "Android's lock screen line while plugged in and full."
+  },
+  "lockIndicationCharging": "{percent}% • Charging",
+  "@lockIndicationCharging": {
+    "description": "Android's lock screen line while charging.",
+    "placeholders": {
+      "percent": {
+        "type": "int"
+      }
+    }
+  },
+  "lockIndicationChargingRapidly": "{percent}% • Charging rapidly",
+  "@lockIndicationChargingRapidly": {
+    "description": "Android's lock screen line while fast charging.",
+    "placeholders": {
+      "percent": {
+        "type": "int"
+      }
+    }
+  },
+  "lockIndicationSwipeUp": "Swipe up to open",
+  "@lockIndicationSwipeUp": {
+    "description": "Android's lock screen hint after a tap on the face."
+  },
   "lockKeyboardBackspace": "Backspace",
   "@lockKeyboardBackspace": {
     "description": "English UI text for lockKeyboardBackspace."

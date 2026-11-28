@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:denial_flutter_sdk/localization.dart';
 import 'package:denial_flutter_sdk/system_services.dart';
 
+import '../../state/unlock_then.dart';
 import '../shade/quick_settings_tiles.dart';
 
 class MobileDataTile extends ConsumerStatefulWidget {
@@ -51,6 +52,12 @@ class _MobileDataTileState extends ConsumerState<MobileDataTile> {
       wide: widget.wide,
       onSettings: widget.onSettings,
       onTap: () async {
+        // Android's Internet tile asks for the unlock first.
+        final gate = ref.read(unlockThenProvider.notifier);
+        if (gate.locked) {
+          gate.run();
+          return;
+        }
         setState(() {
           _busy = true;
           _failed = false;

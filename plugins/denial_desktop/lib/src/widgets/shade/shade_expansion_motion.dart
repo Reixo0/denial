@@ -161,7 +161,8 @@ class ChainedCurve extends Curve {
 }
 
 class _AnimPair extends CompoundAnimation<double> {
-  _AnimPair(Animation<double> a, Animation<double> b) : super(first: a, next: b);
+  _AnimPair(Animation<double> a, Animation<double> b)
+    : super(first: a, next: b);
 
   @override
   double get value => first.value;
@@ -187,11 +188,7 @@ class ShadeBlurAnimation extends CompoundAnimation<double> {
 
   @override
   double get value =>
-      AospShadeInterpolation.blurFraction(
-        first.value,
-        next.value,
-        _qs.value,
-      ) *
+      AospShadeInterpolation.blurFraction(first.value, next.value, _qs.value) *
       (1 - _brightnessMirror.value.clamp(0.0, 1.0));
 }
 

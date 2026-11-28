@@ -17,6 +17,7 @@ class AppLaunchRequest {
     this.targetObjectId,
     this.sourceRect,
     this.sourceItemId,
+    this.sourceRadius,
   }) : expectedAppIds = Set<String>.unmodifiable(
          expectedAppIds
              .map(normalizeAppId)
@@ -37,6 +38,13 @@ class AppLaunchRequest {
   /// The Home item whose icon the launch grows out of. Home hides it while
   /// the transition draws it.
   final String? sourceItemId;
+
+  /// The corners of the view in the shade the launch grows out of, as
+  /// Android's launch from a view does; null for a launch from Home.
+  final ({double top, double bottom})? sourceRadius;
+
+  /// The launch grows out of a view in the shade, which draws it.
+  bool get fromShade => sourceRadius != null;
 
   bool matchesWindow(DenialWindow window) {
     if (!window.isUserApp) {

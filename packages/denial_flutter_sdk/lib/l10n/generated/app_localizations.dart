@@ -1502,6 +1502,30 @@ abstract class AppLocalizations {
   /// **'Hide on-screen keyboard'**
   String get lockHideOnScreenKeyboard;
 
+  /// Android's lock screen line while plugged in and full.
+  ///
+  /// In en, this message translates to:
+  /// **'Charged'**
+  String get lockIndicationCharged;
+
+  /// Android's lock screen line while charging.
+  ///
+  /// In en, this message translates to:
+  /// **'{percent}% • Charging'**
+  String lockIndicationCharging(int percent);
+
+  /// Android's lock screen line while fast charging.
+  ///
+  /// In en, this message translates to:
+  /// **'{percent}% • Charging rapidly'**
+  String lockIndicationChargingRapidly(int percent);
+
+  /// Android's lock screen hint after a tap on the face.
+  ///
+  /// In en, this message translates to:
+  /// **'Swipe up to open'**
+  String get lockIndicationSwipeUp;
+
   /// English UI text for lockKeyboardBackspace.
   ///
   /// In en, this message translates to:

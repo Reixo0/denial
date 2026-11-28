@@ -12,7 +12,7 @@ import '../phone_scheme.dart';
 import '../notification_banner.dart' show PixelNotificationMetrics;
 import 'shade_expansion_motion.dart' show androidDuration;
 import 'notification_shade_list.dart'
-    show AndroidStackExpansion, NotificationShadeList;
+    show AndroidStackExpansion, LockShadeHandover, NotificationShadeList;
 import 'shade_card_blur.dart';
 
 /// The end of Android's notification stack for one frame: where the rows are
@@ -26,7 +26,12 @@ class NotificationShelfFrame {
     required this.starts,
     required this.shelfTop,
     required this.icons,
+    this.shelfWidth,
   });
+
+  /// The shelf's width while it is still the lock screen's pill, widening
+  /// as the shade comes (NotificationShelf.calcActualWidth); null: all of it.
+  final double? shelfWidth;
 
   /// The shade's expansion and how it compresses and lifts the stack
   /// ([NotificationShadeList]).
@@ -97,7 +102,18 @@ class NotificationShelfGeometry {
     required this.count,
     required this.progress,
     required this.topPadding,
+    required this.keyguard,
+    required this.lastKept,
   });
+
+  /// Opening over the lock screen, the stack still ends as the lock
+  /// screen's does: right after its cards, the rest in the shelf. 1 while
+  /// the shade comes, then down to 0 once it is open
+  /// (ANIMATION_DURATION_GO_TO_FULL_SHADE): the rows come out of the shelf.
+  final Animation<double> keyguard;
+
+  /// The last row the lock screen shows as a card, or null for none.
+  final int? Function() lastKept;
 
   /// notification_shelf_height.
   static const double height = 48;
@@ -145,19 +161,53 @@ class NotificationShelfGeometry {
     if (list == null || !list.hasSize || count == 0) return null;
     final open = progress.value.clamp(0.0, 1.0);
     final squish = AndroidStackExpansion.squish(open);
-    final shift = topPadding() * (squish - open);
-    final stackBottom = list.size.height - bottomMargin;
-    final shelfStart = stackBottom - height - PixelNotificationMetrics.divider;
+    final top = topPadding();
+    var shift = top * (squish - open);
     final starts = <int, double>{};
-    final icons = List<double>.filled(count, 0);
+    final heights = <int, double>{};
     var last = -1;
-    var first = count;
     for (final (index, box) in rows()) {
       if (index >= count || !box.attached || !box.hasSize) continue;
       final start = NotificationShadeList.restingTop(box);
       if (start == null) continue;
       starts[index] = start;
+      heights[index] = box.size.height;
       last = math.max(last, index);
+    }
+    if (last < 0) return null;
+    var stackBottom = list.size.height - bottomMargin;
+    final keyguard = this.keyguard.value.clamp(0.0, 1.0);
+    if (keyguard > 0) {
+      // The lock screen's shelf sits where the row after its last card
+      // starts (or at the stack's top without cards).
+      final kept = lastKept();
+      double after = top;
+      final keptStart = kept == null ? null : starts[kept];
+      if (keptStart != null) {
+        // Right under its card: the row's own gap below is the 2 dp divider
+        // when a card follows in the same stack, else 8 dp (a heading or
+        // the end comes next).
+        final end = keptStart + heights[kept!]!;
+        final next = starts[kept + 1];
+        after = next != null && (next - end).abs() < 0.5
+            ? next
+            : end - 8 + PixelNotificationMetrics.divider;
+      }
+      stackBottom = lerpDouble(stackBottom, after + height, keyguard)!;
+    }
+    final handover = LockShadeHandover.active;
+    if (handover) {
+      // The rows go from the lock screen's place to the shade's.
+      final global = LockShadeHandover.lockTop;
+      if (global != null) {
+        final lockAt = list.globalToLocal(Offset(0, global)).dy;
+        shift = (top - lockAt) * (1 - LockShadeHandover.travel(open));
+      }
+    }
+    final shelfStart = stackBottom - height - PixelNotificationMetrics.divider;
+    final icons = List<double>.filled(count, 0);
+    var first = count;
+    for (final MapEntry(key: index, value: start) in starts.entries) {
       if (start >= shelfStart) {
         first = math.min(first, index);
         icons[index] = 1;
@@ -165,17 +215,29 @@ class NotificationShelfGeometry {
         // Don't animate shelf icons during shade expansion.
         icons[index] = _iconAmount(
           start,
-          box.size.height,
+          heights[index]!,
           shelfStart,
           isLast: index == count - 1,
         );
       }
     }
-    if (last < 0) return null;
     // The rows not laid out below these are past the end too.
     for (var i = last + 1; i < count; i++) {
       first = math.min(first, i);
       icons[i] = 1;
+    }
+    double? shelfWidth;
+    if (handover && first < count) {
+      // calcActualWidth: from the pill around its icons to the whole width,
+      // on STANDARD.
+      final pill =
+          2 * NotificationShelf._padding +
+          (count - first) * NotificationShelf._slot;
+      shelfWidth = lerpDouble(
+        pill,
+        list.size.width,
+        const Cubic(0.2, 0, 0, 1).transform(open),
+      )!.clamp(0.0, list.size.width);
     }
     return NotificationShelfFrame(
       open: open,
@@ -185,6 +247,7 @@ class NotificationShelfGeometry {
       starts: starts,
       shelfTop: first < count ? stackBottom * squish - height - shift : null,
       icons: icons,
+      shelfWidth: shelfWidth,
     );
   }
 
@@ -251,11 +314,12 @@ class NotificationShelf extends StatelessWidget {
   static const double _padding = 13;
 
   RRect? _shape(Size size) {
-    final top = geometry.read()?.shelfTop;
+    final frame = geometry.read();
+    final top = frame?.shelfTop;
     if (top == null) return null;
     const height = NotificationShelfGeometry.height;
     return RRect.fromRectAndRadius(
-      Rect.fromLTWH(0, top, size.width, height),
+      Rect.fromLTWH(0, top, frame!.shelfWidth ?? size.width, height),
       const Radius.circular(height / 2),
     );
   }
@@ -271,13 +335,8 @@ class NotificationShelf extends StatelessWidget {
           clipBehavior: Clip.none,
           delegate: _ShelfDelegate(geometry, motion),
           children: <Widget>[
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: scheme.surfaceEffect1,
-                borderRadius: BorderRadius.circular(
-                  NotificationShelfGeometry.height / 2,
-                ),
-              ),
+            CustomPaint(
+              painter: _ShelfBar(geometry, scheme.surfaceEffect1, motion),
             ),
             Center(
               child: SizedBox.square(
@@ -310,6 +369,31 @@ class NotificationShelf extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The shelf's bar, as wide as the frame says.
+class _ShelfBar extends CustomPainter {
+  _ShelfBar(this.geometry, this.color, Listenable motion)
+    : super(repaint: motion);
+
+  final NotificationShelfGeometry geometry;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final width = geometry.read()?.shelfWidth ?? size.width;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromLTWH(0, 0, width, size.height),
+        Radius.circular(size.height / 2),
+      ),
+      Paint()..color = color,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_ShelfBar oldDelegate) =>
+      !identical(oldDelegate.geometry, geometry) || oldDelegate.color != color;
 }
 
 class _ShelfDelegate extends FlowDelegate {

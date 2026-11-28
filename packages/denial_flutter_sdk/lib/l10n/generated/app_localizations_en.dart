@@ -833,6 +833,22 @@ class AppLocalizationsEn extends AppLocalizations {
   String get lockHideOnScreenKeyboard => 'Hide on-screen keyboard';
 
   @override
+  String get lockIndicationCharged => 'Charged';
+
+  @override
+  String lockIndicationCharging(int percent) {
+    return '$percent% • Charging';
+  }
+
+  @override
+  String lockIndicationChargingRapidly(int percent) {
+    return '$percent% • Charging rapidly';
+  }
+
+  @override
+  String get lockIndicationSwipeUp => 'Swipe up to open';
+
+  @override
   String get lockKeyboardBackspace => 'Backspace';
 
   @override

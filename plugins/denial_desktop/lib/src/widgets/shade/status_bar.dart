@@ -128,9 +128,13 @@ class _ShadeStatusBarState extends ConsumerState<ShadeStatusBar> {
     final foreground = _statusForeground(context, ref);
     final progress = expansion.panel;
     final geometry = _StatusGeometry.of(context);
-    final shown = ReferenceShellMetrics.statusBarShown(
-      MediaQuery.sizeOf(context),
-    );
+    // The lock screen draws its own status bar (Android's
+    // KeyguardStatusBarView); this strip still pulls the shade over it.
+    final shown =
+        ReferenceShellMetrics.statusBarShown(MediaQuery.sizeOf(context)) &&
+        !ref.watch(
+          referenceShellProvider.select((state) => state.lockLayerVisible),
+        );
 
     return Positioned(
       left: 0,

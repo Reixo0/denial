@@ -12,7 +12,8 @@ abstract final class AndroidStackExpansion {
   /// How much of each row's height, and of the gap below it, shows:
   /// the interpolated stack height over its end height, from
   /// `StackScrollAlgorithm.START_FRACTION` (0.5) to 1.
-  static double squish(double f) => 0.5 + 0.5 * f.clamp(0.0, 1.0);
+  static double squish(double f) =>
+      LockShadeHandover.active ? 1 : 0.5 + 0.5 * f.clamp(0.0, 1.0);
 
   /// The rows' alpha: `ShadeInterpolation.getContentAlpha`.
   static double alpha(double f) {
@@ -22,6 +23,66 @@ abstract final class AndroidStackExpansion {
     final rest = 1 - eased;
     return 1 - 0.5 * (1 - math.cos(math.pi * rest * rest));
   }
+}
+
+/// The shade opening over the lock screen (LockscreenShadeTransitionController
+/// and the keyguard's StackScrollAlgorithm): the lock screen's stack is the
+/// shade's, so its cards neither shrink nor fade. They move from where the
+/// lock screen shows them to the shade's place (QuickSettingsControllerImpl's
+/// transition position, FAST_OUT_SLOW_IN), and what was only an icon on the
+/// shelf fades in as on any opening. It holds from the first frame the shade
+/// leaves closed until it is fully open, or closed again after springing
+/// back; past that the shade's own rules give the same places.
+abstract final class LockShadeHandover {
+  /// The lock screen's stack top (its first card, or the shelf), in global
+  /// logical pixels; null while it shows nothing.
+  static double? lockTop;
+
+  /// The groups with a card on the lock screen.
+  static Set<String> kept = const <String>{};
+
+  /// The lock screen's stack is up under the shade (it says so itself: the
+  /// shade may not have rebuilt since the phone locked).
+  static bool locked = false;
+
+  /// The card the finger went down on, on the lock screen
+  /// ([RemoteNotificationPull.key]).
+  static Object? pressed;
+
+  static bool get active => _active;
+  static bool _active = false;
+  static bool _closed = true;
+
+  /// The shade covers the lock screen's stack: it waits, as it was, until
+  /// the shade has closed (filtering is off while the shade is open).
+  static final ValueNotifier<bool> covering = ValueNotifier<bool>(false);
+
+  /// The last opening sprang back to the lock screen inside the handover:
+  /// its cards are where the lock screen's are.
+  static bool get returned => _returned;
+  static bool _returned = false;
+
+  /// Follows the shade's expansion.
+  static void follow(double p) {
+    if (p <= 0) {
+      _returned = _active;
+      _active = false;
+      _closed = true;
+      covering.value = false;
+      return;
+    }
+    if (_closed) {
+      _closed = false;
+      _active = locked && lockTop != null;
+      _returned = false;
+      covering.value = true;
+    }
+    if (p >= 1) _active = false;
+  }
+
+  /// How far the cards have gone from the lock screen's place.
+  static double travel(double p) =>
+      Curves.fastOutSlowIn.transform(p.clamp(0.0, 1.0));
 }
 
 /// A normal, lazily laid-out list with expansion-aware vertical positions.
@@ -148,6 +209,7 @@ class _RenderNotificationShadeList extends RenderSliverList {
   @override
   void markNeedsPaint() {
     _cachedRows = null;
+    _lockTopRead = false;
     super.markNeedsPaint();
     if (_scene?.attached ?? false) _scene!.markNeedsPaint();
   }
@@ -164,6 +226,7 @@ class _RenderNotificationShadeList extends RenderSliverList {
       _clips.remove(child)!.layer = null;
     }
     _cachedRows = null;
+    _lockTopRead = false;
     onExtent?.call(
       math.min(
         constraints.viewportMainAxisExtent,
@@ -206,6 +269,25 @@ class _RenderNotificationShadeList extends RenderSliverList {
   }
 
   double get _open => _progress.value.clamp(0.0, 1.0);
+
+  /// The lock screen's stack top in the list's own coordinates (from its
+  /// top), for this frame.
+  double? _lockTop;
+  bool _lockTopRead = false;
+
+  double? get _lockTopHere {
+    if (_lockTopRead) return _lockTop;
+    _lockTopRead = true;
+    final global = LockShadeHandover.lockTop;
+    final toHere = global == null
+        ? null
+        : Matrix4.tryInvert(getTransformTo(null));
+    _lockTop = toHere == null
+        ? null
+        : MatrixUtils.transformPoint(toHere, Offset(0, global!)).dy +
+              _sliverTop;
+    return _lockTop;
+  }
 
   double _topPadding = 0;
   set topPadding(double value) {
@@ -262,9 +344,16 @@ class _RenderNotificationShadeList extends RenderSliverList {
     final open = _open;
     final base = super.childMainAxisPosition(child);
     if (open >= 1) return base;
+    final top = _sliverTop;
+    final lockTop = LockShadeHandover.active ? _lockTopHere : null;
+    if (lockTop != null) {
+      // Whole, from the lock screen's place to the shade's.
+      final at =
+          lockTop + (_topPadding - lockTop) * LockShadeHandover.travel(open);
+      return at + (top + base - _topPadding) - top;
+    }
     // From the list's top, which is the screen's: the stack starts at
     // expansion x its resting top (AOSP's stackY).
-    final top = _sliverTop;
     return _topPadding * open +
         (top + base - _topPadding) * AndroidStackExpansion.squish(open) -
         top;

@@ -20,6 +20,7 @@ import 'phone_desk_input.dart';
 import 'reference_shell_metrics.dart';
 import 'reference_shell_profile.dart';
 import 'shade_back.dart';
+import 'unlock_then.dart';
 import 'reference_input_layout_coordinator.dart';
 
 final referenceShellProvider =
@@ -458,14 +459,18 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
     _launchRequestTimer = null;
     _appSwitchOrderTimer?.cancel();
     _appSwitchOrderTimer = null;
+    // Unlocked from the credential the shade asked for: the shade stays
+    // open for what it asked to do (setLeaveOpenOnKeyguardHide).
+    final keepShade =
+        !state.locked && ref.read(unlockThenProvider.notifier).leavesShadeOpen;
 
     state = state.copyWith(
       lockLayerVisible: true,
       appSwitchOrder: const <int>[],
       overviewVisible: false,
       gesture: GestureDragPhase.idle,
-      quickSettingsVisible: false,
-      quickSettingsDragged: false,
+      quickSettingsVisible: keepShade && state.quickSettingsVisible,
+      quickSettingsDragged: keepShade && state.quickSettingsDragged,
       quickSettingsDragActive: false,
       edgePanelVisible: false,
       edgePanelDrag: Offset.zero,
@@ -557,6 +562,7 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
     required Iterable<String> expectedAppIds,
     Rect? sourceRect,
     String? sourceItemId,
+    ({double top, double bottom})? sourceRadius,
   }) {
     return _beginLauncherTransition(
       appName: appName,
@@ -564,6 +570,7 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
       expectedAppIds: expectedAppIds,
       sourceRect: sourceRect,
       sourceItemId: sourceItemId,
+      sourceRadius: sourceRadius,
     );
   }
 
@@ -575,6 +582,7 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
     required String? iconPath,
     Rect? sourceRect,
     String? sourceItemId,
+    ({double top, double bottom})? sourceRadius,
   }) {
     if (!window.isUserApp) {
       return null;
@@ -586,6 +594,7 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
       targetWindow: window,
       sourceRect: sourceRect,
       sourceItemId: sourceItemId,
+      sourceRadius: sourceRadius,
     );
   }
 
@@ -596,6 +605,7 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
     DenialWindow? targetWindow,
     Rect? sourceRect,
     String? sourceItemId,
+    ({double top, double bottom})? sourceRadius,
   }) {
     if (state.lockLayerVisible || state.launchRequest != null) {
       return null;
@@ -611,6 +621,7 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
       targetObjectId: targetWindow?.objectId,
       sourceRect: sourceRect,
       sourceItemId: sourceItemId,
+      sourceRadius: sourceRadius,
     );
 
     _endFingerGesture();
@@ -819,7 +830,12 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
         }
         closeEdgePanel();
       case MobileBackTarget.shade:
-        if (!ref.read(shadeBackProvider)()) closeQuickSettings();
+        // The credential over the shade closes first, back to the shade.
+        if (ref.read(unlockThenProvider).overShade) {
+          ref.read(unlockThenProvider.notifier).cancel();
+        } else if (!ref.read(shadeBackProvider)()) {
+          closeQuickSettings();
+        }
       case MobileBackTarget.overview:
         closeOverview();
       case MobileBackTarget.app:
@@ -1365,14 +1381,16 @@ class ReferenceShellController extends Notifier<ReferenceShellState>
     }
 
     _endFingerGesture();
+    // The password asked for over the shade keeps the shade beneath it.
+    final keepShade = ref.read(unlockThenProvider).overShade;
     state = state.copyWith(
       edgePanelVisible: true,
       edgePanelDrag: Offset.zero,
       edgePanelDragActive: false,
       overviewVisible: false,
       gesture: GestureDragPhase.idle,
-      quickSettingsVisible: false,
-      quickSettingsDragged: false,
+      quickSettingsVisible: keepShade && state.quickSettingsVisible,
+      quickSettingsDragged: keepShade && state.quickSettingsDragged,
       quickSettingsDragActive: false,
     );
   }

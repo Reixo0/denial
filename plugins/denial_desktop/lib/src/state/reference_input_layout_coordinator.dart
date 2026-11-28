@@ -50,7 +50,10 @@ class ReferenceInputLayoutCoordinator {
     _sceneOrigin = sceneOrigin;
     _composer = composer;
     _observeClientPointerPresses = interactions.observesClientPointerPresses;
-    _homeShown = state.foregroundObjectId == null && !state.lockLayerVisible;
+    // Home is what the lock screen covers when no app is in front: deniald
+    // keeps the lock and home upright, and the unlock must not hand the
+    // panel to the sensor while the lock layer animates away.
+    _homeShown = state.foregroundObjectId == null;
     _overviewShown = state.overviewVisible && !state.lockLayerVisible;
 
     final quickSettingsActive = state.quickSettingsEngaged;

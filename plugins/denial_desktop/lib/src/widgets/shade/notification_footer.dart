@@ -10,6 +10,7 @@ import 'package:denial_flutter_sdk/state.dart';
 import '../phone_scheme.dart';
 import 'notification_shade_list.dart';
 import 'shade_expansion_motion.dart' show androidDuration;
+import 'shade_launch.dart' show LaunchSource;
 
 /// Android's "Clear all" (NotificationStackScrollLayout.clearNotifications):
 /// the visible rows slide out one after another from the last to the first,
@@ -294,6 +295,9 @@ class _FooterPillState extends State<_FooterPill> {
   Widget build(BuildContext context) {
     final scheme = phoneSchemeOf(context);
     final surface = scheme.surfaceEffect1;
+    final color = _pressed
+        ? Color.alphaBlend(scheme.onSurface.withValues(alpha: 0.10), surface)
+        : surface;
     return Semantics(
       button: true,
       label: widget.label,
@@ -307,17 +311,16 @@ class _FooterPillState extends State<_FooterPill> {
         onTap: widget.onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: _pressed
-                  ? Color.alphaBlend(
-                      scheme.onSurface.withValues(alpha: 0.10),
-                      surface,
-                    )
-                  : surface,
-              borderRadius: BorderRadius.circular(20),
+          child: LaunchSource(
+            color: color,
+            radius: BorderRadius.circular(20),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Center(child: widget.child),
             ),
-            child: Center(child: widget.child),
           ),
         ),
       ),

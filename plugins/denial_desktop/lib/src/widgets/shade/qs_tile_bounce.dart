@@ -303,14 +303,7 @@ class _RenderQsBounceRow extends RenderBox
     required int columns,
     required double gap,
     required double tileHeight,
-  }) : this._raw(
-         controllers,
-         spans,
-         bounceEnd,
-         columns,
-         gap,
-         tileHeight,
-       );
+  }) : this._raw(controllers, spans, bounceEnd, columns, gap, tileHeight);
 
   _RenderQsBounceRow._raw(
     this._controllers,

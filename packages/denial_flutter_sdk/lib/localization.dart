@@ -12,6 +12,7 @@ export 'src/localization/denial_localizations.dart'
         localizedBatteryLine,
         localizedBatteryState,
         localizedChargeProtocol,
+        localizedClockDigits,
         localizedLongDate,
         localizedMonth,
         localizedShortDate,
