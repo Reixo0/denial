@@ -603,6 +603,10 @@ pub(super) struct WaylandFrontend {
     pending_cursor_position: Option<(f64, f64)>,
     #[cfg(feature = "flutter")]
     flutter_touch_slots: HashSet<i32>,
+    /// Shell contacts that may let a shell editor open the keyboard: their
+    /// release opens the window again (not touches on the keyboard itself).
+    #[cfg(feature = "flutter")]
+    flutter_keyboard_authorizing_slots: HashSet<i32>,
     #[cfg(feature = "flutter")]
     client_touch_routes: HashMap<i32, ClientInputRoute>,
     /// Contacts on clients without touch, driving the pointer instead.

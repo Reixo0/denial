@@ -112,6 +112,7 @@ impl WaylandFrontend {
         self.invalidate_idle_inhibition();
         self.client_input_route_cache = None;
         self.flutter_touch_slots.clear();
+        self.flutter_keyboard_authorizing_slots.clear();
         // Cursor publication belongs to the Flutter engine generation too.
         // Replay native client state to the replacement renderer, while a
         // Flutter-owned route will select its shape after the fresh Add/Hover.

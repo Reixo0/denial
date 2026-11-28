@@ -2177,6 +2177,7 @@ fn reset_input_devices(state: &mut RuntimeState, reset: InputDeviceReset) {
         #[cfg(feature = "flutter")]
         {
             frontend.flutter_touch_slots.clear();
+            frontend.flutter_keyboard_authorizing_slots.clear();
             frontend.client_touch_routes.clear();
             frontend.client_touch_frame_pending = false;
         }

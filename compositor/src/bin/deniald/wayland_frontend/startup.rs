@@ -451,6 +451,8 @@ impl WaylandFrontend {
             #[cfg(feature = "flutter")]
             flutter_touch_slots: HashSet::new(),
             #[cfg(feature = "flutter")]
+            flutter_keyboard_authorizing_slots: HashSet::new(),
+            #[cfg(feature = "flutter")]
             client_touch_routes: HashMap::new(),
             #[cfg(feature = "flutter")]
             touch_pointer: Default::default(),

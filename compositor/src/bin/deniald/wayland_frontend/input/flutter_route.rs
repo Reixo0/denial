@@ -47,7 +47,10 @@ pub(in super::super) fn cancel_captured_touch_routes(
         let flutter_slots = slots
             .iter()
             .copied()
-            .filter(|slot| frontend.flutter_touch_slots.remove(slot))
+            .filter(|slot| {
+                frontend.flutter_keyboard_authorizing_slots.remove(slot);
+                frontend.flutter_touch_slots.remove(slot)
+            })
             .collect::<Vec<_>>();
         let cancel_client = slots
             .iter()
@@ -387,6 +390,7 @@ pub(super) fn process_flutter_input_event(
                     let frontend = state.frontend_mut();
                     if !software_keyboard_touch {
                         frontend.text_input.note_flutter_touch();
+                        frontend.flutter_keyboard_authorizing_slots.insert(slot);
                     }
                     frontend.flutter_touch_slots.insert(slot);
                     let scale = frontend.atlas_scale;
@@ -609,6 +613,13 @@ pub(super) fn process_flutter_input_event(
             }
             let flutter_target = state.frontend_mut().flutter_touch_slots.remove(&slot);
             if flutter_target {
+                // A release is as much the user's as the press: a shell
+                // editor that its gesture brings up (the lock screen's
+                // password after a slow swipe) may open the keyboard.
+                let frontend = state.frontend_mut();
+                if frontend.flutter_keyboard_authorizing_slots.remove(&slot) {
+                    frontend.text_input.note_flutter_touch();
+                }
                 state.flutter_input.handle(&event);
                 return false;
             }
@@ -682,6 +693,10 @@ pub(super) fn process_flutter_input_event(
                 let actions = state.frontend_mut().touch_pointer.cancel(slot);
                 return apply_touch_pointer(state, actions, touch_event.time());
             }
+            state
+                .frontend_mut()
+                .flutter_keyboard_authorizing_slots
+                .remove(&slot);
             let flutter_target = state.frontend_mut().flutter_touch_slots.remove(&slot);
             if flutter_target {
                 state.flutter_input.handle(&event);
