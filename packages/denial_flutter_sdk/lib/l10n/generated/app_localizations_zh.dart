@@ -4102,6 +4102,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get simPinLater => '稍后';
 
   @override
+  String get simPinEnter => '输入 SIM 卡 PIN 码';
+
+  @override
+  String get simPinLengthHint => '请输入 4 到 8 位数字的 PIN 码。';
+
+  @override
   String get simPukRequired => 'SIM 卡需要 PUK。请联系运营商。';
 
   @override
@@ -5019,6 +5025,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get lockUsePassword => '使用密码';
+
+  @override
+  String get lockWrongPinTryAgain => 'PIN 码错误，请重试。';
 
   @override
   String get lockUsePin => '使用 PIN 码';

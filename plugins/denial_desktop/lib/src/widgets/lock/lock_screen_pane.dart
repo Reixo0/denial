@@ -586,6 +586,14 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
                         : null,
                     usingPin: pinMode,
                   ),
+                // Back over the password panel: the keyboard first, then the
+                // panel (the shell's own strips stand down while locked).
+                if (widget.authenticationEnabled &&
+                    !widget.desktop &&
+                    !simPending &&
+                    credentialShown &&
+                    !pinMode)
+                  MobileBackGestureLayer(onBack: _passwordBack),
                 if (revealed == _LockCredential.sim)
                   _MobileSimPinStage(
                     key: const ValueKey<String>('mobile-sim-pin-stage'),
@@ -601,7 +609,6 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
                     onBegin: () =>
                         ref.read(authenticationProvider.notifier).begin(),
                     onCancel: _cancelAuthentication,
-                    onUsePassword: () => _switchCredential(password: true),
                   ),
                 if (widget.authenticationEnabled)
                   _LockFingerprintFeedback(
@@ -794,6 +801,16 @@ class _LockScreenPaneState extends ConsumerState<_LockScreenPane>
       // The next open prefers the PIN again.
       _usePassword = false;
     });
+  }
+
+  void _passwordBack() {
+    final shell = ref.read(referenceShellProvider);
+    if (shell.edgePanelVisible) {
+      _responseFocus.unfocus();
+      ref.read(referenceShellProvider.notifier).closeEdgePanel();
+      return;
+    }
+    _cancelAuthentication();
   }
 
   void _cancelGesture() {

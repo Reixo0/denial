@@ -7631,6 +7631,18 @@ abstract class AppLocalizations {
   /// **'Later'**
   String get simPinLater;
 
+  /// SIM PIN bouncer prompt (Android's kg_sim_pin_instructions).
+  ///
+  /// In en, this message translates to:
+  /// **'Enter SIM PIN'**
+  String get simPinEnter;
+
+  /// SIM PIN bouncer message when the PIN is too short (Android's kg_invalid_sim_pin_hint).
+  ///
+  /// In en, this message translates to:
+  /// **'Type a PIN that is 4 to 8 numbers.'**
+  String get simPinLengthHint;
+
   /// Mobile connectivity and SIM authentication UI.
   ///
   /// In en, this message translates to:
@@ -9375,6 +9387,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Use password'**
   String get lockUsePassword;
+
+  /// Shown after a rejected lock screen PIN (Android's kg_wrong_pin_try_again).
+  ///
+  /// In en, this message translates to:
+  /// **'Wrong PIN. Try again.'**
+  String get lockWrongPinTryAgain;
 
   /// Switches the lock screen from the account password back to the PIN.
   ///

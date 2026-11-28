@@ -5759,6 +5759,14 @@
   "simPinTitle": "Unlock SIM",
   "simPinUnlock": "Unlock SIM",
   "simPinLater": "Later",
+  "simPinEnter": "Enter SIM PIN",
+  "simPinLengthHint": "Type a PIN that is 4 to 8 numbers.",
+  "@simPinEnter": {
+    "description": "SIM PIN bouncer prompt (Android's kg_sim_pin_instructions)."
+  },
+  "@simPinLengthHint": {
+    "description": "SIM PIN bouncer message when the PIN is too short (Android's kg_invalid_sim_pin_hint)."
+  },
   "simPukRequired": "SIM requires a PUK. Contact your carrier.",
   "simLocked": "SIM locked",
   "keyguardNoSim": "No SIM",
@@ -7028,6 +7036,10 @@
     "description": "Shown after a rejected lock screen PIN."
   },
   "lockUsePassword": "Use password",
+  "lockWrongPinTryAgain": "Wrong PIN. Try again.",
+  "@lockWrongPinTryAgain": {
+    "description": "Shown after a rejected lock screen PIN (Android's kg_wrong_pin_try_again)."
+  },
   "@lockUsePassword": {
     "description": "Switches the lock screen from the PIN to the account password."
   },

@@ -60,10 +60,15 @@ class MobileKeyboardViewport extends ConsumerStatefulWidget {
   const MobileKeyboardViewport({
     required this.child,
     this.appScene = false,
+    this.liftWithKeyboard = false,
     super.key,
   });
 
   final Widget child;
+
+  /// Content anchored to the bottom rises by the keyboard's height as it
+  /// comes up (the lock screen's password field), as Android's adjustResize.
+  final bool liftWithKeyboard;
 
   /// The application scene stays in place while its primary window lays
   /// itself out around the keyboard (denial-insets-v1 keyboard inset).
@@ -81,7 +86,12 @@ class _MobileKeyboardViewportState
 
   void _updateTranslation(({double progress, double scroll}) position) {
     final keyboardOffset = _panelHeight * position.progress;
-    _translation.value = Offset(0, -position.scroll.clamp(0.0, keyboardOffset));
+    _translation.value = Offset(
+      0,
+      widget.liftWithKeyboard
+          ? -keyboardOffset
+          : -position.scroll.clamp(0.0, keyboardOffset),
+    );
   }
 
   ({double progress, double scroll}) _position(ReferenceShellState state) => (

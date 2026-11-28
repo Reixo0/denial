@@ -42,6 +42,11 @@ extension PhoneSurfaceEffects on ColorScheme {
   /// A wide tile's inactive icon well: #26cbe6ff, primary tone 90
   /// (onPrimaryContainer in dark) at 0x26.
   Color get surfaceEffect2 => onPrimaryContainer.withValues(alpha: 0x26 / 255);
+
+  /// The PIN bouncer's enter key (pin_bouncer_action_button_bg): the same
+  /// tone at about 0x14, measured on EvolutionX's bouncer against the
+  /// wallpaper around the key.
+  Color get surfaceEffect3 => onPrimaryContainer.withValues(alpha: 0x14 / 255);
 }
 
 /// The scrim Android's classic shade lays over the blurred scene

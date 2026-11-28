@@ -4297,6 +4297,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get simPinLater => 'Later';
 
   @override
+  String get simPinEnter => 'Enter SIM PIN';
+
+  @override
+  String get simPinLengthHint => 'Type a PIN that is 4 to 8 numbers.';
+
+  @override
   String get simPukRequired => 'SIM requires a PUK. Contact your carrier.';
 
   @override
@@ -5274,6 +5280,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get lockUsePassword => 'Use password';
+
+  @override
+  String get lockWrongPinTryAgain => 'Wrong PIN. Try again.';
 
   @override
   String get lockUsePin => 'Use PIN';

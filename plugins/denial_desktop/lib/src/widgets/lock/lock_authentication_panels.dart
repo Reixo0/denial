@@ -357,6 +357,7 @@ class _MobileLockAuthenticationPanel extends StatelessWidget {
 
     return Positioned.fill(
       child: MobileKeyboardViewport(
+        liftWithKeyboard: true,
         child: SafeArea(
           minimum: const EdgeInsets.fromLTRB(18, 12, 18, 22),
           child: Align(
