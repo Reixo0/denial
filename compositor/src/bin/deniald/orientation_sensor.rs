@@ -56,11 +56,14 @@ impl Orientation {
         }
     }
 
-    /// Coalescing must not let a service-loss marker erase a valid reading
-    /// already queued during the same calloop dispatch.
+    /// Coalescing must not let a service-loss or flat marker erase a valid
+    /// reading already queued during the same calloop dispatch; alone, the
+    /// marker is queued, so the panel can stop following an old edge.
     pub(super) fn update_pending(self, pending: &mut Option<Self>) {
         if self != Self::Undefined {
             *pending = Some(self);
+        } else {
+            pending.get_or_insert(self);
         }
     }
 
@@ -407,7 +410,7 @@ mod tests {
     fn rotation_lock_coalescing_keeps_valid_reading_before_service_loss() {
         let mut pending = None;
         Orientation::Undefined.update_pending(&mut pending);
-        assert_eq!(pending, None);
+        assert_eq!(pending, Some(Orientation::Undefined));
         Orientation::LeftUp.update_pending(&mut pending);
         Orientation::RightUp.update_pending(&mut pending);
         Orientation::Undefined.update_pending(&mut pending);

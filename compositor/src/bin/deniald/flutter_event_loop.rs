@@ -489,6 +489,14 @@ impl Session<'_, '_> {
             self.events.frontend_mut().settings.current_sensor_rotation =
                 self.output_configuration.sensor_rotation;
             if let Some(orientation) = self.events.pending_orientation.take() {
+                // No edge (the phone lies flat, the sensor has just started,
+                // or its service went away): the panel keeps the rotation it
+                // has, as Android's display does without a proposed
+                // rotation. An older reading would turn it later, at the
+                // next unlock or app switch.
+                if orientation == orientation_sensor::Orientation::Undefined {
+                    self.pending_sensor_rotation = self.output_configuration.sensor_rotation;
+                }
                 orientation.update_rotation(&mut self.pending_sensor_rotation);
                 debug!(?orientation, rotation = ?self.pending_sensor_rotation, "observed device orientation");
             }
